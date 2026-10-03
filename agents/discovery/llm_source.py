@@ -64,10 +64,28 @@ class LLMOpportunitySource:
     """OpportunitySource backed by the cheap-tier LLM."""
 
     def __init__(self, gateway: LLMGateway | None = None,
-                 fallback: Any | None = None) -> None:
+                 fallback: Any | None = None,
+                 market: Any | None = None) -> None:
         self.gateway = gateway or LLMGateway()
         self.fallback = fallback or HeuristicSource()
+        self.market = market  # MarketDataProvider or None
         self.last_usage: dict | None = None  # {"tokens": int, "cost_usd": float}
+
+    def _market_instructions(self) -> str:
+        """LIVE MARKET DATA block for the watchlist, or '' when unavailable."""
+        if self.market is None:
+            return ""
+        block = self.market.market_block(self.market.watchlist)
+        if not block:
+            return ""
+        return (
+            "\n\n" + block +
+            "\nUse this live data: prefer niches with rising Google Trends "
+            "and healthy Etsy price bands (avg price above $8; avoid "
+            "oversaturated niches unless demand clearly justifies it). "
+            "In each opportunity's why_now, cite the specific numbers "
+            "above that support it."
+        )
 
     def fetch(self, inputs: dict) -> list[dict]:
         limit = inputs.get("limit", 5)
@@ -94,6 +112,7 @@ class LLMOpportunitySource:
                     "The 12 scoring factors are: "
                     + ", ".join(FACTOR_NAMES)
                     + ". Score honestly — not everything should be high."
+                    + self._market_instructions()
                 ),
                 tier=LLMGateway.CHEAP,
                 system=_SYSTEM,

@@ -24,10 +24,30 @@ class LLMResearchSource:
     """ResearchSource backed by the cheap-tier LLM."""
 
     def __init__(self, gateway: LLMGateway | None = None,
-                 fallback: Any | None = None) -> None:
+                 fallback: Any | None = None,
+                 market: Any | None = None) -> None:
         self.gateway = gateway or LLMGateway()
         self.fallback = fallback or HeuristicResearchSource()
+        self.market = market  # MarketDataProvider or None
         self.last_usage: dict | None = None  # {"tokens": int, "cost_usd": float}
+
+    def _market_instructions(self, opportunity: dict) -> str:
+        """LIVE MARKET DATA block for this niche, or '' when unavailable."""
+        if self.market is None:
+            return ""
+        niche = str(opportunity.get("niche", "")).strip()
+        if not niche:
+            return ""
+        block = self.market.market_block([niche])
+        if not block:
+            return ""
+        return (
+            "\n\n" + block +
+            "\nGround your evidence in these REAL numbers: use the actual "
+            "Etsy competitor count and price band for competitor_count and "
+            "price_range_usd, and the trend direction for estimated_demand. "
+            "Do not invent competitor counts — cite the data above."
+        )
 
     def research(self, opportunity: dict) -> dict:
         try:
@@ -52,6 +72,7 @@ class LLMResearchSource:
                     "marketplace_risk, supplier_risk, support_burden. "
                     "Set verdict to reject for weak ideas. Opportunity: "
                     + json.dumps(opportunity, default=str)[:2000]
+                    + self._market_instructions(opportunity)
                 ),
                 tier=LLMGateway.CHEAP,
                 system=_SYSTEM,

@@ -41,6 +41,24 @@ AGENT_CLASSES = (
 )
 
 
+def _build_agent(cls: type, gateway: "LLMGateway | None",
+                 market: "MarketDataProvider | None" = None):
+    """Construct an agent, wiring LLM sources when the gateway is on.
+
+    market (live Etsy + Trends data) is injected into the LLM sources so
+    prompts carry real numbers; silently ignored when unavailable.
+    """
+    from core.llm import LLMGateway  # noqa: F401  (re-export for type hints)
+
+    if gateway is not None and cls is DiscoveryAgent:
+        from agents.discovery.llm_source import LLMOpportunitySource
+        return cls(source=LLMOpportunitySource(gateway, market=market))
+    if gateway is not None and cls is ResearchAgent:
+        from agents.research.llm_source import LLMResearchSource
+        return cls(source=LLMResearchSource(gateway, market=market))
+    return cls()
+
+
 @dataclass
 class Runtime:
     agent_registry: AgentRegistry
@@ -53,8 +71,41 @@ class Runtime:
     handlers: dict
 
 
-def build_runtime(use_postgres: bool = False) -> Runtime:
-    """Wire every component together. Single composition root."""
+def build_runtime(use_postgres: bool = False,
+                  use_llm: bool | None = None,
+                  use_market: bool | None = None) -> Runtime:
+    """Wire every component together. Single composition root.
+
+    use_llm: True forces real LLM sources, False forces heuristics,
+    None (default) auto-detects from LLMGateway.enabled() (litellm +
+    API key present). The chosen mode is logged at startup.
+
+    use_market: True forces live market data (Etsy + Trends) into the
+    LLM prompts, False disables it, None (default) enables it whenever
+    the LLM gateway is on. Never breaks composition — any market
+    failure degrades to data-free prompts.
+    """
+    import logging
+
+    from core.llm import LLMGateway
+
+    log = logging.getLogger("ecosystem.runtime")
+    llm_on = LLMGateway.enabled() if use_llm is None else bool(use_llm)
+    gateway = LLMGateway() if llm_on else None
+
+    market = None
+    market_on = llm_on and (True if use_market is None else bool(use_market))
+    if market_on:
+        from core.market_data import build_market_provider
+
+        try:
+            market = build_market_provider()
+        except Exception as exc:  # never break composition
+            log.warning("market data disabled (%s)", exc)
+            market = None
+        if market is None:
+            market_on = False
+
     agent_registry = AgentRegistry()
     handlers: dict = {}
     for cls in AGENT_CLASSES:
@@ -63,7 +114,12 @@ def build_runtime(use_postgres: bool = False) -> Runtime:
             capabilities=list(cls.capabilities),
             description=cls.description,
         )
-        handlers[cls.agent_type] = cls()
+        handlers[cls.agent_type] = _build_agent(cls, gateway, market)
+
+    log.warning("runtime mode: LLM %s (%s) | market data %s",
+                "ON" if llm_on else "OFF (heuristics)",
+                gateway.cheap_model if gateway else "no key/litellm",
+                "ON" if market_on else "OFF")
 
     store = None
     if use_postgres:
@@ -99,7 +155,7 @@ def create_dashboard_app(rt: Runtime | None = None):
     from dashboard.app import create_app
 
     rt = rt or build_runtime(use_postgres=bool(os.environ.get("DATABASE_URL")))
-    return create_app(
+    app = create_app(
         orchestrator=rt.orchestrator,
         registry=rt.businesses,
         ledger=rt.ledger,
@@ -107,3 +163,5 @@ def create_dashboard_app(rt: Runtime | None = None):
         approvals=rt.approvals,
         audit=rt.audit,
     )
+    app.state.runtime_holder = {"rt": rt}
+    return app

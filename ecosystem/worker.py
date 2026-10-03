@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,73 @@ from core.models import BusinessStatus, Opportunity
 from core.scoring import ScoringEngine
 from ecosystem.runtime import build_runtime
 from orchestrator.models import TaskStatus
+
+MONITOR_STATE_PATH = Path.home() / ".config" / "evergreen-etsy" / "monitor_state.json"
+
+
+def _load_monitor_state() -> dict:
+    if MONITOR_STATE_PATH.exists():
+        return json.loads(MONITOR_STATE_PATH.read_text())
+    return {"last_revenue_usd": 0.0}
+
+
+def _save_monitor_state(state: dict) -> None:
+    MONITOR_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MONITOR_STATE_PATH.write_text(json.dumps(state, indent=1))
+
+
+def run_etsy_monitor_tick(rt, tick: int) -> dict | None:
+    """Check Experiment 001 against the charter. Returns the snapshot,
+    or None when Etsy isn't configured (warns once). Idempotent: revenue
+    is recorded to the ledger only as deltas."""
+    from ecosystem.etsy_monitor import (
+        EXPERIMENT_BUSINESS_NAME,
+        EXPERIMENT_BUSINESS_TYPE,
+        EtsyCredentialsError,
+        EtsyMonitor,
+    )
+
+    try:
+        snapshot = EtsyMonitor().check()
+    except EtsyCredentialsError as exc:
+        if tick == 1 or tick % 50 == 1:
+            print(f"etsy monitor: skipped ({exc})", flush=True)
+        return None
+    except Exception as exc:  # noqa: BLE001 - monitor must not kill worker
+        print(f"etsy monitor: ERROR {exc}", flush=True)
+        return None
+
+    # Ensure the experiment's business exists in this runtime's registry.
+    biz = next((b for b in rt.businesses.list()
+                if b.name == EXPERIMENT_BUSINESS_NAME), None)
+    if biz is None:
+        biz = rt.businesses.create(EXPERIMENT_BUSINESS_NAME,
+                                   EXPERIMENT_BUSINESS_TYPE)
+
+    state = _load_monitor_state()
+    delta = round(snapshot["revenue_usd"] - state.get("last_revenue_usd", 0.0), 2)
+    if delta > 0:
+        rt.ledger.record(business_id=biz.id, kind="revenue",
+                         amount_usd=delta,
+                         description=f"Etsy sales to tick {tick}")
+        state["last_revenue_usd"] = snapshot["revenue_usd"]
+        _save_monitor_state(state)
+
+    print(
+        f"etsy tick {tick}: day {snapshot['days_elapsed']}/60 | "
+        f"{snapshot['active_listings']} listings | {snapshot['orders']} orders | "
+        f"${snapshot['revenue_usd']:.2f} revenue / ${snapshot['spend_usd']:.2f} spend | "
+        f"pace {snapshot['pace_pct']}% | {snapshot['verdict']}",
+        flush=True,
+    )
+    if snapshot["verdict"] == "STOP_LOSS":
+        print("!" * 70, flush=True)
+        for trigger in snapshot["stop_loss_triggers"]:
+            print(f"STOP-LOSS TRIGGERED: {trigger}", flush=True)
+        print("!" * 70, flush=True)
+        rt.audit.record(agent_type="etsy_monitor", event="stop_loss_triggered",
+                        business_id=biz.id, result=snapshot)
+    return snapshot
 
 
 def run_tick(rt, tick: int) -> dict:
@@ -50,6 +118,12 @@ def run_tick(rt, tick: int) -> dict:
     winner = ranked[0] if ranked else None
 
     ai_spend = r1.cost_usd + r2.cost_usd
+    runs = [
+        {"agent_type": "discovery", "tokens_used": r1.tokens_used,
+         "cost_usd": r1.cost_usd},
+        {"agent_type": "research", "tokens_used": r2.tokens_used,
+         "cost_usd": r2.cost_usd},
+    ]
     business_id = None
     if winner is not None:
         biz = rt.businesses.create(winner.niche, winner.business_type)
@@ -72,6 +146,7 @@ def run_tick(rt, tick: int) -> dict:
         "score": winner.score if winner else None,
         "business_id": business_id,
         "ai_spend_usd": round(ai_spend, 4),
+        "runs": runs,
     }
 
 
@@ -83,11 +158,31 @@ def main(argv: list[str] | None = None) -> int:
                         help="run N ticks then exit (default: run forever)")
     parser.add_argument("--use-postgres", action="store_true",
                         help="use PostgresTaskStore via DATABASE_URL")
+    parser.add_argument("--monitor-every", type=int, default=10,
+                        help="run the Etsy experiment monitor every N ticks "
+                             "(default: 10; 0 disables)")
+    parser.add_argument("--monitor-once", action="store_true",
+                        help="run only the Etsy monitor once, then exit")
+    parser.add_argument("--llm", dest="use_llm", action="store_true",
+                        default=None,
+                        help="force real LLM inference (requires API key)")
+    parser.add_argument("--no-llm", dest="use_llm", action="store_false",
+                        help="force heuristic agents (no LLM calls)")
+    parser.add_argument("--no-market", dest="use_market", action="store_false",
+                        default=None,
+                        help="disable live market data (data-free prompts)")
     args = parser.parse_args(argv)
 
-    rt = build_runtime(use_postgres=args.use_postgres)
+    rt = build_runtime(use_postgres=args.use_postgres, use_llm=args.use_llm,
+                       use_market=args.use_market)
+
+    if args.monitor_once:
+        run_etsy_monitor_tick(rt, tick=1)
+        return 0
+
     print(f"worker online: interval={args.interval}s "
-          f"store={'postgres' if args.use_postgres else 'memory'}", flush=True)
+          f"store={'postgres' if args.use_postgres else 'memory'} "
+          f"etsy_monitor_every={args.monitor_every}", flush=True)
 
     tick = 0
     while True:
@@ -107,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             print(f"tick {tick}: FAILED {result.get('error')}", flush=True)
+        if args.monitor_every and tick % args.monitor_every == 0:
+            run_etsy_monitor_tick(rt, tick)
         if args.ticks and tick >= args.ticks:
             break
         time.sleep(args.interval)

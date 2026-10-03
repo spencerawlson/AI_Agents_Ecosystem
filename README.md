@@ -124,6 +124,12 @@ python launch.py worker                   # headless agent tick loop
 python launch.py all                      # dashboard + worker together
 ```
 
+Open **http://0.0.0.0:8000/game** for the live game view: agent stations,
+event feed, portfolio HUD, speed controls (1×/2×/4×), pause, and reset —
+every tick runs the real orchestrator, agents, ledger, and state machine
+via the dashboard's JSON API (`/api/snapshot`, `/api/tick`, `/api/reset`).
+No simulation, no mocks.
+
 `launch.py` commands: `dashboard` (default), `worker`, `all`, `initdb`.
 Worker flags go after `--`: `python launch.py worker -- --ticks 5 --interval 30`.
 Add `--use-postgres` (with `DATABASE_URL` set) to persist tasks in Postgres
@@ -164,6 +170,77 @@ export DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
 python launch.py initdb
 python launch.py all --use-postgres
 ```
+
+### Experiment 001 monitor (Etsy)
+
+The worker automatically checks the live Etsy shop against the experiment
+charter ($1,000 / 60 days, 84+ orders, stop-loss triggers) every 10 ticks:
+
+```bash
+python launch.py worker -- --monitor-every 5   # check every 5 ticks
+python launch.py worker -- --monitor-once      # single check, then exit
+python launch.py worker -- --monitor-every 0   # disable
+```
+
+Status is also live at `http://<vm-ip>:8000/experiment-001` on the dashboard.
+OAuth tokens auto-refresh; credentials resolve from `ETSY_*` env vars or
+`~/.config/evergreen-etsy/`. Ad/fee spend isn't visible via the Etsy API —
+record it with:
+
+```bash
+python -c "from ecosystem.etsy_monitor import EtsyMonitor;
+print(EtsyMonitor.record_spend(10.0, 'Etsy Ads top-up'))"
+```
+
+### Real LLM inference
+
+Agents run on heuristics by default. With an API key, discovery and
+research use real LLM inference (cheap tier), and capital allocation
+gets smart-tier rationales — all fallback-safe (any LLM failure
+degrades to heuristics, never crashes a tick):
+
+```bash
+# 1. Free key: Google AI Studio (https://aistudio.google.com) → Get API key
+# 2. On the VM:
+export GEMINI_API_KEY="<your key>"   # also in ~/.bashrc or the systemd unit
+pip install -r requirements.txt      # pulls litellm
+python launch.py worker -- --llm     # force LLM mode
+python launch.py worker -- --no-llm  # force heuristics (default when no key)
+```
+
+Env overrides: `ECOSYSTEM_CHEAP_MODEL` (default `gemini/gemini-2.5-flash`),
+`ECOSYSTEM_SMART_MODEL` (default `gemini/gemini-2.5-pro`).
+`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` also work — the model strings are
+litellm names, so any provider can be swapped in.
+
+Routing: tier 1–2 tasks (discovery, research) → cheap model; tier 3
+(capital allocation rationales) → smart model. Real token usage and
+cost (via `litellm.completion_cost`) flow through the same budget
+enforcement and Ledger accounting as before — expect **cents per
+hundred ticks** (real inference is ~50–100x cheaper than the old
+heuristic cost rates).
+
+### Real market data
+
+When LLM mode is on, prompts are grounded in live market numbers —
+Etsy listing counts + price bands and 12-month Google Trends direction —
+so `why_now` and competitor evidence cite real data instead of guesses:
+
+```bash
+python launch.py worker -- --no-market  # disable (default: ON with LLM)
+```
+
+- **Sources:** Etsy `listings/active` search (reuses the shop's existing
+  OAuth token — no new key; token auto-refreshes on 401) and Google
+  Trends via `pytrends` (keyless).
+- **Discovery** sees a `LIVE MARKET DATA` block for watchlist niches and
+  is instructed to prefer rising trends + healthy price bands.
+- **Research** gets the niche's real competitor count and price band and
+  must use them for `competitor_count` / `price_range_usd`.
+- **Rate limits:** snapshots are TTL-cached per keyword set (1h default),
+  so repeated ticks don't hammer the APIs. If one source fails, the
+  prompt still goes out with the other's data (`partial`); only if both
+  fail does the prompt go data-free. A data failure never crashes a tick.
 
 ## Status
 

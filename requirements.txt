@@ -7,3 +7,4 @@ redis>=5.0
 pydantic>=2.6
 pydantic-settings>=2.2
 litellm>=1.60
+pytrends
