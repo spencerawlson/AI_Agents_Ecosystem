@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ecosystem Ops Room</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg2: #11151d;
+    --panel: #151b26;
+    --panel2: #1a2230;
+    --border: #232d40;
+    --text: #dbe2ef;
+    --dim: #8b96ab;
+    --green: #34d399;
+    --red: #f87171;
+    --orange: #fbbf24;
+    --blue: #60a5fa;
+    --purple: #a78bfa;
+    --accent: #22d3ee;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 12px 20px;
+    background: linear-gradient(180deg, #131926, #0e1320);
+    border-bottom: 2px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-wrap: wrap;
+  }
+  #hud .logo { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+  #hud .logo span { color: var(--accent); }
+  .hud-stat { display: flex; flex-direction: column; min-width: 90px; }
+  .hud-stat .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+  .hud-stat .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  #tick-value { color: var(--accent); }
+  #verdict-chip {
+    margin-left: auto;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1px;
+    border: 1px solid;
+  }
+  #verdict-chip.ON_TRACK { color: var(--green); border-color: var(--green); background: rgba(52,211,153,.08); }
+  #verdict-chip.BEHIND { color: var(--orange); border-color: var(--orange); background: rgba(251,191,36,.08); }
+  #verdict-chip.STOP_LOSS { color: var(--red); border-color: var(--red); background: rgba(248,113,113,.12); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .55; } }
+  #live-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #374151; display: inline-block; margin-right: 6px;
+    vertical-align: middle;
+  }
+  #live-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse .6s; }
+  @keyframes pulse { 0% { transform: scale(1.6); } 100% { transform: scale(1); } }
+  #live-label { font-size: 12px; color: var(--dim); letter-spacing: 2px; }
+
+  /* ---------- error banner ---------- */
+  #error-banner {
+    display: none;
+    background: #3b1414;
+    border-bottom: 1px solid var(--red);
+    color: #fecaca;
+    padding: 10px 20px;
+    font-size: 13px;
+  }
+  #error-banner.show { display: block; }
+
+  /* ---------- layout ---------- */
+  #main {
+    display: grid;
+    grid-template-columns: 300px 1fr 340px;
+    gap: 14px;
+    padding: 14px 20px;
+    flex: 1;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    #main { grid-template-columns: 1fr 1fr; }
+    #events-panel { grid-column: 1 / -1; }
+  }
+  @media (max-width: 760px) {
+    #main { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--dim);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+
+  /* ---------- agents ---------- */
+  #agents { display: flex; flex-direction: column; gap: 10px; }
+  .agent-card {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: box-shadow .4s, border-color .4s;
+  }
+  .agent-card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .agent-card .icon { font-size: 22px; }
+  .agent-card .name { font-weight: 700; font-size: 14px; text-transform: capitalize; }
+  .agent-card .type { font-size: 11px; color: var(--dim); font-family: monospace; }
+  .agent-card .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; font-size: 12px; }
+  .agent-card .stats .s-label { color: var(--dim); font-size: 10px; text-transform: uppercase; }
+  .agent-card .stats .s-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .agent-card .last-task {
+    margin-top: 6px; font-size: 12px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .agent-card.flash {
+    border-color: var(--green);
+    box-shadow: 0 0 14px rgba(52,211,153,.55);
+  }
+
+  /* ---------- businesses ---------- */
+  #businesses-list { display: flex; flex-direction: column; gap: 8px; }
+  .biz-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .biz-row .biz-name { font-weight: 600; }
+  .biz-row .biz-type { font-size: 11px; color: var(--dim); font-family: monospace; }
+  .status-badge {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 12px; letter-spacing: .5px;
+    border: 1px solid;
+  }
+  .status-badge.researching { color: var(--blue); border-color: var(--blue); }
+  .status-badge.validated { color: var(--purple); border-color: var(--purple); }
+  .status-badge.approved { color: var(--green); border-color: var(--green); }
+  .status-badge.building { color: var(--orange); border-color: var(--orange); }
+  .status-badge.live, .status-badge.operating { color: var(--green); border-color: var(--green); background: rgba(52,211,153,.1); }
+  .status-badge.paused, .status-badge.shut_down { color: var(--red); border-color: var(--red); }
+  .status-badge.proposed, .status-badge.discovered { color: var(--dim); border-color: var(--dim); }
+  .biz-profit { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+  .empty-note { color: var(--dim); font-style: italic; padding: 12px; text-align: center; }
+
+  /* ---------- experiment 001 ---------- */
+  #exp001 { margin-top: 14px; }
+  #exp001.hidden { display: none; }
+  .exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .exp-cell { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .exp-cell .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+  .exp-cell .value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #exp-triggers { list-style: none; }
+  #exp-triggers li {
+    font-size: 12px; color: var(--red);
+    background: rgba(248,113,113,.08);
+    border: 1px solid rgba(248,113,113,.3);
+    border-radius: 6px; padding: 6px 10px; margin-top: 6px;
+  }
+  #exp-triggers li.ok { color: var(--green); background: rgba(52,211,153,.06); border-color: rgba(52,211,153,.25); }
+
+  /* ---------- events ---------- */
+  #events-panel { display: flex; flex-direction: column; max-height: calc(100vh - 190px); }
+  #events-feed { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+  .event-row {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .event-row .e-time { color: var(--dim); font-family: monospace; white-space: nowrap; font-size: 11px; }
+  .event-row .e-actor { color: var(--accent); font-weight: 700; white-space: nowrap; }
+  .event-row .e-text { color: var(--text); word-break: break-word; }
+  .event-row.fresh { border-color: var(--accent); }
+
+  /* ---------- controls ---------- */
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: #0e1320;
+    border-top: 2px solid var(--border);
+    position: sticky;
+    bottom: 0;
+    flex-wrap: wrap;
+  }
+  button, select {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); background: #222c40; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #0e3a4a; border-color: var(--accent); }
+  button.danger { background: #3b1414; border-color: var(--red); }
+  button.active-toggle { background: #123f2a; border-color: var(--green); color: var(--green); }
+  #controls .spacer { flex: 1; }
+  #controls .hint { font-size: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<header id="hud">
+  <div class="logo">🤖 ECO<span>SYSTEM</span> OPS</div>
+  <div class="hud-stat"><span class="label">Tick</span><span class="value" id="tick-value">–</span></div>
+  <div class="hud-stat"><span class="label">Businesses</span><span class="value" id="hud-businesses">–</span></div>
+  <div class="hud-stat"><span class="label">Revenue</span><span class="value" id="hud-revenue">–</span></div>
+  <div class="hud-stat"><span class="label">Costs</span><span class="value" id="hud-costs">–</span></div>
+  <div class="hud-stat"><span class="label">Net profit</span><span class="value" id="hud-profit">–</span></div>
+  <div id="verdict-chip" class="hidden" style="display:none"></div>
+  <div><span id="live-dot"></span><span id="live-label">LIVE</span></div>
+</header>
+
+<div id="error-banner"></div>
+
+<div id="main">
+  <section class="panel" id="agents-panel">
+    <h2>⚡ Agent Stations</h2>
+    <div id="agents"></div>
+  </section>
+
+  <section>
+    <div class="panel" id="businesses-panel">
+      <h2>🏢 Businesses</h2>
+      <div id="businesses-list"></div>
+    </div>
+    <div class="panel" id="exp001">
+      <h2>🧪 Experiment 001 — Evergreen Planners</h2>
+      <div class="exp-grid">
+        <div class="exp-cell"><div class="label">Day</div><div class="value" id="exp-day">–</div></div>
+        <div class="exp-cell"><div class="label">Pace</div><div class="value" id="exp-pace">–</div></div>
+        <div class="exp-cell"><div class="label">Orders</div><div class="value" id="exp-orders">–</div></div>
+        <div class="exp-cell"><div class="label">Revenue</div><div class="value" id="exp-revenue">–</div></div>
+        <div class="exp-cell"><div class="label">Spend</div><div class="value" id="exp-spend">–</div></div>
+        <div class="exp-cell"><div class="label">Verdict</div><div class="value" id="exp-verdict">–</div></div>
+      </div>
+      <h2 style="margin-top:4px">Stop-loss triggers</h2>
+      <ul id="exp-triggers"></ul>
+    </div>
+  </section>
+
+  <section class="panel" id="events-panel">
+    <h2>📡 Event Feed</h2>
+    <div id="events-feed"></div>
+  </section>
+</div>
+
+<footer id="controls">
+  <button id="btn-step" class="primary">⏭ Step</button>
+  <button id="btn-auto">▶ Auto</button>
+  <select id="speed" title="Auto speed">
+    <option value="4000">1×</option>
+    <option value="2000">2×</option>
+    <option value="1000">4×</option>
+  </select>
+  <button id="btn-pause">⏸ Pause</button>
+  <button id="btn-reset" class="danger">↺ Reset</button>
+  <span class="spacer"></span>
+  <span class="hint">Step = one real orchestrator tick · Auto polls on the speed interval</span>
+</footer>
+
+<script>
+"use strict";
+
+/* ---------------- helpers ---------------- */
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const fmtUSD = (n) => {
+  const v = Number(n) || 0;
+  return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const fmtInt = (n) => (Number(n) || 0).toLocaleString("en-US");
+const fmtTime = (ts) => {
+  if (ts == null || ts === "") return "—";
+  let ms = Number(ts);
+  if (!isNaN(ms)) {
+    if (ms < 1e12) ms *= 1000; // epoch seconds -> ms
+    return new Date(ms).toLocaleTimeString("en-US", { hour12: false });
+  }
+  const d = new Date(ts);
+  return isNaN(d) ? esc(ts) : d.toLocaleTimeString("en-US", { hour12: false });
+};
+
+const AGENT_ICONS = {
+  discovery: "🔭",
+  research: "🔬",
+  marketing: "📣",
+  support: "💬",
+  creative: "🎨",
+  operations: "⚙️",
+};
+const iconFor = (type) => AGENT_ICONS[String(type || "").toLowerCase()] || "🤖";
+const VERDICT_LABEL = { ON_TRACK: "ON TRACK", BEHIND: "BEHIND", STOP_LOSS: "STOP LOSS" };
+
+/* ---------------- state ---------------- */
+const state = {
+  snapshot: null,
+  prevTasks: {},       // agent type -> tasks_completed, for flash highlight
+  auto: false,
+  autoTimer: null,
+  tickInFlight: false,
+  eventIds: new Set(),
+};
+
+/* ---------------- api ---------------- */
+async function api(path, method) {
+  const res = await fetch(path, { method: method || "GET" });
+  if (!res.ok) throw new Error("HTTP " + res.status + " on " + path);
+  return res.json();
+}
+
+function showError(msg) {
+  const b = $("error-banner");
+  b.textContent = "⚠ API unreachable: " + msg + " — retrying…";
+  b.classList.add("show");
+}
+function hideError() { $("error-banner").classList.remove("show"); }
+function pulseLive() {
+  const d = $("live-dot");
+  d.classList.remove("on");
+  void d.offsetWidth; // restart animation
+  d.classList.add("on");
+}
+
+/* ---------------- render ---------------- */
+function render(snapshot) {
+  state.snapshot = snapshot;
+  renderHUD(snapshot);
+  renderAgents(snapshot.agents || []);
+  renderBusinesses(snapshot.businesses || []);
+  renderEvents(snapshot.events || []);
+  renderExperiment(snapshot.experiment_001);
+  pulseLive();
+}
+
+function renderHUD(s) {
+  $("tick-value").textContent = s.tick != null ? "#" + s.tick : "–";
+  const t = s.totals || {};
+  $("hud-businesses").textContent = t.businesses != null ? fmtInt(t.businesses) : "–";
+  $("hud-revenue").textContent = fmtUSD(t.revenue);
+  $("hud-costs").textContent = fmtUSD(t.total_costs);
+  const p = $("hud-profit");
+  p.textContent = fmtUSD(t.net_profit);
+  p.className = "value " + ((Number(t.net_profit) || 0) >= 0 ? "pos" : "neg");
+
+  const chip = $("verdict-chip");
+  const e = s.experiment_001;
+  if (e && e.verdict) {
+    chip.style.display = "";
+    chip.className = e.verdict;
+    chip.textContent = "EXP-001 · " + (VERDICT_LABEL[e.verdict] || e.verdict);
+  } else {
+    chip.style.display = "none";
+  }
+}
+
+function renderAgents(agents) {
+  const wrap = $("agents");
+  wrap.innerHTML = "";
+  if (!agents.length) {
+    wrap.innerHTML = '<div class="empty-note">No agents registered.</div>';
+    return;
+  }
+  for (const a of agents) {
+    const type = a.type || "unknown";
+    const tasks = Number(a.tasks_completed) || 0;
+    const prev = state.prevTasks[type];
+    const increased = prev != null && tasks > prev;
+    state.prevTasks[type] = tasks;
+
+    const card = document.createElement("div");
+    card.className = "agent-card" + (increased ? " flash" : "");
+    card.innerHTML =
+      '<div class="head"><span class="icon">' + iconFor(type) + '</span>' +
+      '<div><div class="name">' + esc(type) + '</div>' +
+      '<div class="type">' + esc(type) + ' · agent</div></div></div>' +
+      '<div class="stats">' +
+      '<div><div class="s-label">Tasks</div><div class="s-value">' + fmtInt(tasks) + '</div></div>' +
+      '<div><div class="s-label">Tokens</div><div class="s-value">' + fmtInt(a.tokens_used) + '</div></div>' +
+      '<div><div class="s-label">Cost</div><div class="s-value">' + fmtUSD(a.cost_usd) + '</div></div>' +
+      '</div>' +
+      '<div class="last-task" title="' + esc(a.last_task) + '">▸ ' + esc(a.last_task || "idle") + '</div>';
+    wrap.appendChild(card);
+    if (increased) setTimeout(() => card.classList.remove("flash"), 1200);
+  }
+}
+
+function renderBusinesses(businesses) {
+  const wrap = $("businesses-list");
+  wrap.innerHTML = "";
+  if (!businesses.length) {
+    wrap.innerHTML = '<div class="empty-note">No businesses yet — press Step or enable Auto.</div>';
+    return;
+  }
+  for (const b of businesses) {
+    const profit = Number(b.net_profit) || 0;
+    const row = document.createElement("div");
+    row.className = "biz-row";
+    row.innerHTML =
+      '<div><div class="biz-name">' + esc(b.name) + '</div>' +
+      '<div class="biz-type">' + esc(b.business_type || "") + ' · ' + esc(b.id || "") + '</div></div>' +
+      '<span class="status-badge ' + esc(String(b.status || "").toLowerCase()) + '">' + esc(b.status || "?") + '</span>' +
+      '<div class="biz-profit ' + (profit >= 0 ? "pos" : "neg") + '">' + fmtUSD(profit) + '</div>';
+    wrap.appendChild(row);
+  }
+}
+
+function renderEvents(events) {
+  const feed = $("events-feed");
+  // newest first
+  const sorted = [...events].reverse();
+  feed.innerHTML = "";
+  let shown = 0;
+  for (const e of sorted) {
+    if (shown >= 100) break;
+    const row = document.createElement("div");
+    row.className = "event-row";
+    const detail = [e.business_id, e.task_id].filter(Boolean).map(esc).join(" · ");
+    row.innerHTML =
+      '<span class="e-time">' + esc(fmtTime(e.ts)) + '</span>' +
+      '<span class="e-actor">' + esc(e.actor || "system") + '</span>' +
+      '<span class="e-text">' + esc(e.event || "") + (detail ? ' <span style="color:var(--dim)">[' + detail + ']</span>' : '') + '</span>';
+    feed.appendChild(row);
+    shown++;
+  }
+  if (!shown) feed.innerHTML = '<div class="empty-note">No events yet.</div>';
+  feed.scrollTop = 0;
+}
+
+function renderExperiment(e) {
+  const panel = $("exp001");
+  if (!e) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  $("exp-day").textContent = e.days_elapsed + " / 60";
+  $("exp-pace").textContent = (e.pace_pct != null ? e.pace_pct + "%" : "–");
+  $("exp-orders").textContent = fmtInt(e.orders);
+  $("exp-revenue").textContent = fmtUSD(e.revenue_usd);
+  $("exp-spend").textContent = fmtUSD(e.spend_usd);
+  const v = $("exp-verdict");
+  v.textContent = VERDICT_LABEL[e.verdict] || e.verdict || "–";
+  v.className = "value " + (e.verdict === "ON_TRACK" ? "pos" : e.verdict === "BEHIND" ? "" : "neg");
+  if (e.verdict === "BEHIND") v.style.color = "var(--orange)"; else v.style.color = "";
+
+  const ul = $("exp-triggers");
+  ul.innerHTML = "";
+  const triggers = e.stop_loss_triggers || [];
+  if (!triggers.length) {
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.textContent = "✓ No stop-loss triggers active.";
+    ul.appendChild(li);
+  } else {
+    for (const t of triggers) {
+      const li = document.createElement("li");
+      li.textContent = "⛔ " + t;
+      ul.appendChild(li);
+    }
+  }
+}
+
+/* ---------------- actions ---------------- */
+async function refresh() {
+  try {
+    const s = await api("/api/snapshot");
+    hideError();
+    render(s);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function doTick() {
+  if (state.tickInFlight) return;
+  state.tickInFlight = true;
+  updateButtons();
+  try {
+    const res = await api("/api/tick", "POST");
+    hideError();
+    render(res.snapshot || res);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    state.tickInFlight = false;
+    updateButtons();
+  }
+}
+
+async function doReset() {
+  if (!confirm("Reset the simulation? All progress will be lost.")) return;
+  stopAuto();
+  try {
+    const res = await api("/api/reset", "POST");
+    hideError();
+    state.prevTasks = {};
+    render(res.snapshot || res);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function startAuto() {
+  if (state.auto || state.tickInFlight) return;
+  state.auto = true;
+  const interval = Number($("speed").value) || 4000;
+  const loop = async () => {
+    if (!state.auto) return;
+    await doTick();
+    if (state.auto) state.autoTimer = setTimeout(loop, interval);
+  };
+  loop();
+  updateButtons();
+}
+
+function stopAuto() {
+  state.auto = false;
+  if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
+  updateButtons();
+}
+
+function updateButtons() {
+  $("btn-step").disabled = state.tickInFlight;
+  $("btn-auto").disabled = state.tickInFlight || state.auto;
+  $("btn-auto").classList.toggle("active-toggle", state.auto);
+  $("btn-auto").textContent = state.auto ? "⏸ Auto ON" : "▶ Auto";
+  $("btn-pause").disabled = !state.auto;
+}
+
+/* ---------------- wiring ---------------- */
+$("btn-step").addEventListener("click", doTick);
+$("btn-auto").addEventListener("click", startAuto);
+$("btn-pause").addEventListener("click", stopAuto);
+$("btn-reset").addEventListener("click", doReset);
+$("speed").addEventListener("change", () => {
+  if (state.auto) { stopAuto(); startAuto(); } // restart at new speed
+});
+
+updateButtons();
+refresh();
+</script>
+</body>
+</html>

@@ -99,7 +99,7 @@ def create_dashboard_app(rt: Runtime | None = None):
     from dashboard.app import create_app
 
     rt = rt or build_runtime(use_postgres=bool(os.environ.get("DATABASE_URL")))
-    return create_app(
+    app = create_app(
         orchestrator=rt.orchestrator,
         registry=rt.businesses,
         ledger=rt.ledger,
@@ -107,3 +107,5 @@ def create_dashboard_app(rt: Runtime | None = None):
         approvals=rt.approvals,
         audit=rt.audit,
     )
+    app.state.runtime_holder = {"rt": rt}
+    return app
