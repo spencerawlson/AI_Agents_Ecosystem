@@ -5,6 +5,11 @@
 **Shop:** Existing Etsy shop FXMacroAnalysis (Montreal, since 2026, 0 sales) —
 pivoting from forex journals to planners per owner 2026-10-03.
 Listing pack: `001-listing-pack.md` (12 listings, titles/descriptions/tags).
+**Launch status 2026-10-03:** 12/12 drafts published via API (IDs in
+`~/.config/evergreen-etsy/draft_listings.json`), 12/12 covers uploaded,
+12/12 product files attached (7 PDFs + 4 xlsx + 1 bundle zip, built
+2026-10-03 in `~/workspace/etsy-products/`). All drafts complete and ready
+for owner review → activation.
 **Date:** 2026-10-03
 
 > No charter, no spend. This document is the decision record.
