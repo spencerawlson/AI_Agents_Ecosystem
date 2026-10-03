@@ -145,7 +145,7 @@ class EtsyCommerceAdapter(CommerceAdapter):
             "description": product["description"],
             "price": product["price_usd"],
             "who_made": "i_did",
-            "when_made": "2020_2023",
+            "when_made": "2020_2026",
             "taxonomy_id": product.get("taxonomy_id", 1),
             "is_digital": True,
             "type": "download",
