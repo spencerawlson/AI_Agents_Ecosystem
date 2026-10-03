@@ -52,15 +52,27 @@ class ModelOption:
 
 
 class ModelRouter:
-    """Route each task to the cheapest model that can handle it."""
+    """Route each task to the cheapest model that can handle it.
 
-    def __init__(self, models: list[ModelOption] | None = None) -> None:
+    Two modes:
+    - heuristic mode (default): routes to built-in ModelOptions with fixed
+      cost rates — no real inference, used when no LLM key is configured.
+    - real mode: via `route_real`, returns the gateway model name string
+      for the tier (cheap for tiers 1-2, smart for tier 3).
+    """
+
+    # Real-model mapping: capability tiers -> gateway tier names.
+    REAL_TIER_MODELS = {1: "cheap", 2: "cheap", 3: "smart"}
+
+    def __init__(self, models: list[ModelOption] | None = None,
+                 gateway: "LLMGateway | None" = None) -> None:
         self.models = models or [
             ModelOption("fast", cost_per_1k_tokens=0.001, capability_tier=1),
             ModelOption("balanced", cost_per_1k_tokens=0.01, capability_tier=2),
             ModelOption("powerful", cost_per_1k_tokens=0.05, capability_tier=3),
         ]
         self._spend_log: list[tuple[str, str, float, int]] = []  # (task, model, cost, tokens)
+        self.gateway = gateway
 
     def route(self, task_description: str, required_tier: int) -> ModelOption:
         """Cheapest model at or above the required capability tier."""
@@ -68,6 +80,26 @@ class ModelRouter:
         if not candidates:
             raise ValueError(f"no model meets tier {required_tier}")
         return min(candidates, key=lambda m: m.cost_per_1k_tokens)
+
+    def route_real(self, task_description: str, required_tier: int) -> str:
+        """Real-model name for the tier, via the LLM gateway.
+
+        Tiers 1-2 -> cheap model, tier 3 -> smart model. Raises
+        LLMUnavailable when no gateway is configured/disabled, so
+        callers can fall back to heuristic `route()`.
+        """
+        from core.llm import LLMGateway, LLMUnavailable
+
+        gateway = self.gateway
+        if gateway is None:
+            if LLMGateway.enabled():
+                gateway = LLMGateway()
+            else:
+                raise LLMUnavailable("no LLM gateway available")
+        gateway_tier = self.REAL_TIER_MODELS.get(required_tier)
+        if gateway_tier is None:
+            raise ValueError(f"no model meets tier {required_tier}")
+        return gateway.model_for(gateway_tier)
 
     def log_spend(self, task_description: str, model: ModelOption, tokens: int) -> float:
         cost = tokens / 1000 * model.cost_per_1k_tokens

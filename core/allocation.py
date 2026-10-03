@@ -23,6 +23,48 @@ class Allocation(BaseModel):
     recommendation: str  # SCALE | MAINTAIN | REDUCE | PAUSE | SHUT_DOWN
     allocated_usd: float
     reasoning: str = ""
+    llm_rationale: str = ""  # smart-tier LLM rationale, when available
+
+
+def _smart_rationales(allocator: "CapitalAllocator",
+                      allocations: list[Allocation],
+                      gateway: "LLMGateway") -> None:
+    """Attach a 2-3 sentence smart-tier rationale to the top allocations.
+
+    Silently skips on any LLM failure — allocation must never depend on it.
+    """
+    from core.llm import LLMUnavailable
+
+    top = [a for a in allocations
+           if a.recommendation not in ("SHUT_DOWN", "PAUSE")][:3]
+    for alloc in top:
+        biz = allocator.registry.get(alloc.business_id)
+        name = biz.name if biz is not None else alloc.business_id
+        try:
+            result = gateway.complete(
+                prompt=(
+                    "You are a portfolio manager at an autonomous "
+                    "micro-business fund. Write a 2-3 sentence capital "
+                    "allocation rationale for this decision. Be concrete, "
+                    "no hype. Respond with STRICT JSON only: "
+                    '{"rationale": str}. '
+                    f"Business: {name}. "
+                    f"Capital efficiency: {alloc.capital_efficiency:.2f}. "
+                    f"Recommendation: {alloc.recommendation}. "
+                    f"Allocated: ${alloc.allocated_usd:,.2f}. "
+                    f"Heuristic reasoning: {alloc.reasoning}."
+                ),
+                tier=gateway.SMART,
+                system=(
+                    "You write concise capital allocation rationales for "
+                    "an autonomous investment system."
+                ),
+                json_mode=True,
+            )
+            alloc.llm_rationale = str(
+                (result["json"] or {}).get("rationale", ""))
+        except LLMUnavailable:
+            continue
 
 
 class CapitalAllocator:
@@ -52,11 +94,15 @@ class CapitalAllocator:
         return ("SCALE", f"strong returns, efficiency {eff:.2f}")
 
     def allocate(
-        self, total_capital_usd: float, minimum_usd: float = 100.0
+        self, total_capital_usd: float, minimum_usd: float = 100.0,
+        llm: "LLMGateway | None" = None,
     ) -> list[Allocation]:
         """Allocate capital proportional to efficiency (floored at minimum).
 
         Businesses recommended SHUT_DOWN / PAUSE get $0.
+
+        Pass an LLMGateway as `llm` to attach smart-tier rationales to the
+        top allocations; silently skipped when the gateway is unavailable.
         """
         businesses = self.registry.list()
         scored: list[tuple[str, float, str, str]] = []
@@ -91,7 +137,11 @@ class CapitalAllocator:
                     business_id=bid, capital_efficiency=self.efficiency(bid),
                     recommendation=rec, allocated_usd=amount, reasoning=reason,
                 ))
-        return sorted(allocations, key=lambda a: a.capital_efficiency, reverse=True)
+        ranked = sorted(allocations,
+                        key=lambda a: a.capital_efficiency, reverse=True)
+        if llm is not None and llm.enabled():
+            _smart_rationales(self, ranked, llm)
+        return ranked
 
     def equal_split(self, total_capital_usd: float) -> dict[str, float]:
         """Naive baseline for comparison."""

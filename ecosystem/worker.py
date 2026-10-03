@@ -163,9 +163,14 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: 10; 0 disables)")
     parser.add_argument("--monitor-once", action="store_true",
                         help="run only the Etsy monitor once, then exit")
+    parser.add_argument("--llm", dest="use_llm", action="store_true",
+                        default=None,
+                        help="force real LLM inference (requires API key)")
+    parser.add_argument("--no-llm", dest="use_llm", action="store_false",
+                        help="force heuristic agents (no LLM calls)")
     args = parser.parse_args(argv)
 
-    rt = build_runtime(use_postgres=args.use_postgres)
+    rt = build_runtime(use_postgres=args.use_postgres, use_llm=args.use_llm)
 
     if args.monitor_once:
         run_etsy_monitor_tick(rt, tick=1)
