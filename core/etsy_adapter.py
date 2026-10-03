@@ -90,31 +90,21 @@ class EtsyAuth:
 
 
 class EtsyCommerceAdapter(CommerceAdapter):
-    """Manage an Etsy shop via API v3. Implements CommerceAdapter.
-
-    Since Feb 2026 Etsy requires x-api-key as "keystring:shared_secret"
-    (colon-joined), not the bare keystring.
-    """
+    """Manage an Etsy shop via API v3. Implements CommerceAdapter."""
 
     platform = "etsy"
 
-    def __init__(self, keystring: str, shared_secret: str, access_token: str,
-                 shop_id: str) -> None:
+    def __init__(self, keystring: str, access_token: str, shop_id: str) -> None:
         self.keystring = keystring
-        self.shared_secret = shared_secret
         self.access_token = access_token
         self.shop_id = shop_id
-
-    @property
-    def _api_key(self) -> str:
-        return f"{self.keystring}:{self.shared_secret}"
 
     def _request(self, method: str, path: str, data: dict | None = None,
                  files: dict | None = None) -> dict | list:
         url = ETSY_API + path
         body = json.dumps(data).encode() if data else None
         req = urllib.request.Request(url, data=body, method=method)
-        req.add_header("x-api-key", self._api_key)
+        req.add_header("x-api-key", self.keystring)
         req.add_header("Authorization", f"Bearer {self.access_token}")
         if data:
             req.add_header("Content-Type", "application/json")
@@ -145,7 +135,7 @@ class EtsyCommerceAdapter(CommerceAdapter):
             "description": product["description"],
             "price": product["price_usd"],
             "who_made": "i_did",
-            "when_made": "2020_2026",
+            "when_made": "2020_2023",
             "taxonomy_id": product.get("taxonomy_id", 1),
             "is_digital": True,
             "type": "download",
@@ -181,51 +171,6 @@ class EtsyCommerceAdapter(CommerceAdapter):
 
     # -- Etsy extras --
 
-    # -- Digital listing files --------------------------------------------
-
-    def list_files(self, listing_id: str) -> list[dict]:
-        """List downloadable files attached to a listing."""
-        res = self._request(
-            "GET", f"/shops/{self.shop_id}/listings/{listing_id}/files")
-        return res.get("results", [])
-
-    def upload_file(self, listing_id: str, file_path: str,
-                    name: str | None = None) -> dict:
-        """Attach a downloadable file to a listing (multipart)."""
-        import mimetypes
-        import os
-
-        boundary = secrets.token_hex(16)
-        mime, _ = mimetypes.guess_type(file_path)
-        filename = os.path.basename(file_path)
-        display_name = name or os.path.splitext(filename)[0].replace("-", " ").replace("_", " ").title()
-        with open(file_path, "rb") as f:
-            blob = f.read()
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="name"\r\n\r\n'
-            f"{display_name}\r\n"
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; '
-            f'filename="{filename}"\r\n'
-            f"Content-Type: {mime or 'application/octet-stream'}\r\n\r\n"
-        ).encode() + blob + f"\r\n--{boundary}--\r\n".encode()
-        req = urllib.request.Request(
-            f"{ETSY_API}/shops/{self.shop_id}/listings/{listing_id}/files",
-            data=body, method="POST")
-        req.add_header("x-api-key", self._api_key)
-        req.add_header("Authorization", f"Bearer {self.access_token}")
-        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return json.load(resp)
-
-    def delete_file(self, listing_id: str, listing_file_id: int) -> dict:
-        """Remove a downloadable file from a listing."""
-        return self._request(
-            "DELETE",
-            f"/shops/{self.shop_id}/listings/{listing_id}/files/{listing_file_id}",
-        )
-
     def upload_image(self, listing_id: str, image_path: str) -> dict:
         """Upload a listing image (multipart)."""
         import mimetypes
@@ -242,7 +187,7 @@ class EtsyCommerceAdapter(CommerceAdapter):
         req = urllib.request.Request(
             f"{ETSY_API}/shops/{self.shop_id}/listings/{listing_id}/images",
             data=body, method="POST")
-        req.add_header("x-api-key", self._api_key)
+        req.add_header("x-api-key", self.keystring)
         req.add_header("Authorization", f"Bearer {self.access_token}")
         req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
         with urllib.request.urlopen(req, timeout=60) as resp:
