@@ -41,19 +41,6 @@ AGENT_CLASSES = (
 )
 
 
-def _build_agent(cls: type, gateway: "LLMGateway | None"):
-    """Construct an agent, wiring LLM sources when the gateway is on."""
-    from core.llm import LLMGateway  # noqa: F401  (re-export for type hints)
-
-    if gateway is not None and cls is DiscoveryAgent:
-        from agents.discovery.llm_source import LLMOpportunitySource
-        return cls(source=LLMOpportunitySource(gateway))
-    if gateway is not None and cls is ResearchAgent:
-        from agents.research.llm_source import LLMResearchSource
-        return cls(source=LLMResearchSource(gateway))
-    return cls()
-
-
 @dataclass
 class Runtime:
     agent_registry: AgentRegistry
@@ -66,22 +53,8 @@ class Runtime:
     handlers: dict
 
 
-def build_runtime(use_postgres: bool = False,
-                  use_llm: bool | None = None) -> Runtime:
-    """Wire every component together. Single composition root.
-
-    use_llm: True forces real LLM sources, False forces heuristics,
-    None (default) auto-detects from LLMGateway.enabled() (litellm +
-    API key present). The chosen mode is logged at startup.
-    """
-    import logging
-
-    from core.llm import LLMGateway
-
-    log = logging.getLogger("ecosystem.runtime")
-    llm_on = LLMGateway.enabled() if use_llm is None else bool(use_llm)
-    gateway = LLMGateway() if llm_on else None
-
+def build_runtime(use_postgres: bool = False) -> Runtime:
+    """Wire every component together. Single composition root."""
     agent_registry = AgentRegistry()
     handlers: dict = {}
     for cls in AGENT_CLASSES:
@@ -90,10 +63,7 @@ def build_runtime(use_postgres: bool = False,
             capabilities=list(cls.capabilities),
             description=cls.description,
         )
-        handlers[cls.agent_type] = _build_agent(cls, gateway)
-
-    log.warning("runtime mode: LLM %s (%s)", "ON" if llm_on else "OFF (heuristics)",
-                gateway.cheap_model if gateway else "no key/litellm")
+        handlers[cls.agent_type] = cls()
 
     store = None
     if use_postgres:
@@ -129,7 +99,7 @@ def create_dashboard_app(rt: Runtime | None = None):
     from dashboard.app import create_app
 
     rt = rt or build_runtime(use_postgres=bool(os.environ.get("DATABASE_URL")))
-    app = create_app(
+    return create_app(
         orchestrator=rt.orchestrator,
         registry=rt.businesses,
         ledger=rt.ledger,
@@ -137,5 +107,3 @@ def create_dashboard_app(rt: Runtime | None = None):
         approvals=rt.approvals,
         audit=rt.audit,
     )
-    app.state.runtime_holder = {"rt": rt}
-    return app
