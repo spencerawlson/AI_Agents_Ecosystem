@@ -124,6 +124,12 @@ python launch.py worker                   # headless agent tick loop
 python launch.py all                      # dashboard + worker together
 ```
 
+Open **http://0.0.0.0:8000/game** for the live game view: agent stations,
+event feed, portfolio HUD, speed controls (1×/2×/4×), pause, and reset —
+every tick runs the real orchestrator, agents, ledger, and state machine
+via the dashboard's JSON API (`/api/snapshot`, `/api/tick`, `/api/reset`).
+No simulation, no mocks.
+
 `launch.py` commands: `dashboard` (default), `worker`, `all`, `initdb`.
 Worker flags go after `--`: `python launch.py worker -- --ticks 5 --interval 30`.
 Add `--use-postgres` (with `DATABASE_URL` set) to persist tasks in Postgres

@@ -3,231 +3,287 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🌱 Ecosystem Tycoon — Live</title>
+<title>Ecosystem Ops Room</title>
 <style>
   :root {
-    --bg: #fdf3e7;
-    --bg2: #fbeed9;
-    --card: #ffffff;
-    --ink: #3d3225;
-    --dim: #8a7a66;
-    --border: #f0e2cc;
-    --accent: #e8833a;
-    --accent-soft: #fdebd3;
-    --green: #2e9e5b;
-    --green-soft: #ddf3e5;
-    --red: #d64545;
-    --red-soft: #fbe3e3;
-    --amber: #c77f0a;
-    --amber-soft: #fdf0d0;
-    --blue: #3a7bd5;
-    --blue-soft: #e0edfb;
-    --purple: #8a5fc0;
-    --purple-soft: #ece2f8;
+    --bg: #0b0e14;
+    --bg2: #11151d;
+    --panel: #151b26;
+    --panel2: #1a2230;
+    --border: #232d40;
+    --text: #dbe2ef;
+    --dim: #8b96ab;
+    --green: #34d399;
+    --red: #f87171;
+    --orange: #fbbf24;
+    --blue: #60a5fa;
+    --purple: #a78bfa;
+    --accent: #22d3ee;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background: var(--bg);
-    background-image: radial-gradient(circle at 20% 10%, #fdeeda 0, transparent 40%),
-                      radial-gradient(circle at 85% 90%, #fbe3c8 0, transparent 35%);
-    color: var(--ink);
-    font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
     font-size: 14px;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
   }
+
+  /* ---------- HUD ---------- */
   #hud {
-    display: flex; align-items: center; gap: 14px;
-    padding: 12px 22px; background: #fffaf0;
-    border-bottom: 3px solid var(--border);
-    position: sticky; top: 0; z-index: 10; flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 12px 20px;
+    background: linear-gradient(180deg, #131926, #0e1320);
+    border-bottom: 2px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-wrap: wrap;
   }
-  #hud .title { font-size: 22px; font-weight: 800; letter-spacing: .5px; }
-  #tick-badge {
-    background: var(--ink); color: #fff; font-weight: 800; font-size: 13px;
-    letter-spacing: 1px; padding: 6px 16px; border-radius: 999px;
-  }
-  .hud-stat { display: flex; flex-direction: column; min-width: 86px; }
-  .hud-stat .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; font-weight: 700; }
-  .hud-stat .value { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #hud .logo { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+  #hud .logo span { color: var(--accent); }
+  .hud-stat { display: flex; flex-direction: column; min-width: 90px; }
+  .hud-stat .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+  .hud-stat .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .pos { color: var(--green); }
   .neg { color: var(--red); }
+  #tick-value { color: var(--accent); }
   #verdict-chip {
-    margin-left: auto; padding: 7px 16px; border-radius: 999px;
-    font-weight: 800; font-size: 13px; letter-spacing: .5px; border: 2px solid;
+    margin-left: auto;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 1px;
+    border: 1px solid;
   }
-  #verdict-chip.ON_TRACK { color: var(--green); border-color: var(--green); background: var(--green-soft); }
-  #verdict-chip.BEHIND { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
-  #verdict-chip.STOP_LOSS { color: var(--red); border-color: var(--red); background: var(--red-soft); animation: wiggle 1s infinite; }
-  @keyframes wiggle { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-3deg); } 75% { transform: rotate(3deg); } }
-  #live-wrap { display: flex; align-items: center; gap: 6px; }
-  #live-dot { width: 12px; height: 12px; border-radius: 50%; background: #d8cbb6; display: inline-block; }
-  #live-dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pop .5s; }
-  @keyframes pop { 0% { transform: scale(1.7); } 100% { transform: scale(1); } }
-  #live-label { font-size: 11px; color: var(--dim); letter-spacing: 2px; font-weight: 800; }
+  #verdict-chip.ON_TRACK { color: var(--green); border-color: var(--green); background: rgba(52,211,153,.08); }
+  #verdict-chip.BEHIND { color: var(--orange); border-color: var(--orange); background: rgba(251,191,36,.08); }
+  #verdict-chip.STOP_LOSS { color: var(--red); border-color: var(--red); background: rgba(248,113,113,.12); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .55; } }
+  #live-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #374151; display: inline-block; margin-right: 6px;
+    vertical-align: middle;
+  }
+  #live-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse .6s; }
+  @keyframes pulse { 0% { transform: scale(1.6); } 100% { transform: scale(1); } }
+  #live-label { font-size: 12px; color: var(--dim); letter-spacing: 2px; }
+
+  /* ---------- error banner ---------- */
   #error-banner {
-    display: none; background: var(--red-soft); border-bottom: 2px solid var(--red);
-    color: var(--red); padding: 10px 22px; font-size: 13px; font-weight: 600;
+    display: none;
+    background: #3b1414;
+    border-bottom: 1px solid var(--red);
+    color: #fecaca;
+    padding: 10px 20px;
+    font-size: 13px;
   }
   #error-banner.show { display: block; }
-  #main { padding: 18px 22px 8px; flex: 1; max-width: 1400px; width: 100%; margin: 0 auto; }
-  .panel-title { font-size: 17px; font-weight: 800; margin: 18px 0 10px; display: flex; align-items: center; gap: 8px; }
-  #stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-  @media (max-width: 1100px) { #stations { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 560px) { #stations { grid-template-columns: 1fr; } }
-  .char-card {
-    background: var(--card); border: 2px solid var(--border); border-radius: 20px;
-    padding: 16px 14px 12px; text-align: center;
-    box-shadow: 0 4px 14px rgba(180, 130, 70, .10);
-    transition: transform .15s, box-shadow .4s, border-color .4s;
+
+  /* ---------- layout ---------- */
+  #main {
+    display: grid;
+    grid-template-columns: 300px 1fr 340px;
+    gap: 14px;
+    padding: 14px 20px;
+    flex: 1;
+    align-items: start;
   }
-  .char-card:hover { transform: translateY(-2px); }
-  .char-card.flash { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft), 0 6px 18px rgba(232, 131, 58, .35); }
-  .char-emoji { font-size: 52px; line-height: 1; display: inline-block; }
-  .char-card.working .char-emoji { animation: bounce .7s infinite; }
-  @keyframes bounce { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-8px) rotate(4deg); } }
-  .char-name { font-size: 17px; font-weight: 800; margin-top: 8px; }
-  .char-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--dim); margin-bottom: 8px; }
-  .char-status { font-size: 13px; font-weight: 600; color: var(--dim); min-height: 20px; margin-bottom: 10px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .char-card.working .char-status { color: var(--accent); font-weight: 800; }
-  .char-stats { display: flex; justify-content: center; gap: 14px; border-top: 2px dashed var(--border); padding-top: 8px; font-size: 12px; }
-  .char-stats .s { display: flex; flex-direction: column; }
-  .char-stats .s-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); font-weight: 700; }
-  .char-stats .s-value { font-weight: 800; font-variant-numeric: tabular-nums; font-size: 14px; }
-  .char-big { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; border-top: 2px dashed var(--border); padding-top: 8px; }
-  .char-sub { font-size: 12px; color: var(--dim); font-weight: 600; margin-top: 2px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #lower { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
-  @media (max-width: 900px) { #lower { grid-template-columns: 1fr; } }
-  .panel { background: var(--card); border: 2px solid var(--border); border-radius: 20px; padding: 16px;
-    box-shadow: 0 4px 14px rgba(180, 130, 70, .10); }
-  .panel h2 { font-size: 15px; font-weight: 800; margin-bottom: 12px; }
-  .biz-row { display: flex; align-items: center; gap: 10px; background: var(--bg);
-    border: 2px solid var(--border); border-radius: 14px; padding: 10px 14px; margin-bottom: 8px; }
-  .biz-row .biz-emoji { font-size: 26px; }
-  .biz-row .biz-info { flex: 1; min-width: 0; }
-  .biz-row .biz-name { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .biz-row .biz-type { font-size: 11px; color: var(--dim); font-weight: 600; }
-  .status-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
-    padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
-  .status-badge.researching { background: var(--blue-soft); color: var(--blue); }
-  .status-badge.validated { background: var(--purple-soft); color: var(--purple); }
-  .status-badge.approved, .status-badge.live, .status-badge.operating { background: var(--green-soft); color: var(--green); }
-  .status-badge.building { background: var(--amber-soft); color: var(--amber); }
-  .status-badge.paused, .status-badge.shut_down { background: var(--red-soft); color: var(--red); }
-  .status-badge.proposed, .status-badge.discovered { background: var(--bg2); color: var(--dim); }
-  .biz-profit { font-weight: 800; font-variant-numeric: tabular-nums; font-size: 15px; }
-  .empty-note { color: var(--dim); font-style: italic; padding: 14px; text-align: center; }
-  #events-panel { max-height: 420px; display: flex; flex-direction: column; }
-  #events-feed { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
-  .event-row { background: var(--bg); border: 2px solid var(--border); border-radius: 12px;
-    padding: 8px 12px; font-size: 13px; line-height: 1.4; }
-  .event-row .e-voice { font-weight: 600; }
-  .event-row .e-meta { font-size: 11px; color: var(--dim); font-weight: 600; margin-top: 2px; }
-  .event-row.fresh { border-color: var(--accent); background: var(--accent-soft); }
+  @media (max-width: 1100px) {
+    #main { grid-template-columns: 1fr 1fr; }
+    #events-panel { grid-column: 1 / -1; }
+  }
+  @media (max-width: 760px) {
+    #main { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--dim);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+
+  /* ---------- agents ---------- */
+  #agents { display: flex; flex-direction: column; gap: 10px; }
+  .agent-card {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: box-shadow .4s, border-color .4s;
+  }
+  .agent-card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .agent-card .icon { font-size: 22px; }
+  .agent-card .name { font-weight: 700; font-size: 14px; text-transform: capitalize; }
+  .agent-card .type { font-size: 11px; color: var(--dim); font-family: monospace; }
+  .agent-card .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; font-size: 12px; }
+  .agent-card .stats .s-label { color: var(--dim); font-size: 10px; text-transform: uppercase; }
+  .agent-card .stats .s-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .agent-card .last-task {
+    margin-top: 6px; font-size: 12px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .agent-card.flash {
+    border-color: var(--green);
+    box-shadow: 0 0 14px rgba(52,211,153,.55);
+  }
+
+  /* ---------- businesses ---------- */
+  #businesses-list { display: flex; flex-direction: column; gap: 8px; }
+  .biz-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .biz-row .biz-name { font-weight: 600; }
+  .biz-row .biz-type { font-size: 11px; color: var(--dim); font-family: monospace; }
+  .status-badge {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 12px; letter-spacing: .5px;
+    border: 1px solid;
+  }
+  .status-badge.researching { color: var(--blue); border-color: var(--blue); }
+  .status-badge.validated { color: var(--purple); border-color: var(--purple); }
+  .status-badge.approved { color: var(--green); border-color: var(--green); }
+  .status-badge.building { color: var(--orange); border-color: var(--orange); }
+  .status-badge.live, .status-badge.operating { color: var(--green); border-color: var(--green); background: rgba(52,211,153,.1); }
+  .status-badge.paused, .status-badge.shut_down { color: var(--red); border-color: var(--red); }
+  .status-badge.proposed, .status-badge.discovered { color: var(--dim); border-color: var(--dim); }
+  .biz-profit { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+  .empty-note { color: var(--dim); font-style: italic; padding: 12px; text-align: center; }
+
+  /* ---------- experiment 001 ---------- */
   #exp001 { margin-top: 14px; }
   #exp001.hidden { display: none; }
-  .exp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
-  @media (max-width: 560px) { .exp-grid { grid-template-columns: repeat(2, 1fr); } }
-  .exp-cell { background: var(--bg); border: 2px solid var(--border); border-radius: 14px; padding: 10px 12px; text-align: center; }
-  .exp-cell .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; font-weight: 800; }
-  .exp-cell .value { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .exp-cell { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .exp-cell .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; }
+  .exp-cell .value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
   #exp-triggers { list-style: none; }
-  #exp-triggers li { font-size: 13px; font-weight: 600; color: var(--red); background: var(--red-soft);
-    border-radius: 10px; padding: 8px 12px; margin-top: 6px; }
-  #exp-triggers li.ok { color: var(--green); background: var(--green-soft); }
+  #exp-triggers li {
+    font-size: 12px; color: var(--red);
+    background: rgba(248,113,113,.08);
+    border: 1px solid rgba(248,113,113,.3);
+    border-radius: 6px; padding: 6px 10px; margin-top: 6px;
+  }
+  #exp-triggers li.ok { color: var(--green); background: rgba(52,211,153,.06); border-color: rgba(52,211,153,.25); }
+
+  /* ---------- events ---------- */
+  #events-panel { display: flex; flex-direction: column; max-height: calc(100vh - 190px); }
+  #events-feed { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+  .event-row {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .event-row .e-time { color: var(--dim); font-family: monospace; white-space: nowrap; font-size: 11px; }
+  .event-row .e-actor { color: var(--accent); font-weight: 700; white-space: nowrap; }
+  .event-row .e-text { color: var(--text); word-break: break-word; }
+  .event-row.fresh { border-color: var(--accent); }
+
+  /* ---------- controls ---------- */
   #controls {
-    display: flex; align-items: center; gap: 10px; padding: 14px 22px;
-    background: #fffaf0; border-top: 3px solid var(--border);
-    position: sticky; bottom: 0; flex-wrap: wrap;
-    max-width: 1400px; width: 100%; margin: 18px auto 0;
-    border-left: 3px solid var(--border); border-right: 3px solid var(--border);
-    border-radius: 20px 20px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: #0e1320;
+    border-top: 2px solid var(--border);
+    position: sticky;
+    bottom: 0;
+    flex-wrap: wrap;
   }
   button, select {
-    background: var(--card); color: var(--ink); border: 2px solid var(--border);
-    border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 800;
-    cursor: pointer; font-family: inherit;
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
   }
-  button:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-1px); }
-  button:disabled { opacity: .4; cursor: not-allowed; transform: none; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.danger { background: var(--card); border-color: var(--red); color: var(--red); }
-  button.active-toggle { background: var(--green); border-color: var(--green); color: #fff; }
+  button:hover:not(:disabled) { border-color: var(--accent); background: #222c40; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #0e3a4a; border-color: var(--accent); }
+  button.danger { background: #3b1414; border-color: var(--red); }
+  button.active-toggle { background: #123f2a; border-color: var(--green); color: var(--green); }
   #controls .spacer { flex: 1; }
-  #controls .hint { font-size: 12px; color: var(--dim); font-weight: 600; }
-  #controls a.pill {
-    background: var(--card); color: var(--ink); border: 2px solid var(--border);
-    border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 800;
-    text-decoration: none; display: inline-block; font-family: inherit;
-  }
-  #controls a.pill:hover { border-color: var(--accent); transform: translateY(-1px); }
-
-  /* ---------- mobile (phone-first: 390px and up) ---------- */
-  body { overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
-  @media (max-width: 560px) {
-    #main { padding: 14px 14px 8px; }
-    #hud { padding: 10px 14px; gap: 10px; }
-    #hud .title { font-size: 18px; }
-    #tick-badge { font-size: 11px; padding: 5px 12px; }
-    .hud-stat { min-width: 68px; }
-    .hud-stat .value { font-size: 17px; }
-    #verdict-chip { margin-left: 0; font-size: 12px; padding: 6px 12px; }
-    .panel-title { font-size: 15px; margin: 14px 0 8px; }
-    .char-emoji { font-size: 44px; }
-    .char-card { padding: 14px 10px 10px; }
-    .char-name { font-size: 15px; }
-    #events-panel { max-height: 320px; }
-    .exp-cell { padding: 8px 8px; }
-    .exp-cell .value { font-size: 17px; }
-    .biz-row { padding: 10px 12px; gap: 8px; }
-    .biz-row .biz-emoji { font-size: 22px; }
-    #controls { padding: 12px 14px; gap: 8px; }
-    #controls > button, #controls > select, #controls > a.pill { flex: 1 1 44%; min-height: 48px; font-size: 15px; }
-    #controls .spacer { display: none; }
-    #controls .hint { flex-basis: 100%; text-align: center; }
-  }
+  #controls .hint { font-size: 12px; color: var(--dim); }
 </style>
 </head>
 <body>
+
 <header id="hud">
-  <div class="title">🌱 Ecosystem Tycoon</div>
-  <div id="tick-badge">TICK –</div>
+  <div class="logo">🤖 ECO<span>SYSTEM</span> OPS</div>
+  <div class="hud-stat"><span class="label">Tick</span><span class="value" id="tick-value">–</span></div>
+  <div class="hud-stat"><span class="label">Businesses</span><span class="value" id="hud-businesses">–</span></div>
   <div class="hud-stat"><span class="label">Revenue</span><span class="value" id="hud-revenue">–</span></div>
   <div class="hud-stat"><span class="label">Costs</span><span class="value" id="hud-costs">–</span></div>
   <div class="hud-stat"><span class="label">Net profit</span><span class="value" id="hud-profit">–</span></div>
-  <div id="verdict-chip" style="display:none"></div>
-  <div id="live-wrap"><span id="live-dot"></span><span id="live-label">LIVE</span></div>
+  <div id="verdict-chip" class="hidden" style="display:none"></div>
+  <div><span id="live-dot"></span><span id="live-label">LIVE</span></div>
 </header>
+
 <div id="error-banner"></div>
+
 <div id="main">
-  <div class="panel-title">⭐ Your Crew</div>
-  <section id="stations"></section>
-  <div id="lower">
+  <section class="panel" id="agents-panel">
+    <h2>⚡ Agent Stations</h2>
+    <div id="agents"></div>
+  </section>
+
+  <section>
     <div class="panel" id="businesses-panel">
-      <h2>🏪 Businesses</h2>
+      <h2>🏢 Businesses</h2>
       <div id="businesses-list"></div>
     </div>
-    <div class="panel" id="events-panel">
-      <h2>📣 What Just Happened</h2>
-      <div id="events-feed"></div>
+    <div class="panel" id="exp001">
+      <h2>🧪 Experiment 001 — Evergreen Planners</h2>
+      <div class="exp-grid">
+        <div class="exp-cell"><div class="label">Day</div><div class="value" id="exp-day">–</div></div>
+        <div class="exp-cell"><div class="label">Pace</div><div class="value" id="exp-pace">–</div></div>
+        <div class="exp-cell"><div class="label">Orders</div><div class="value" id="exp-orders">–</div></div>
+        <div class="exp-cell"><div class="label">Revenue</div><div class="value" id="exp-revenue">–</div></div>
+        <div class="exp-cell"><div class="label">Spend</div><div class="value" id="exp-spend">–</div></div>
+        <div class="exp-cell"><div class="label">Verdict</div><div class="value" id="exp-verdict">–</div></div>
+      </div>
+      <h2 style="margin-top:4px">Stop-loss triggers</h2>
+      <ul id="exp-triggers"></ul>
     </div>
-  </div>
-  <div class="panel" id="exp001">
-    <h2>🧪 Experiment 001 — Evergreen Planners</h2>
-    <div class="exp-grid">
-      <div class="exp-cell"><div class="label">Day</div><div class="value" id="exp-day">–</div></div>
-      <div class="exp-cell"><div class="label">Pace</div><div class="value" id="exp-pace">–</div></div>
-      <div class="exp-cell"><div class="label">Verdict</div><div class="value" id="exp-verdict">–</div></div>
-      <div class="exp-cell"><div class="label">Orders</div><div class="value" id="exp-orders">–</div></div>
-      <div class="exp-cell"><div class="label">Revenue</div><div class="value" id="exp-revenue">–</div></div>
-      <div class="exp-cell"><div class="label">Spend</div><div class="value" id="exp-spend">–</div></div>
-    </div>
-    <ul id="exp-triggers"></ul>
-  </div>
+  </section>
+
+  <section class="panel" id="events-panel">
+    <h2>📡 Event Feed</h2>
+    <div id="events-feed"></div>
+  </section>
 </div>
+
 <footer id="controls">
   <button id="btn-step" class="primary">⏭ Step</button>
   <button id="btn-auto">▶ Auto</button>
@@ -238,10 +294,10 @@
   </select>
   <button id="btn-pause">⏸ Pause</button>
   <button id="btn-reset" class="danger">↺ Reset</button>
-  <a class="pill" href="/report">📊 Report</a>
   <span class="spacer"></span>
-  <span class="hint">Step = one real orchestrator tick · Auto runs ticks on the speed interval</span>
+  <span class="hint">Step = one real orchestrator tick · Auto polls on the speed interval</span>
 </footer>
+
 <script>
 "use strict";
 
@@ -256,38 +312,35 @@ const fmtUSD = (n) => {
 };
 const fmtInt = (n) => (Number(n) || 0).toLocaleString("en-US");
 const fmtTime = (ts) => {
-  if (ts == null || ts === "") return "";
-  const ms = Number(ts);
+  if (ts == null || ts === "") return "—";
+  let ms = Number(ts);
   if (!isNaN(ms)) {
-    const t = ms < 1e12 ? ms * 1000 : ms;
-    return new Date(t).toLocaleTimeString("en-US", { hour12: false });
+    if (ms < 1e12) ms *= 1000; // epoch seconds -> ms
+    return new Date(ms).toLocaleTimeString("en-US", { hour12: false });
   }
   const d = new Date(ts);
-  return isNaN(d) ? "" : d.toLocaleTimeString("en-US", { hour12: false });
+  return isNaN(d) ? esc(ts) : d.toLocaleTimeString("en-US", { hour12: false });
 };
 
-/* ---------------- the crew (fixed roster) ---------------- */
-const ROSTER = [
-  { name: "Scout",   emoji: "🔭", role: "Discovery",   agentType: "discovery" },
-  { name: "Analyst", emoji: "🔬", role: "Research",    agentType: "research" },
-  { name: "Builder", emoji: "🛠️", role: "Product",     agentType: null },
-  { name: "Studio",  emoji: "🎨", role: "Creative",    agentType: "creative" },
-  { name: "Growth",  emoji: "📣", role: "Marketing",   agentType: "marketing" },
-  { name: "Care",    emoji: "💬", role: "Support",     agentType: "support" },
-  { name: "Ops",     emoji: "⚙️", role: "Operations",  agentType: "operations" },
-  { name: "Ledger",  emoji: "📒", role: "Finance",     agentType: null },
-];
-// Agent types that actually execute work during a tick (see ecosystem/worker.py run_tick)
-const TICK_WORKERS = ["discovery", "research"];
-const VERDICT_LABEL = { ON_TRACK: "🟢 ON TRACK", BEHIND: "🟡 BEHIND", STOP_LOSS: "🔴 STOP LOSS" };
+const AGENT_ICONS = {
+  discovery: "🔭",
+  research: "🔬",
+  marketing: "📣",
+  support: "💬",
+  creative: "🎨",
+  operations: "⚙️",
+};
+const iconFor = (type) => AGENT_ICONS[String(type || "").toLowerCase()] || "🤖";
+const VERDICT_LABEL = { ON_TRACK: "ON TRACK", BEHIND: "BEHIND", STOP_LOSS: "STOP LOSS" };
 
 /* ---------------- state ---------------- */
 const state = {
   snapshot: null,
-  prevTasks: {},       // agentType -> tasks_completed, for flash highlight
+  prevTasks: {},       // agent type -> tasks_completed, for flash highlight
   auto: false,
   autoTimer: null,
   tickInFlight: false,
+  eventIds: new Set(),
 };
 
 /* ---------------- api ---------------- */
@@ -296,16 +349,17 @@ async function api(path, method) {
   if (!res.ok) throw new Error("HTTP " + res.status + " on " + path);
   return res.json();
 }
+
 function showError(msg) {
   const b = $("error-banner");
-  b.textContent = "⚠ Can't reach the game server: " + msg + " — retrying…";
+  b.textContent = "⚠ API unreachable: " + msg + " — retrying…";
   b.classList.add("show");
 }
 function hideError() { $("error-banner").classList.remove("show"); }
 function pulseLive() {
   const d = $("live-dot");
   d.classList.remove("on");
-  void d.offsetWidth;
+  void d.offsetWidth; // restart animation
   d.classList.add("on");
 }
 
@@ -313,7 +367,7 @@ function pulseLive() {
 function render(snapshot) {
   state.snapshot = snapshot;
   renderHUD(snapshot);
-  renderStations(snapshot);
+  renderAgents(snapshot.agents || []);
   renderBusinesses(snapshot.businesses || []);
   renderEvents(snapshot.events || []);
   renderExperiment(snapshot.experiment_001);
@@ -321,76 +375,54 @@ function render(snapshot) {
 }
 
 function renderHUD(s) {
-  $("tick-badge").textContent = "TICK " + (s.tick != null ? s.tick : "–");
+  $("tick-value").textContent = s.tick != null ? "#" + s.tick : "–";
   const t = s.totals || {};
+  $("hud-businesses").textContent = t.businesses != null ? fmtInt(t.businesses) : "–";
   $("hud-revenue").textContent = fmtUSD(t.revenue);
   $("hud-costs").textContent = fmtUSD(t.total_costs);
   const p = $("hud-profit");
   p.textContent = fmtUSD(t.net_profit);
   p.className = "value " + ((Number(t.net_profit) || 0) >= 0 ? "pos" : "neg");
+
   const chip = $("verdict-chip");
   const e = s.experiment_001;
   if (e && e.verdict) {
     chip.style.display = "";
     chip.className = e.verdict;
-    chip.textContent = VERDICT_LABEL[e.verdict] || e.verdict;
+    chip.textContent = "EXP-001 · " + (VERDICT_LABEL[e.verdict] || e.verdict);
   } else {
     chip.style.display = "none";
   }
 }
 
-function renderStations(s) {
-  const wrap = $("stations");
-  const byType = {};
-  for (const a of (s.agents || [])) byType[String(a.type || "").toLowerCase()] = a;
-  const totals = s.totals || {};
-  const businesses = s.businesses || [];
+function renderAgents(agents) {
+  const wrap = $("agents");
   wrap.innerHTML = "";
-  for (const c of ROSTER) {
-    const card = document.createElement("div");
-    card.className = "char-card";
-    let inner = '<div class="char-emoji">' + c.emoji + "</div>" +
-      '<div class="char-name">' + esc(c.name) + "</div>" +
-      '<div class="char-role">' + esc(c.role) + "</div>";
+  if (!agents.length) {
+    wrap.innerHTML = '<div class="empty-note">No agents registered.</div>';
+    return;
+  }
+  for (const a of agents) {
+    const type = a.type || "unknown";
+    const tasks = Number(a.tasks_completed) || 0;
+    const prev = state.prevTasks[type];
+    const increased = prev != null && tasks > prev;
+    state.prevTasks[type] = tasks;
 
-    if (c.agentType) {
-      // Real agent station: stats come from the API's agents array.
-      const a = byType[c.agentType] || {};
-      const tasks = Number(a.tasks_completed) || 0;
-      const prev = state.prevTasks[c.agentType];
-      const increased = prev != null && tasks > prev;
-      state.prevTasks[c.agentType] = tasks;
-      const working = state.tickInFlight && TICK_WORKERS.indexOf(c.agentType) !== -1;
-      if (working) card.classList.add("working");
-      if (increased) card.classList.add("flash");
-      const statusText = working ? "Working…" : (a.last_task ? a.last_task : "Standing by");
-      inner += '<div class="char-status"' +
-        ((a.last_task && !working) ? ' title="' + esc(a.last_task) + '"' : "") + ">" +
-        (working ? "⚡ " : "▸ ") + esc(statusText) + "</div>";
-      inner += '<div class="char-stats">' +
-        '<div class="s"><span class="s-label">Tasks ✓</span><span class="s-value">' + fmtInt(tasks) + "</span></div>" +
-        '<div class="s"><span class="s-label">Tokens</span><span class="s-value">' + fmtInt(a.tokens_used) + "</span></div>" +
-        '<div class="s"><span class="s-label">Cost</span><span class="s-value">' + fmtUSD(a.cost_usd) + "</span></div>" +
-        "</div>";
-      if (increased) setTimeout(() => card.classList.remove("flash"), 1400);
-    } else if (c.name === "Builder") {
-      // Product station: derived from totals + businesses (no agent_type).
-      const n = Number(totals.businesses) || 0;
-      const latest = businesses.length ? businesses[businesses.length - 1] : null;
-      inner += '<div class="char-big">' + fmtInt(n) + ' <span style="font-size:14px">🏪</span></div>' +
-        '<div class="char-sub" title="' + esc(latest ? latest.name : "") + '">' +
-        esc(latest ? "Latest: " + latest.name : "No businesses yet — press Step") + "</div>";
-    } else {
-      // Ledger station: real ledger totals (no agent_type).
-      const profit = Number(totals.net_profit) || 0;
-      inner += '<div class="char-stats">' +
-        '<div class="s"><span class="s-label">Revenue</span><span class="s-value pos">' + fmtUSD(totals.revenue) + "</span></div>" +
-        '<div class="s"><span class="s-label">Costs</span><span class="s-value">' + fmtUSD(totals.total_costs) + "</span></div>" +
-        '<div class="s"><span class="s-label">Net</span><span class="s-value ' + (profit >= 0 ? "pos" : "neg") + '">' + fmtUSD(profit) + "</span></div>" +
-        "</div>";
-    }
-    card.innerHTML = inner;
+    const card = document.createElement("div");
+    card.className = "agent-card" + (increased ? " flash" : "");
+    card.innerHTML =
+      '<div class="head"><span class="icon">' + iconFor(type) + '</span>' +
+      '<div><div class="name">' + esc(type) + '</div>' +
+      '<div class="type">' + esc(type) + ' · agent</div></div></div>' +
+      '<div class="stats">' +
+      '<div><div class="s-label">Tasks</div><div class="s-value">' + fmtInt(tasks) + '</div></div>' +
+      '<div><div class="s-label">Tokens</div><div class="s-value">' + fmtInt(a.tokens_used) + '</div></div>' +
+      '<div><div class="s-label">Cost</div><div class="s-value">' + fmtUSD(a.cost_usd) + '</div></div>' +
+      '</div>' +
+      '<div class="last-task" title="' + esc(a.last_task) + '">▸ ' + esc(a.last_task || "idle") + '</div>';
     wrap.appendChild(card);
+    if (increased) setTimeout(() => card.classList.remove("flash"), 1200);
   }
 }
 
@@ -398,7 +430,7 @@ function renderBusinesses(businesses) {
   const wrap = $("businesses-list");
   wrap.innerHTML = "";
   if (!businesses.length) {
-    wrap.innerHTML = '<div class="empty-note">No businesses yet — press Step and the crew will get to work! 🚀</div>';
+    wrap.innerHTML = '<div class="empty-note">No businesses yet — press Step or enable Auto.</div>';
     return;
   }
   for (const b of businesses) {
@@ -406,49 +438,33 @@ function renderBusinesses(businesses) {
     const row = document.createElement("div");
     row.className = "biz-row";
     row.innerHTML =
-      '<span class="biz-emoji">🏪</span>' +
-      '<div class="biz-info"><div class="biz-name">' + esc(b.name) + "</div>" +
-      '<div class="biz-type">' + esc(b.business_type || "") + "</div></div>" +
-      '<span class="status-badge ' + esc(String(b.status || "").toLowerCase()) + '">' + esc(b.status || "?") + "</span>" +
-      '<div class="biz-profit ' + (profit >= 0 ? "pos" : "neg") + '">' + fmtUSD(profit) + "</div>";
+      '<div><div class="biz-name">' + esc(b.name) + '</div>' +
+      '<div class="biz-type">' + esc(b.business_type || "") + ' · ' + esc(b.id || "") + '</div></div>' +
+      '<span class="status-badge ' + esc(String(b.status || "").toLowerCase()) + '">' + esc(b.status || "?") + '</span>' +
+      '<div class="biz-profit ' + (profit >= 0 ? "pos" : "neg") + '">' + fmtUSD(profit) + '</div>';
     wrap.appendChild(row);
   }
 }
 
-function eventVoice(e) {
-  // Game-voice interpretations of real audit events (newest data wins).
-  const r = e.result;
-  if (r && r.winner != null) {
-    const tick = (r.tick != null) ? "T" + r.tick + " · " : "";
-    return tick + "Analyst ranked the opportunities — '" + r.winner + "' wins (" + r.score + ")";
-  }
-  if (e.event === "stop_loss_triggered") return "⛔ Stop-loss triggered — check Experiment 001!";
-  if (e.event === "tick_completed") {
-    const who = e.actor === "game" ? "The crew" : (e.actor || "Someone");
-    return who + " finished a tick" + (e.business_id ? " and launched a business! 🎉" : ".");
-  }
-  return (e.actor || "system") + " — " + (e.event || "");
-}
-
 function renderEvents(events) {
   const feed = $("events-feed");
+  // newest first
+  const sorted = [...events].reverse();
   feed.innerHTML = "";
   let shown = 0;
-  for (const e of events) {  // API sends newest-first already
+  for (const e of sorted) {
     if (shown >= 100) break;
     const row = document.createElement("div");
-    row.className = "event-row" + (shown === 0 ? " fresh" : "");
-    const metaBits = [];
-    const t = fmtTime(e.ts);
-    if (t) metaBits.push(t);
-    const ids = [e.business_id, e.task_id].filter(Boolean).join(" · ");
-    if (ids) metaBits.push(ids);
-    row.innerHTML = '<div class="e-voice">' + esc(eventVoice(e)) + "</div>" +
-      (metaBits.length ? '<div class="e-meta">' + esc(metaBits.join(" · ")) + "</div>" : "");
+    row.className = "event-row";
+    const detail = [e.business_id, e.task_id].filter(Boolean).map(esc).join(" · ");
+    row.innerHTML =
+      '<span class="e-time">' + esc(fmtTime(e.ts)) + '</span>' +
+      '<span class="e-actor">' + esc(e.actor || "system") + '</span>' +
+      '<span class="e-text">' + esc(e.event || "") + (detail ? ' <span style="color:var(--dim)">[' + detail + ']</span>' : '') + '</span>';
     feed.appendChild(row);
     shown++;
   }
-  if (!shown) feed.innerHTML = '<div class="empty-note">Quiet… for now. Press Step! 🎲</div>';
+  if (!shown) feed.innerHTML = '<div class="empty-note">No events yet.</div>';
   feed.scrollTop = 0;
 }
 
@@ -458,20 +474,21 @@ function renderExperiment(e) {
   panel.classList.remove("hidden");
   $("exp-day").textContent = e.days_elapsed + " / 60";
   $("exp-pace").textContent = (e.pace_pct != null ? e.pace_pct + "%" : "–");
-  const v = $("exp-verdict");
-  v.textContent = (VERDICT_LABEL[e.verdict] || e.verdict || "–");
-  v.className = "value " + (e.verdict === "ON_TRACK" ? "pos" : e.verdict === "STOP_LOSS" ? "neg" : "");
-  if (e.verdict === "BEHIND") v.style.color = "var(--amber)"; else v.style.color = "";
   $("exp-orders").textContent = fmtInt(e.orders);
   $("exp-revenue").textContent = fmtUSD(e.revenue_usd);
   $("exp-spend").textContent = fmtUSD(e.spend_usd);
+  const v = $("exp-verdict");
+  v.textContent = VERDICT_LABEL[e.verdict] || e.verdict || "–";
+  v.className = "value " + (e.verdict === "ON_TRACK" ? "pos" : e.verdict === "BEHIND" ? "" : "neg");
+  if (e.verdict === "BEHIND") v.style.color = "var(--orange)"; else v.style.color = "";
+
   const ul = $("exp-triggers");
   ul.innerHTML = "";
   const triggers = e.stop_loss_triggers || [];
   if (!triggers.length) {
     const li = document.createElement("li");
     li.className = "ok";
-    li.textContent = "✅ No stop-loss triggers active. Smooth sailing!";
+    li.textContent = "✓ No stop-loss triggers active.";
     ul.appendChild(li);
   } else {
     for (const t of triggers) {
@@ -497,7 +514,6 @@ async function doTick() {
   if (state.tickInFlight) return;
   state.tickInFlight = true;
   updateButtons();
-  renderStations(state.snapshot || { agents: [], totals: {}, businesses: [] });
   try {
     const res = await api("/api/tick", "POST");
     hideError();
@@ -507,12 +523,11 @@ async function doTick() {
   } finally {
     state.tickInFlight = false;
     updateButtons();
-    if (state.snapshot) renderStations(state.snapshot);
   }
 }
 
 async function doReset() {
-  if (!confirm("Reset the game? Your whole crew's progress will be lost!")) return;
+  if (!confirm("Reset the simulation? All progress will be lost.")) return;
   stopAuto();
   try {
     const res = await api("/api/reset", "POST");
@@ -557,7 +572,7 @@ $("btn-auto").addEventListener("click", startAuto);
 $("btn-pause").addEventListener("click", stopAuto);
 $("btn-reset").addEventListener("click", doReset);
 $("speed").addEventListener("change", () => {
-  if (state.auto) { stopAuto(); startAuto(); }
+  if (state.auto) { stopAuto(); startAuto(); } // restart at new speed
 });
 
 updateButtons();

@@ -118,6 +118,12 @@ def run_tick(rt, tick: int) -> dict:
     winner = ranked[0] if ranked else None
 
     ai_spend = r1.cost_usd + r2.cost_usd
+    runs = [
+        {"agent_type": "discovery", "tokens_used": r1.tokens_used,
+         "cost_usd": r1.cost_usd},
+        {"agent_type": "research", "tokens_used": r2.tokens_used,
+         "cost_usd": r2.cost_usd},
+    ]
     business_id = None
     if winner is not None:
         biz = rt.businesses.create(winner.niche, winner.business_type)
@@ -140,6 +146,7 @@ def run_tick(rt, tick: int) -> dict:
         "score": winner.score if winner else None,
         "business_id": business_id,
         "ai_spend_usd": round(ai_spend, 4),
+        "runs": runs,
     }
 
 
