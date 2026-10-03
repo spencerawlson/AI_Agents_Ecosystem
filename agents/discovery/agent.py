@@ -67,12 +67,6 @@ class DiscoveryAgent(BaseAgent):
 
     def run(self, task: Task) -> dict:
         raw = self.source.fetch(task.inputs)
-        usage = getattr(self.source, "last_usage", None)
-        if usage:  # real LLM usage: true tokens + true cost
-            self.record_usage(task, tokens=usage["tokens"],
-                              cost_usd=usage["cost_usd"])
-        else:  # heuristic fallback accounting
-            self.record_usage(task, tokens=200 * len(raw),
-                              cost_usd=0.01 * len(raw))
+        self.record_usage(task, tokens=200 * len(raw), cost_usd=0.01 * len(raw))
         opportunities = [Opportunity(**item).model_dump() for item in raw]
         return {"opportunities": opportunities, "count": len(opportunities)}
