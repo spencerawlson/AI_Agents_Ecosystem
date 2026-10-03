@@ -112,16 +112,4 @@ class CreativeAgent(BaseAgent):
                     for t in {a.asset_type for a in self._assets.values()}
                 },
             }
-        if action == "brief":
-            title = task.inputs.get("title", "untitled")
-            description = task.inputs.get("description", "")
-            business_id = task.business_id or "unknown"
-            asset = self.create(business_id, "copy", title, description)
-            self.record_usage(task, tokens=800, cost_usd=0.02)
-            return {
-                "asset_id": asset.id,
-                "title": title,
-                "status": "briefed",
-                "next": "human reviews brief, produces final product",
-            }
         raise ValueError(f"unknown action: {action}")
