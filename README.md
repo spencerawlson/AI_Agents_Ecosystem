@@ -165,6 +165,27 @@ python launch.py initdb
 python launch.py all --use-postgres
 ```
 
+### Experiment 001 monitor (Etsy)
+
+The worker automatically checks the live Etsy shop against the experiment
+charter ($1,000 / 60 days, 84+ orders, stop-loss triggers) every 10 ticks:
+
+```bash
+python launch.py worker -- --monitor-every 5   # check every 5 ticks
+python launch.py worker -- --monitor-once      # single check, then exit
+python launch.py worker -- --monitor-every 0   # disable
+```
+
+Status is also live at `http://<vm-ip>:8000/experiment-001` on the dashboard.
+OAuth tokens auto-refresh; credentials resolve from `ETSY_*` env vars or
+`~/.config/evergreen-etsy/`. Ad/fee spend isn't visible via the Etsy API —
+record it with:
+
+```bash
+python -c "from ecosystem.etsy_monitor import EtsyMonitor;
+print(EtsyMonitor.record_spend(10.0, 'Etsy Ads top-up'))"
+```
+
 ## Status
 
 Phases 1–4 scaffolded and tested (36/36 passing). Next: pick the first real experiment — one low-capital business, defined budget, KPIs, duration, stop-loss — and run it toward the $1,000 revenue / positive-unit-economics milestone. See [docs/roadmap.md](docs/roadmap.md).
