@@ -192,6 +192,56 @@ python -c "from ecosystem.etsy_monitor import EtsyMonitor;
 print(EtsyMonitor.record_spend(10.0, 'Etsy Ads top-up'))"
 ```
 
+### Real LLM inference
+
+Agents run on heuristics by default. With an API key, discovery and
+research use real LLM inference (cheap tier), and capital allocation
+gets smart-tier rationales — all fallback-safe (any LLM failure
+degrades to heuristics, never crashes a tick):
+
+```bash
+# 1. Key: OpenAI dashboard (https://platform.openai.com/api-keys) → Create key
+# 2. On the VM:
+export OPENAI_API_KEY="sk-..."         # also in ~/.bashrc or the systemd unit
+pip install -r requirements.txt      # pulls litellm
+python launch.py worker -- --llm     # force LLM mode
+python launch.py worker -- --no-llm  # force heuristics (default when no key)
+```
+
+Env overrides: `ECOSYSTEM_CHEAP_MODEL` (default `gpt-6-luna`),
+`ECOSYSTEM_SMART_MODEL` (default `gpt-6.1-sol`).
+`GEMINI_API_KEY` / `ANTHROPIC_API_KEY` also work — the model strings are
+litellm names, so any provider can be swapped in.
+
+Routing: tier 1–2 tasks (discovery, research) → cheap model; tier 3
+(capital allocation rationales) → smart model. Real token usage and
+cost (via `litellm.completion_cost`) flow through the same budget
+enforcement and Ledger accounting as before — expect **cents per
+hundred ticks** (real inference is ~50–100x cheaper than the old
+heuristic cost rates).
+
+### Real market data
+
+When LLM mode is on, prompts are grounded in live market numbers —
+Etsy listing counts + price bands and 12-month Google Trends direction —
+so `why_now` and competitor evidence cite real data instead of guesses:
+
+```bash
+python launch.py worker -- --no-market  # disable (default: ON with LLM)
+```
+
+- **Sources:** Etsy `listings/active` search (reuses the shop's existing
+  OAuth token — no new key; token auto-refreshes on 401) and Google
+  Trends via `pytrends` (keyless).
+- **Discovery** sees a `LIVE MARKET DATA` block for watchlist niches and
+  is instructed to prefer rising trends + healthy price bands.
+- **Research** gets the niche's real competitor count and price band and
+  must use them for `competitor_count` / `price_range_usd`.
+- **Rate limits:** snapshots are TTL-cached per keyword set (1h default),
+  so repeated ticks don't hammer the APIs. If one source fails, the
+  prompt still goes out with the other's data (`partial`); only if both
+  fail does the prompt go data-free. A data failure never crashes a tick.
+
 ## Status
 
 Phases 1–4 scaffolded and tested (36/36 passing). Next: pick the first real experiment — one low-capital business, defined budget, KPIs, duration, stop-loss — and run it toward the $1,000 revenue / positive-unit-economics milestone. See [docs/roadmap.md](docs/roadmap.md).

@@ -70,7 +70,7 @@ def test_gateway_complete_parses_json_and_cost(monkeypatch):
     gw = LLMGateway()
     out = gw.complete('{"opportunities": []}', tier="cheap")
     assert out["json"] == {"opportunities": []}
-    assert out["model"] == "gemini/gemini-2.5-flash"
+    assert out["model"] == "gpt-6-luna"
     assert out["input_tokens"] == 120
     assert out["output_tokens"] == 60
     assert out["cost_usd"] == pytest.approx(0.004)
@@ -129,7 +129,7 @@ def test_model_env_override(monkeypatch):
     monkeypatch.setenv("ECOSYSTEM_CHEAP_MODEL", "openai/gpt-6-luna")
     gw = LLMGateway()
     assert gw.model_for("cheap") == "openai/gpt-6-luna"
-    assert gw.model_for("smart") == "gemini/gemini-2.5-pro"
+    assert gw.model_for("smart") == "gpt-6.1-sol"
 
 
 # -- router -------------------------------------------------------------
@@ -139,9 +139,9 @@ def test_router_route_real_maps_tiers(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     install_fake(monkeypatch, {})
     router = ModelRouter(gateway=LLMGateway())
-    assert router.route_real("scan niches", 1) == "gemini/gemini-2.5-flash"
-    assert router.route_real("score ideas", 2) == "gemini/gemini-2.5-flash"
-    assert router.route_real("allocate capital", 3) == "gemini/gemini-2.5-pro"
+    assert router.route_real("scan niches", 1) == "gpt-6-luna"
+    assert router.route_real("score ideas", 2) == "gpt-6-luna"
+    assert router.route_real("allocate capital", 3) == "gpt-6.1-sol"
     with pytest.raises(ValueError):
         router.route_real("x", 9)
 

@@ -6,8 +6,8 @@ failure, and callers catch it to degrade to heuristics — an LLM
 failure must NEVER crash a tick.
 
 Env config:
-    ECOSYSTEM_CHEAP_MODEL  default "gemini/gemini-2.5-flash"
-    ECOSYSTEM_SMART_MODEL  default "gemini/gemini-2.5-pro"
+    ECOSYSTEM_CHEAP_MODEL  default "gpt-6-luna"
+    ECOSYSTEM_SMART_MODEL  default "gpt-6.1-sol"
     GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY  (at least one)
 """
 
@@ -38,9 +38,9 @@ class LLMGateway:
         timeout: int = 60,
     ) -> None:
         self.cheap_model = cheap_model or os.environ.get(
-            "ECOSYSTEM_CHEAP_MODEL", "gemini/gemini-2.5-flash")
+            "ECOSYSTEM_CHEAP_MODEL", "gpt-6-luna")
         self.smart_model = smart_model or os.environ.get(
-            "ECOSYSTEM_SMART_MODEL", "gemini/gemini-2.5-pro")
+            "ECOSYSTEM_SMART_MODEL", "gpt-6.1-sol")
         self.timeout = timeout
         self._litellm: Any = None
 
