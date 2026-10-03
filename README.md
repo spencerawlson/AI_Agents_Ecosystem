@@ -118,78 +118,8 @@ Failed experiments are documented and terminated; their data stays available so 
 
 ```bash
 pip install -e .
-python -m pytest tests/ -q                # 39/39 passing
-python launch.py                          # dashboard → http://0.0.0.0:8000
-python launch.py worker                   # headless agent tick loop
-python launch.py all                      # dashboard + worker together
-```
-
-Open **http://0.0.0.0:8000/game** for the live game view: agent stations,
-event feed, portfolio HUD, speed controls (1×/2×/4×), pause, and reset —
-every tick runs the real orchestrator, agents, ledger, and state machine
-via the dashboard's JSON API (`/api/snapshot`, `/api/tick`, `/api/reset`).
-No simulation, no mocks.
-
-`launch.py` commands: `dashboard` (default), `worker`, `all`, `initdb`.
-Worker flags go after `--`: `python launch.py worker -- --ticks 5 --interval 30`.
-Add `--use-postgres` (with `DATABASE_URL` set) to persist tasks in Postgres
-instead of the in-memory store.
-
-### Run on a Fedora VM (Proxmox)
-
-```bash
-sudo dnf install -y python3.12 python3-pip git
-git clone https://github.com/spencerawlson/AI_Agents_Ecosystem.git
-cd AI_Agents_Ecosystem
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e . "uvicorn[standard]" pytest
-python launch.py all                      # dashboard + worker
-```
-
-Then open `http://<vm-ip>:8000` from your laptop — no desktop needed on the VM.
-
-To survive reboots, install the systemd user service:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp deploy/ecosystem.service ~/.config/systemd/user/
-# edit paths in the unit if your checkout lives elsewhere
-systemctl --user daemon-reload
-systemctl --user enable --now ecosystem.service
-sudo loginctl enable-linger $USER        # keep running after logout
-journalctl --user -u ecosystem.service -f # logs
-```
-
-### Postgres + Redis (optional)
-
-The in-memory store is the default. For durable task history:
-
-```bash
-docker compose -f infra/docker-compose.yml up -d
-export DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
-python launch.py initdb
-python launch.py all --use-postgres
-```
-
-### Experiment 001 monitor (Etsy)
-
-The worker automatically checks the live Etsy shop against the experiment
-charter ($1,000 / 60 days, 84+ orders, stop-loss triggers) every 10 ticks:
-
-```bash
-python launch.py worker -- --monitor-every 5   # check every 5 ticks
-python launch.py worker -- --monitor-once      # single check, then exit
-python launch.py worker -- --monitor-every 0   # disable
-```
-
-Status is also live at `http://<vm-ip>:8000/experiment-001` on the dashboard.
-OAuth tokens auto-refresh; credentials resolve from `ETSY_*` env vars or
-`~/.config/evergreen-etsy/`. Ad/fee spend isn't visible via the Etsy API —
-record it with:
-
-```bash
-python -c "from ecosystem.etsy_monitor import EtsyMonitor;
-print(EtsyMonitor.record_spend(10.0, 'Etsy Ads top-up'))"
+python examples/opportunity_pipeline.py   # discovery → research → scoring → registry
+python -m pytest tests/ -q                # or run each tests/test_*.py directly
 ```
 
 ## Status
