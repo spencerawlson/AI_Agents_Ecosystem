@@ -1,6 +1,7 @@
 # Experiment 001 — Etsy Digital Downloads
 
-**Status:** PROPOSED (awaiting owner sign-off)
+**Status:** ACTIVE — launched 2026-10-03 (owner sign-off)
+**Business ID:** biz_e44e5a9f6f7e ("Evergreen Planners", state: APPROVED)
 **Date:** 2026-10-03
 
 > No charter, no spend. This document is the decision record.
