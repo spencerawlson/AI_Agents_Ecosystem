@@ -2,6 +2,9 @@
 
 **Status:** ACTIVE — launched 2026-10-03 (owner sign-off)
 **Business ID:** biz_e44e5a9f6f7e ("Evergreen Planners", state: APPROVED)
+**Shop:** Existing Etsy shop FXMacroAnalysis (Montreal, since 2026, 0 sales) —
+pivoting from forex journals to planners per owner 2026-10-03.
+Listing pack: `001-listing-pack.md` (12 listings, titles/descriptions/tags).
 **Date:** 2026-10-03
 
 > No charter, no spend. This document is the decision record.
