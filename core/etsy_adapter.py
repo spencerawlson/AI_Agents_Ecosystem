@@ -90,21 +90,31 @@ class EtsyAuth:
 
 
 class EtsyCommerceAdapter(CommerceAdapter):
-    """Manage an Etsy shop via API v3. Implements CommerceAdapter."""
+    """Manage an Etsy shop via API v3. Implements CommerceAdapter.
+
+    Since Feb 2026 Etsy requires x-api-key as "keystring:shared_secret"
+    (colon-joined), not the bare keystring.
+    """
 
     platform = "etsy"
 
-    def __init__(self, keystring: str, access_token: str, shop_id: str) -> None:
+    def __init__(self, keystring: str, shared_secret: str, access_token: str,
+                 shop_id: str) -> None:
         self.keystring = keystring
+        self.shared_secret = shared_secret
         self.access_token = access_token
         self.shop_id = shop_id
+
+    @property
+    def _api_key(self) -> str:
+        return f"{self.keystring}:{self.shared_secret}"
 
     def _request(self, method: str, path: str, data: dict | None = None,
                  files: dict | None = None) -> dict | list:
         url = ETSY_API + path
         body = json.dumps(data).encode() if data else None
         req = urllib.request.Request(url, data=body, method=method)
-        req.add_header("x-api-key", self.keystring)
+        req.add_header("x-api-key", self._api_key)
         req.add_header("Authorization", f"Bearer {self.access_token}")
         if data:
             req.add_header("Content-Type", "application/json")
@@ -187,7 +197,7 @@ class EtsyCommerceAdapter(CommerceAdapter):
         req = urllib.request.Request(
             f"{ETSY_API}/shops/{self.shop_id}/listings/{listing_id}/images",
             data=body, method="POST")
-        req.add_header("x-api-key", self.keystring)
+        req.add_header("x-api-key", self._api_key)
         req.add_header("Authorization", f"Bearer {self.access_token}")
         req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
         with urllib.request.urlopen(req, timeout=60) as resp:
