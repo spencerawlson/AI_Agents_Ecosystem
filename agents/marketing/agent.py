@@ -100,14 +100,4 @@ class MarketingAgent(BaseAgent):
                 "total_spent_usd": total_spent,
                 "total_remaining_usd": total_budget - total_spent,
             }
-        if action == "seo_keywords":
-            niche = task.inputs.get("niche", "")
-            # Seed keyword set; refined with real search data as it arrives.
-            keywords = [
-                f"{niche} planner", f"{niche} printable",
-                "adhd planner pdf", "hyperlinked planner",
-                "wedding budget spreadsheet", "content calendar template",
-            ]
-            self.record_usage(task, tokens=400, cost_usd=0.01)
-            return {"niche": niche, "keywords": keywords, "status": "draft"}
         raise ValueError(f"unknown action: {action}")
