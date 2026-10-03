@@ -158,6 +158,12 @@
   button.active-toggle { background: var(--green); border-color: var(--green); color: #fff; }
   #controls .spacer { flex: 1; }
   #controls .hint { font-size: 12px; color: var(--dim); font-weight: 600; }
+  #controls a.pill {
+    background: var(--card); color: var(--ink); border: 2px solid var(--border);
+    border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 800;
+    text-decoration: none; display: inline-block; font-family: inherit;
+  }
+  #controls a.pill:hover { border-color: var(--accent); transform: translateY(-1px); }
 
   /* ---------- mobile (phone-first: 390px and up) ---------- */
   body { overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
@@ -179,7 +185,7 @@
     .biz-row { padding: 10px 12px; gap: 8px; }
     .biz-row .biz-emoji { font-size: 22px; }
     #controls { padding: 12px 14px; gap: 8px; }
-    #controls > button, #controls > select { flex: 1 1 44%; min-height: 48px; font-size: 15px; }
+    #controls > button, #controls > select, #controls > a.pill { flex: 1 1 44%; min-height: 48px; font-size: 15px; }
     #controls .spacer { display: none; }
     #controls .hint { flex-basis: 100%; text-align: center; }
   }
@@ -232,6 +238,7 @@
   </select>
   <button id="btn-pause">⏸ Pause</button>
   <button id="btn-reset" class="danger">↺ Reset</button>
+  <a class="pill" href="/report">📊 Report</a>
   <span class="spacer"></span>
   <span class="hint">Step = one real orchestrator tick · Auto runs ticks on the speed interval</span>
 </footer>
