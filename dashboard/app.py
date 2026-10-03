@@ -11,6 +11,8 @@ Routes:
 
 from __future__ import annotations
 
+import html
+
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -20,6 +22,11 @@ from core.ledger import Ledger
 from core.registry import BusinessRegistry
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
+
+
+def esc(value: object) -> str:
+    """HTML-escape any value interpolated into templates."""
+    return html.escape(str(value), quote=True)
 
 
 def create_app(
@@ -49,8 +56,8 @@ def create_app(
         total_revenue = sum(led.pnl(b.id).revenue for b in businesses)
         total_profit = sum(led.pnl(b.id).net_profit for b in businesses)
         rows = "".join(
-            f"<tr><td><a href='/businesses/{b.id}'>{b.name}</a></td>"
-            f"<td>{b.business_type}</td><td>{b.status.value}</td>"
+            f"<tr><td><a href='/businesses/{esc(b.id)}'>{esc(b.name)}</a></td>"
+            f"<td>{esc(b.business_type)}</td><td>{esc(b.status.value)}</td>"
             f"<td>${led.pnl(b.id).net_profit:,.2f}</td></tr>"
             for b in businesses
         )
@@ -71,9 +78,9 @@ def create_app(
             raise HTTPException(404, "business not found")
         pnl = led.pnl(business_id)
         events = aud.for_business(business_id)
-        return f"""<html><head><title>{biz.name}</title></head><body>
-<h1>{biz.name}</h1>
-<p>Type: {biz.business_type} | Status: {biz.status.value}</p>
+        return f"""<html><head><title>{esc(biz.name)}</title></head><body>
+<h1>{esc(biz.name)}</h1>
+<p>Type: {esc(biz.business_type)} | Status: {esc(biz.status.value)}</p>
 <h2>P&L</h2>
 <p>Revenue: ${pnl.revenue:,.2f} | Costs: ${pnl.total_costs:,.2f} |
 Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
@@ -85,8 +92,8 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
     def experiment_list():
         exp: ExperimentEngine = state["experiments"]
         rows = "".join(
-            f"<tr><td>{e.id}</td><td>{e.business_id}</td><td>{e.status.value}</td>"
-            f"<td>{e.recommendation or '-'}</td></tr>"
+            f"<tr><td>{esc(e.id)}</td><td>{esc(e.business_id)}</td>"
+            f"<td>{esc(e.status.value)}</td><td>{esc(e.recommendation or '-')}</td></tr>"
             for e in exp._experiments.values()
         )
         return f"""<html><body><h1>Experiments</h1>
@@ -97,8 +104,8 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
     def approval_queue():
         gate: ApprovalGate = state["approvals"]
         rows = "".join(
-            f"<tr><td>{a.id}</td><td>{a.action}</td><td>{a.amount_usd}</td>"
-            f"<td><form method='post' action='/approvals/{a.id}/decide'>"
+            f"<tr><td>{esc(a.id)}</td><td>{esc(a.action)}</td><td>{a.amount_usd}</td>"
+            f"<td><form method='post' action='/approvals/{esc(a.id)}/decide'>"
             f"<button name='approved' value='true'>Approve</button>"
             f"<button name='approved' value='false'>Reject</button></form></td></tr>"
             for a in gate.pending()
