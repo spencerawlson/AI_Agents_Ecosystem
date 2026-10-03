@@ -68,6 +68,23 @@ def create_app(
 <p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a></p>
 </body></html>"""
 
+    @app.get("/businesses", response_class=HTMLResponse)
+    def business_list():
+        reg: BusinessRegistry = state["registry"]
+        led: Ledger = state["ledger"]
+        businesses = reg.list()
+        rows = "".join(
+            f"<tr><td><a href='/businesses/{esc(b.id)}'>{esc(b.name)}</a></td>"
+            f"<td>{esc(b.business_type)}</td><td>{esc(b.status.value)}</td>"
+            f"<td>${led.pnl(b.id).net_profit:,.2f}</td></tr>"
+            for b in businesses
+        )
+        return f"""<html><head><title>Businesses</title></head><body>
+<h1>Businesses ({len(businesses)})</h1>
+<table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
+<p><a href="/">Back</a></p>
+</body></html>"""
+
     @app.get("/businesses/{business_id}", response_class=HTMLResponse)
     def business_detail(business_id: str):
         reg: BusinessRegistry = state["registry"]

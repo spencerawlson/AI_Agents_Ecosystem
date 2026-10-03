@@ -118,8 +118,51 @@ Failed experiments are documented and terminated; their data stays available so 
 
 ```bash
 pip install -e .
-python examples/opportunity_pipeline.py   # discovery → research → scoring → registry
-python -m pytest tests/ -q                # or run each tests/test_*.py directly
+python -m pytest tests/ -q                # 39/39 passing
+python launch.py                          # dashboard → http://0.0.0.0:8000
+python launch.py worker                   # headless agent tick loop
+python launch.py all                      # dashboard + worker together
+```
+
+`launch.py` commands: `dashboard` (default), `worker`, `all`, `initdb`.
+Worker flags go after `--`: `python launch.py worker -- --ticks 5 --interval 30`.
+Add `--use-postgres` (with `DATABASE_URL` set) to persist tasks in Postgres
+instead of the in-memory store.
+
+### Run on a Fedora VM (Proxmox)
+
+```bash
+sudo dnf install -y python3.12 python3-pip git
+git clone https://github.com/spencerawlson/AI_Agents_Ecosystem.git
+cd AI_Agents_Ecosystem
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e . "uvicorn[standard]" pytest
+python launch.py all                      # dashboard + worker
+```
+
+Then open `http://<vm-ip>:8000` from your laptop — no desktop needed on the VM.
+
+To survive reboots, install the systemd user service:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/ecosystem.service ~/.config/systemd/user/
+# edit paths in the unit if your checkout lives elsewhere
+systemctl --user daemon-reload
+systemctl --user enable --now ecosystem.service
+sudo loginctl enable-linger $USER        # keep running after logout
+journalctl --user -u ecosystem.service -f # logs
+```
+
+### Postgres + Redis (optional)
+
+The in-memory store is the default. For durable task history:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+export DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
+python launch.py initdb
+python launch.py all --use-postgres
 ```
 
 ## Status

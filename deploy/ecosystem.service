@@ -1,0 +1,38 @@
+# AI Agents Ecosystem — systemd user service (Fedora / Proxmox VM)
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/ecosystem.service ~/.config/systemd/user/
+#   # edit WorkingDirectory/ExecStart below to match your checkout path
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ecosystem.service
+#   # keep it running after logout (headless VM):
+#   sudo loginctl enable-linger $USER
+#
+# Operate:
+#   systemctl --user status ecosystem.service
+#   journalctl --user -u ecosystem.service -f
+#   systemctl --user restart ecosystem.service
+#
+# With Postgres (optional):
+#   cd ~/AI_Agents_Ecosystem && docker compose -f infra/docker-compose.yml up -d
+#   systemctl --user set-environment DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
+#   # then add --use-postgres to ExecStart below
+
+[Unit]
+Description=AI Agents Ecosystem (dashboard + worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/AI_Agents_Ecosystem
+ExecStart=%h/AI_Agents_Ecosystem/.venv/bin/python launch.py all
+Restart=always
+RestartSec=10
+# Uncomment for Postgres persistence instead of the in-memory store:
+# Environment=DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
+# ExecStart=%h/AI_Agents_Ecosystem/.venv/bin/python launch.py all --use-postgres
+
+[Install]
+WantedBy=default.target
