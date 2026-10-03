@@ -8,11 +8,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from core.logging import get_logger
 from .models import AgentRun, Approval, Task, TaskStatus, utcnow
 from .registry import AgentRegistry
-
-log = get_logger("orchestrator")
 
 
 class TaskStore(Protocol):
@@ -76,8 +73,6 @@ class Orchestrator:
     ) -> Task:
         if self.registry.get(agent_type) is None:
             raise ValueError(f"unknown agent type: {agent_type}")
-        if budget_usd < 0 or budget_tokens < 0:
-            raise ValueError("budgets cannot be negative")
         task = Task(
             agent_type=agent_type,
             business_id=business_id,
@@ -87,7 +82,6 @@ class Orchestrator:
             deadline=deadline,
         )
         self.store.save_task(task)
-        log.info("task_submitted id=%s agent=%s business=%s", task.id, agent_type, business_id)
         return task
 
     def dispatch(self, task_id: str) -> AgentRun:
@@ -113,23 +107,13 @@ class Orchestrator:
             if not isinstance(output, dict):
                 raise TypeError(f"agent {task.agent_type} must return a dict, got {type(output)}")
             run.output = output
-            # Capture budget-tracked usage from BaseAgent handlers.
-            tokens = getattr(handler, "tokens_used", 0)
-            cost = getattr(handler, "cost_usd", 0.0)
-            run.tokens_used = int(tokens) if isinstance(tokens, (int, float)) else 0
-            run.cost_usd = float(cost) if isinstance(cost, (int, float)) else 0.0
             run.status = TaskStatus.COMPLETED
             task.status = TaskStatus.COMPLETED
-            log.info(
-                "task_completed id=%s run=%s tokens=%d cost_usd=%.4f",
-                task.id, run.id, run.tokens_used, run.cost_usd,
-            )
         except Exception as exc:  # noqa: BLE001
             run.status = TaskStatus.FAILED
             run.error = str(exc)
             task.status = TaskStatus.FAILED
             task.error = str(exc)
-            log.warning("task_failed id=%s run=%s error=%s", task.id, run.id, exc)
         finally:
             run.finished_at = utcnow()
             task.finished_at = run.finished_at

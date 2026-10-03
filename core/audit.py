@@ -55,10 +55,6 @@ class AuditLog:
     def for_task(self, task_id: str) -> list[AuditEvent]:
         return [e for e in self._events if e.task_id == task_id]
 
-    def latest(self, n: int = 50) -> list[AuditEvent]:
-        """Most recent events, newest first."""
-        return list(reversed(self._events[-n:]))
-
     def total_ai_cost(self, business_id: str | None = None) -> float:
         events = self._events if business_id is None else self.for_business(business_id)
         return sum(e.cost_usd for e in events)
