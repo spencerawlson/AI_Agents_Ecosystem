@@ -67,7 +67,7 @@ def create_app(
 <h1>Portfolio</h1>
 <p>Businesses: {len(businesses)} | Revenue: ${total_revenue:,.2f} | Net profit: ${total_profit:,.2f}</p>
 <table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
 </body></html>"""
 
     @app.get("/businesses", response_class=HTMLResponse)
@@ -253,6 +253,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
             else str(e.created_at),
             "actor": e.agent_type, "event": e.event,
             "business_id": e.business_id, "task_id": e.task_id,
+            "result": e.result,
         } for e in aud.latest(50)]
         totals = {
             "revenue": round(sum(r["revenue"] for r in biz_rows), 2),
@@ -272,6 +273,119 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
     @app.get("/api/snapshot")
     def api_snapshot():
         return JSONResponse(_snapshot())
+
+    @app.get("/api/report")
+    def api_report():
+        """Agent + financial report as JSON. Composed from _snapshot() so the
+        composition logic lives in one place; blended margin comes from
+        core.reporting.FinancialReporting."""
+        from core.reporting import FinancialReporting
+        from orchestrator.models import utcnow
+
+        snap = _snapshot()
+        exp = snap["experiment_001"]
+        summary = FinancialReporting(state["ledger"]).portfolio_summary(
+            [b["id"] for b in snap["businesses"]])
+        return JSONResponse({
+            "generated_at": utcnow().isoformat(),
+            "tick": snap["tick"],
+            "agents": snap["agents"],
+            "financials": {
+                "revenue": snap["totals"]["revenue"],
+                "total_costs": snap["totals"]["total_costs"],
+                "net_profit": snap["totals"]["net_profit"],
+                "blended_margin": round(summary["blended_margin"], 4),
+            },
+            "businesses": snap["businesses"],
+            "experiment_001": {
+                "verdict": exp["verdict"],
+                "days_elapsed": exp["days_elapsed"],
+                "days_remaining": exp["days_remaining"],
+                "orders": exp["orders"],
+                "revenue_usd": exp["revenue_usd"],
+                "spend_usd": exp["spend_usd"],
+                "pace_pct": exp["pace_pct"],
+            } if exp else None,
+        })
+
+    @app.get("/report", response_class=HTMLResponse)
+    def report_page():
+        """Server-rendered agent + financial report (mobile-friendly)."""
+        from orchestrator.models import utcnow
+
+        snap = _snapshot()
+        exp = snap["experiment_001"]
+        fin = {
+            "revenue": snap["totals"]["revenue"],
+            "total_costs": snap["totals"]["total_costs"],
+            "net_profit": snap["totals"]["net_profit"],
+        }
+        agent_rows = "".join(
+            f"<tr><td>{esc(a['type'])}</td>"
+            f"<td>{a['tasks_completed']}</td>"
+            f"<td>{a['tokens_used']:,}</td>"
+            f"<td>${a['cost_usd']:,.4f}</td>"
+            f"<td>{esc(a['last_task']) or '—'}</td></tr>"
+            for a in snap["agents"]
+        ) or "<tr><td colspan='5'>No agent activity yet.</td></tr>"
+        biz_rows = "".join(
+            f"<tr><td>{esc(b['name'])}</td>"
+            f"<td>{esc(b['business_type'])}</td>"
+            f"<td>{esc(b['status'])}</td>"
+            f"<td>${b['revenue']:,.2f}</td>"
+            f"<td>${b['total_costs']:,.2f}</td>"
+            f"<td>${b['net_profit']:,.2f}</td></tr>"
+            for b in snap["businesses"]
+        ) or "<tr><td colspan='6'>No businesses yet.</td></tr>"
+        exp_block = (
+            f"<h2>Experiment 001 — Evergreen Planners</h2>"
+            f"<p>Verdict: <strong>{esc(exp['verdict'])}</strong> · "
+            f"Day {exp['days_elapsed']}/60 ({exp['days_remaining']} remaining)</p>"
+            f"<p>Orders: {exp['orders']} · Revenue: ${exp['revenue_usd']:,.2f} · "
+            f"Spend: ${exp['spend_usd']:,.2f} · Pace: {exp['pace_pct']}%</p>"
+        ) if exp else (
+            "<h2>Experiment 001</h2><p>Not configured on this runtime.</p>"
+        )
+        net_color = "green" if fin["net_profit"] >= 0 else "red"
+        return f"""<html><head><title>Agent &amp; Financial Report</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {{ font-family: sans-serif; margin: 0 auto; max-width: 960px;
+       padding: 16px; color: #222; }}
+.cards {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }}
+.card {{ flex: 1 1 140px; border: 1px solid #ddd; border-radius: 8px;
+        padding: 12px; background: #fafafa; }}
+.card .label {{ font-size: 12px; color: #666; text-transform: uppercase; }}
+.card .value {{ font-size: 22px; font-weight: bold; margin-top: 4px; }}
+.table-wrap {{ overflow-x: auto; }}
+table {{ border-collapse: collapse; width: 100%; margin: 8px 0 20px; }}
+th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left;
+         font-size: 14px; }}
+th {{ background: #f0f0f0; }}
+@media (max-width: 560px) {{ th, td {{ font-size: 13px; padding: 6px; }} }}
+</style></head><body>
+<h1>📊 Agent &amp; Financial Report</h1>
+<p>Generated: {esc(utcnow().isoformat())} · Tick: {snap["tick"]}</p>
+<h2>Financials</h2>
+<div class="cards">
+<div class="card"><div class="label">Revenue</div>
+<div class="value">${fin["revenue"]:,.2f}</div></div>
+<div class="card"><div class="label">Total costs</div>
+<div class="value">${fin["total_costs"]:,.2f}</div></div>
+<div class="card"><div class="label">Net profit</div>
+<div class="value" style="color:{net_color}">${fin["net_profit"]:,.2f}</div></div>
+</div>
+<h2>Agent performance</h2>
+<div class="table-wrap"><table>
+<tr><th>Agent</th><th>Tasks</th><th>Tokens</th><th>Cost (USD)</th>
+<th>Last task</th></tr>{agent_rows}</table></div>
+<h2>Business P&amp;L</h2>
+<div class="table-wrap"><table>
+<tr><th>Name</th><th>Type</th><th>Status</th><th>Revenue</th><th>Costs</th>
+<th>Net profit</th></tr>{biz_rows}</table></div>
+{exp_block}
+<p><a href="/">Back to portfolio</a> | <a href="/game">🎮 Live game view</a></p>
+</body></html>"""
 
     @app.post("/api/tick")
     def api_tick():
