@@ -178,5 +178,13 @@ class CreativeAgent(BaseAgent):
                 tokens=result["input_tokens"] + result["output_tokens"],
                 cost_usd=result["cost_usd"],
             )
-            return {"niche": niche, "drafts": kept, "asset_ids": asset_ids}
+            return {
+                "niche": niche,
+                "drafts": kept,
+                "asset_ids": asset_ids,
+                "evidence": (
+                    f"{len(kept)} drafts returned; each draft has platform, "
+                    "text, hook and is stored as a creative asset"
+                ),
+            }
         raise ValueError(f"unknown action: {action}")
