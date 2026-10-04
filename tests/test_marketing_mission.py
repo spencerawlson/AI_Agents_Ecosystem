@@ -94,8 +94,8 @@ def test_content_calendar_success():
         out = agent(_task("content_calendar", niche="n",
                           keyword_map={"keywords": [{"keyword": "k"}]}, days=1))
     assert out["calendar"] == payload["calendar"]
-    assert agent._cost_usd == pytest.approx(0.02)
-    assert agent._tokens_used == 300
+    assert agent.cost_usd == pytest.approx(0.02)
+    assert agent.tokens_used == 300
 
 
 def test_positioning_brief_success():

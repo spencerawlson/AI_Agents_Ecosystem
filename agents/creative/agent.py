@@ -8,6 +8,7 @@ the creative that drove it.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -45,10 +46,14 @@ class CreativeAgent(BaseAgent):
         super().__init__()
         self._assets: dict[str, CreativeAsset] = {}
         self._counter = 0
+        # The dispatcher may run concurrent tasks on this one handler
+        # instance: ID generation must never hand out a duplicate.
+        self._id_lock = threading.Lock()
 
     def _next_id(self) -> str:
-        self._counter += 1
-        return f"asset_{self._counter:05d}"
+        with self._id_lock:
+            self._counter += 1
+            return f"asset_{self._counter:05d}"
 
     def create(
         self,
@@ -92,9 +97,11 @@ class CreativeAgent(BaseAgent):
         asset = self._assets.get(asset_id)
         if asset is None:
             raise ValueError(f"unknown asset: {asset_id}")
-        asset.impressions += impressions
-        asset.clicks += clicks
-        asset.conversions += conversions
+        # Read-modify-write on shared state: guard it for concurrent tasks.
+        with self._id_lock:
+            asset.impressions += impressions
+            asset.clicks += clicks
+            asset.conversions += conversions
         return asset
 
     def top_performers(self, business_id: str, limit: int = 5) -> list[CreativeAsset]:

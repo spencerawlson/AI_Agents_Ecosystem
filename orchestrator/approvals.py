@@ -6,6 +6,7 @@ ad spend is tiered, everything else consequential always needs a human.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 from .models import Approval, ApprovalStatus, utcnow
@@ -38,6 +39,9 @@ class ApprovalGate:
     def __init__(self, policy: ApprovalPolicy | None = None) -> None:
         self.policy = policy or ApprovalPolicy()
         self._approvals: dict[str, Approval] = {}
+        # Decisions may arrive from the dashboard thread while the
+        # dispatcher polls pending approvals on its own thread.
+        self._lock = threading.RLock()
 
     def requires_approval(self, action: str, amount_usd: float | None = None) -> bool:
         if action in self.policy.always_require:
@@ -71,25 +75,29 @@ class ApprovalGate:
             amount_usd=amount_usd,
             requested_by=requested_by,
         )
-        self._approvals[approval.id] = approval
+        with self._lock:
+            self._approvals[approval.id] = approval
         return approval
 
     def decide(
         self, approval_id: str, approved: bool, decided_by: str, note: str | None = None
     ) -> Approval:
-        approval = self._approvals.get(approval_id)
-        if approval is None:
-            raise ValueError(f"unknown approval: {approval_id}")
-        if approval.status != ApprovalStatus.PENDING:
-            raise ValueError(f"approval {approval_id} already decided")
-        approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
-        approval.decided_by = decided_by
-        approval.decided_at = utcnow()
-        approval.note = note
-        return approval
+        with self._lock:
+            approval = self._approvals.get(approval_id)
+            if approval is None:
+                raise ValueError(f"unknown approval: {approval_id}")
+            if approval.status != ApprovalStatus.PENDING:
+                raise ValueError(f"approval {approval_id} already decided")
+            approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
+            approval.decided_by = decided_by
+            approval.decided_at = utcnow()
+            approval.note = note
+            return approval
 
     def pending(self) -> list[Approval]:
-        return [a for a in self._approvals.values() if a.status == ApprovalStatus.PENDING]
+        with self._lock:
+            return [a for a in self._approvals.values() if a.status == ApprovalStatus.PENDING]
 
     def get(self, approval_id: str) -> Approval | None:
-        return self._approvals.get(approval_id)
+        with self._lock:
+            return self._approvals.get(approval_id)

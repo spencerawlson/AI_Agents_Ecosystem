@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from infra.db_models import AgentRunRow, TaskRow
-from orchestrator.models import AgentRun, Task, TaskStatus
+from orchestrator.models import AgentRun, ApprovalStatus, Task, TaskStatus, utcnow
 
 
 def _row_to_task(row: TaskRow) -> Task:
@@ -108,3 +108,50 @@ class PostgresTaskStore:
         with self._session() as s:
             row = s.get(AgentRunRow, run_id)
             return _row_to_run(row) if row else None
+
+    def claim_task(self, task_id: str, worker_id: str) -> Task | None:
+        """Atomically claim a PENDING task.
+
+        Single UPDATE ... WHERE status='pending': the rowcount tells us
+        whether we won the race, so two workers (even in two processes)
+        can never claim the same task.
+        """
+        with self._session() as s:
+            result = s.execute(
+                update(TaskRow)
+                .where(TaskRow.id == task_id,
+                       TaskRow.status == TaskStatus.PENDING.value)
+                .values(status=TaskStatus.RUNNING.value,
+                        started_at=utcnow())
+            )
+            s.commit()
+            if result.rowcount == 0:
+                return None
+            row = s.get(TaskRow, task_id)
+            return _row_to_task(row) if row else None
+
+    def promote_approved(self, gate) -> dict[str, int]:
+        """Promote WAITING_APPROVAL tasks per their approval decision.
+
+        Same semantics as MemoryTaskStore.promote_approved. Each task's
+        transition is idempotent, so concurrent promoters are harmless;
+        the atomic claim_task remains the single point of truth for who
+        executes a task.
+        """
+        promoted = cancelled = 0
+        with self._session() as s:
+            rows = s.query(TaskRow).filter(
+                TaskRow.status == TaskStatus.WAITING_APPROVAL.value).all()
+            for row in rows:
+                approval = gate.get((row.inputs or {}).get("approval_id"))
+                if approval is None or approval.status == ApprovalStatus.PENDING:
+                    continue
+                if approval.status == ApprovalStatus.APPROVED:
+                    row.status = TaskStatus.PENDING.value
+                    promoted += 1
+                else:
+                    row.status = TaskStatus.CANCELLED.value
+                    row.finished_at = utcnow()
+                    cancelled += 1
+            s.commit()
+        return {"promoted": promoted, "cancelled": cancelled}
