@@ -108,10 +108,22 @@ def write_report(path: Path, ctx: dict) -> None:
         f"{d.get('text', '')}\n"
         for d in ctx.get("drafts", [])
     )
-    audiences = "\n".join(f"- {a}" for a in brief.get("audiences", []))
-    props = "\n".join(f"- {p}" for p in brief.get("value_props", []))
-    angles = "\n".join(f"- {a}" for a in brief.get("content_angles", []))
-    channels = "\n".join(f"- {c}" for c in brief.get("channels_ranked", []))
+    def _fmt(x):
+        # The LLM sometimes returns dicts (e.g. {"name": ..., "pain_point": ...});
+        # render those as readable lines instead of raw dict reprs.
+        if isinstance(x, dict):
+            name = x.get("name") or x.get("title") or ""
+            desc = (x.get("pain_point") or x.get("description")
+                    or x.get("text") or "")
+            if name and desc:
+                return f"- **{name}** — {desc}"
+            return f"- {name or desc}"
+        return f"- {x}"
+
+    audiences = "\n".join(_fmt(a) for a in brief.get("audiences", []))
+    props = "\n".join(_fmt(p) for p in brief.get("value_props", []))
+    angles = "\n".join(_fmt(a) for a in brief.get("content_angles", []))
+    channels = "\n".join(_fmt(c) for c in brief.get("channels_ranked", []))
 
     report = f"""# Marketing Mission — {ctx['site_url']}
 
