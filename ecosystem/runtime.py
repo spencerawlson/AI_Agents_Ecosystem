@@ -122,6 +122,12 @@ def build_runtime(use_postgres: bool = False,
                 "ON" if llm_on else "OFF (heuristics)",
                 gateway.cheap_model if gateway else "no key/litellm",
                 "ON" if market_on else "OFF")
+    if use_llm and not LLMGateway.enabled():
+        # --llm was forced but the gateway can't actually run: say so now
+        # instead of letting the banner claim "LLM ON" and failing mid-run.
+        log.warning("WARNING: --llm requested but LLMGateway.enabled() is "
+                    "False (litellm not installed or no API key in env) — "
+                    "LLM actions will fail at dispatch")
 
     store = None
     if use_postgres:

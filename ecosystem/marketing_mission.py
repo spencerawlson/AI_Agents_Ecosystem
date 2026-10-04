@@ -49,6 +49,30 @@ BANNER = (
 )
 
 
+def _require_llm_ready() -> None:
+    """Fail fast with a precise diagnosis when the mission needs the LLM but
+    the gateway can't actually run (missing litellm or no API key in env).
+
+    Without this, the run prints "LLM ON", completes step 1, then dies at
+    step 2 with a confusing "requires LLM mode" error.
+    """
+    import os
+
+    from core.llm import LLMGateway
+
+    if LLMGateway.enabled():
+        return
+    missing = []
+    try:
+        import litellm  # noqa: F401
+    except ImportError:
+        missing.append("litellm is not installed — run: pip install litellm")
+    if not any(os.environ.get(k) for k in (
+            "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")):
+        missing.append("no API key in environment — export OPENAI_API_KEY=...")
+    raise SystemExit("LLM unavailable: " + "; ".join(missing))
+
+
 def run_step(orch, agent_type, action, inputs, business_id,
              budget_usd, budget_tokens, criteria):
     """Submit + dispatch one mission step. Returns (ok, output_or_error, run)."""
@@ -150,6 +174,11 @@ def main(argv=None) -> int:
 
     rt = build_runtime(use_llm=args.llm)
     orch = rt.orchestrator
+
+    # The mission's steps 2-4 need the LLM. Fail fast with a clear diagnosis
+    # instead of dying at step 2. (--no-llm explicitly opts into the failure.)
+    if args.llm is not False:
+        _require_llm_ready()
 
     biz = rt.businesses.create(
         name="Road to CISSP",

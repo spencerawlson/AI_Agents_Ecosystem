@@ -213,3 +213,35 @@ def test_peer_review_social_drafts_evidenced():
         out, ["10 drafts returned", "each draft has platform, text, hook"],
         agent_type="creative")
     assert not [i for i in issues if "not evidenced in output" in i], issues
+
+
+# -- fail-fast LLM diagnosis ----------------------------------------------
+
+def test_require_llm_ready_passes_when_enabled():
+    from ecosystem.marketing_mission import _require_llm_ready
+    with patch("core.llm.LLMGateway.enabled", return_value=True):
+        _require_llm_ready()  # must not raise
+
+
+def test_require_llm_ready_fails_fast_with_diagnosis():
+    import builtins
+
+    from ecosystem.marketing_mission import _require_llm_ready
+    real_import = builtins.__import__
+
+    def no_litellm(name, *args, **kwargs):
+        if name == "litellm":
+            raise ImportError("no litellm")
+        return real_import(name, *args, **kwargs)
+
+    with patch("core.llm.LLMGateway.enabled", return_value=False), \
+         patch("builtins.__import__", side_effect=no_litellm), \
+         patch.dict("os.environ", {}, clear=False):
+        # ensure no key leaks in from the real environment
+        import os
+        for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            os.environ.pop(k, None)
+        with pytest.raises(SystemExit) as exc:
+            _require_llm_ready()
+    msg = str(exc.value)
+    assert "litellm" in msg and "OPENAI_API_KEY" in msg, msg
