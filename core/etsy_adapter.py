@@ -229,8 +229,9 @@ class EtsyCommerceAdapter(CommerceAdapter):
             f"/shops/{self.shop_id}/listings/{listing_id}/files/{listing_file_id}",
         )
 
-    def upload_image(self, listing_id: str, image_path: str) -> dict:
-        """Upload a listing image (multipart)."""
+    def upload_image(self, listing_id: str, image_path: str,
+                     rank: int | None = None) -> dict:
+        """Upload a listing image (multipart). rank sets its carousel position."""
         import mimetypes
 
         boundary = secrets.token_hex(16)
@@ -241,7 +242,14 @@ class EtsyCommerceAdapter(CommerceAdapter):
             f"--{boundary}\r\n"
             f'Content-Disposition: form-data; name="image"; filename="img"\r\n'
             f"Content-Type: {mime or 'image/png'}\r\n\r\n"
-        ).encode() + img + f"\r\n--{boundary}--\r\n".encode()
+        ).encode() + img + f"\r\n".encode()
+        if rank is not None:
+            body += (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="rank"\r\n\r\n'
+                f"{rank}\r\n"
+            ).encode()
+        body += f"--{boundary}--\r\n".encode()
         req = urllib.request.Request(
             f"{ETSY_API}/shops/{self.shop_id}/listings/{listing_id}/images",
             data=body, method="POST")
