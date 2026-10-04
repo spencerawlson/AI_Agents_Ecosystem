@@ -27,11 +27,21 @@ class BaseAgent(ABC):
     def __init__(self) -> None:
         self._tokens_used = 0
         self._cost_usd = 0.0
+        self._last_self_check: list[str] = []
 
     @abstractmethod
     def run(self, task: Task) -> dict:
         """Execute the task. Must return a JSON-serializable dict."""
         ...
+
+    def self_check(self, task: Task, output: dict) -> list[str]:
+        """Layer 1 of verification: the agent checks its own output.
+
+        Return a list of issue strings; empty means the agent stands behind
+        its output. Override to enforce the task's acceptance criteria from
+        the producer's side — a real quality bar, not a rubber stamp.
+        """
+        return []
 
     def __call__(self, task: Task) -> dict:
         self._tokens_used = 0
@@ -39,6 +49,10 @@ class BaseAgent(ABC):
         output = self.run(task)
         if not isinstance(output, dict):
             raise TypeError(f"{self.agent_type} must return a dict")
+        try:
+            self._last_self_check = list(self.self_check(task, output) or [])
+        except Exception as exc:  # noqa: BLE001 - a crashing self-check is itself a finding
+            self._last_self_check = [f"self_check crashed: {exc}"]
         return output
 
     # -- budget-tracked resource usage -----------------------------------

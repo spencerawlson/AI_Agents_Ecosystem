@@ -21,6 +21,7 @@ from agents.discovery.agent import DiscoveryAgent
 from agents.marketing.agent import MarketingAgent
 from agents.operations.agent import OperationsAgent
 from agents.research.agent import ResearchAgent
+from agents.review.agent import ReviewAgent
 from agents.support.agent import SupportAgent
 from core.audit import AuditLog
 from core.experiments import ExperimentEngine
@@ -38,6 +39,7 @@ AGENT_CLASSES = (
     SupportAgent,
     CreativeAgent,
     OperationsAgent,
+    ReviewAgent,
 )
 
 
@@ -134,7 +136,9 @@ def build_runtime(use_postgres: bool = False,
             )
         store = PostgresTaskStore(url)
 
-    orchestrator = Orchestrator(registry=agent_registry, store=store)
+    audit_log = AuditLog()
+    orchestrator = Orchestrator(registry=agent_registry, store=store,
+                              audit=audit_log)
     for agent_type, handler in handlers.items():
         orchestrator.register_handler(agent_type, handler)
 
@@ -145,7 +149,7 @@ def build_runtime(use_postgres: bool = False,
         ledger=Ledger(),
         experiments=ExperimentEngine(),
         approvals=ApprovalGate(),
-        audit=AuditLog(),
+        audit=audit_log,
         handlers=handlers,
     )
 
