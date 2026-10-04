@@ -124,4 +124,59 @@ class CreativeAgent(BaseAgent):
                 "status": "briefed",
                 "next": "human reviews brief, produces final product",
             }
+        if action == "social_drafts":
+            from core.llm import LLMGateway
+
+            if not LLMGateway.enabled():
+                raise RuntimeError(
+                    "social_drafts requires LLM mode (--llm with OPENAI_API_KEY)"
+                )
+            niche = task.inputs.get("niche", "")
+            themes = [t for t in task.inputs.get("themes", []) if t]
+            count = int(task.inputs.get("count", 10))
+            business_id = task.business_id or "unknown"
+            theme_list = "\n".join(f"- {t}" for t in themes) or f"- {niche}"
+            prompt = (
+                f"You write social posts for an online learning platform in the "
+                f"niche: {niche}.\n"
+                f"Themes to cover:\n{theme_list}\n"
+                f"Return ONLY a JSON object with a single key \"drafts\": a list of "
+                f"exactly {count} drafts, each with keys \"platform\" (one of: x, "
+                'threads, linkedin), "text" (the post, under 280 chars for x/threads), '
+                '"hook" (the opening line, one sentence). No hashtags spam: max 3.'
+            )
+            result = LLMGateway().complete(
+                prompt,
+                tier="cheap",
+                system="You are a concise social media copywriter. JSON only.",
+                json_mode=True,
+            )
+            payload = result["json"] or {}
+            drafts = payload.get("drafts", payload) if isinstance(payload, dict) else payload
+            if not isinstance(drafts, list):
+                raise ValueError("LLM did not return a drafts list")
+            asset_ids: list[str] = []
+            kept: list[dict] = []
+            for d in drafts[:count]:
+                if not isinstance(d, dict) or not d.get("text"):
+                    continue
+                platform = d.get("platform", "x")
+                hook = d.get("hook", d["text"][:60])
+                asset = self.create(
+                    business_id,
+                    "social",
+                    f"[{platform}] {hook}"[:80],
+                    f"[{platform}] {d['text']}",
+                )
+                asset_ids.append(asset.id)
+                kept.append(
+                    {"platform": platform, "text": d["text"], "hook": hook,
+                     "asset_id": asset.id}
+                )
+            self.record_usage(
+                task,
+                tokens=result["input_tokens"] + result["output_tokens"],
+                cost_usd=result["cost_usd"],
+            )
+            return {"niche": niche, "drafts": kept, "asset_ids": asset_ids}
         raise ValueError(f"unknown action: {action}")
