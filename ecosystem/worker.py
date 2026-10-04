@@ -200,7 +200,7 @@ def run_dispatcher(rt, args) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, rt=None) -> int:
     parser = argparse.ArgumentParser(description="Ecosystem headless worker")
     parser.add_argument("--interval", type=float, default=60.0,
                         help="seconds between ticks (default: 60)")
@@ -235,8 +235,9 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: 2)")
     args = parser.parse_args(argv)
 
-    rt = build_runtime(use_postgres=args.use_postgres, use_llm=args.use_llm,
-                       use_market=args.use_market)
+    if rt is None:
+        rt = build_runtime(use_postgres=args.use_postgres, use_llm=args.use_llm,
+                           use_market=args.use_market, approvals_persist=True)
 
     if args.dispatcher:
         return run_dispatcher(rt, args)

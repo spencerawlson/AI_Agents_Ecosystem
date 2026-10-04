@@ -48,6 +48,16 @@ BANNER = (
     "No ads were bought, no emails sent, no posts published."
 )
 
+# Real differentiators of road2cissp.com, fed to the positioning brief so
+# its value props are grounded in the actual product (not generic).
+SITE_FEATURES = [
+    "1004+ flashcards mapped to the official CISSP exam domains",
+    "Interactive hands-on labs: Cisco IOS shell, Python scripting, Linux terminal",
+    "3D visual lab: explorable network topologies (OSI packet flow, load balancers)",
+    "Timed 100-question CISSP practice exams with per-domain score reports",
+    "Gamification: study streaks, XP, ranks and badges with spaced repetition",
+]
+
 
 def _require_llm_ready() -> None:
     """Fail fast with a precise diagnosis when the mission needs the LLM but
@@ -184,7 +194,7 @@ def main(argv=None) -> int:
     parser.add_argument("--niche", default="CISSP exam preparation")
     args = parser.parse_args(argv)
 
-    rt = build_runtime(use_llm=args.llm)
+    rt = build_runtime(use_llm=args.llm, approvals_persist=True)
     orch = rt.orchestrator
 
     # The mission's steps 2-4 need the LLM. Fail fast with a clear diagnosis
@@ -221,7 +231,8 @@ def main(argv=None) -> int:
           "each keyword has avg_12mo and a trend value or 'unavailable'",
           "no invented numbers — gaps marked 'unavailable' explicitly"]),
         ("marketing", "positioning_brief",
-         {"niche": args.niche, "site_url": args.site_url}, 2.0, 6000,
+         {"niche": args.niche, "site_url": args.site_url,
+          "features": SITE_FEATURES}, 2.0, 6000,
          ["audiences, value_props, content_angles, channels_ranked present"]),
         ("marketing", "content_calendar",
          {"niche": args.niche, "days": args.days}, 3.0, 12000,
@@ -279,7 +290,37 @@ def main(argv=None) -> int:
     print(f"report: {report_path}", flush=True)
     print(f"total AI spend: ${ctx['total_spend_usd']:.4f} "
           f"({ctx['total_tokens']} tokens)", flush=True)
+    request_report_approval(rt, biz, report_path, ctx)
     return 0
+
+
+def request_report_approval(rt, biz, report_path: Path, ctx: dict):
+    """Register GUI approval for the finished mission report.
+
+    Approving means "a human signed off on the drafts" — it never
+    publishes anything on its own; publishing stays a separate,
+    explicit human action.
+    """
+    approval = rt.approvals.request(
+        action="mission_report_approval",
+        details={
+            "mission": "marketing_mission",
+            "business_name": biz.name,
+            "site_url": ctx["site_url"],
+            "report_path": str(report_path),
+            "report_name": report_path.name,
+            "drafts_count": len(ctx["drafts"]),
+            "total_spend_usd": round(ctx["total_spend_usd"], 4),
+            "total_tokens": ctx["total_tokens"],
+            "steps_completed": ctx["steps_completed"],
+        },
+        amount_usd=round(ctx["total_spend_usd"], 4),
+        business_id=biz.id,
+        requested_by="marketing_mission",
+    )
+    print(f"approval requested: {approval.id} — review it at /approvals",
+          flush=True)
+    return approval
 
 
 if __name__ == "__main__":

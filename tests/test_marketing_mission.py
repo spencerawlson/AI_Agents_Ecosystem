@@ -108,6 +108,20 @@ def test_positioning_brief_success():
     assert out["brief"] == payload
 
 
+def test_positioning_brief_includes_site_features():
+    payload = {"audiences": ["a"], "value_props": ["v"],
+               "content_angles": ["c"], "channels_ranked": ["x"]}
+    gw = _fake_llm_gateway(payload)
+    with patch("core.llm.LLMGateway", gw):
+        MarketingAgent()(_task("positioning_brief", niche="n",
+                               site_url="https://x.test",
+                               features=["1004+ flashcards", "3D visual lab"]))
+    prompt = gw.return_value.complete.call_args.args[0]
+    assert "1004+ flashcards" in prompt
+    assert "3D visual lab" in prompt
+    assert "do not invent" in prompt
+
+
 # -- social_drafts --------------------------------------------------------
 
 def test_social_drafts_requires_llm():

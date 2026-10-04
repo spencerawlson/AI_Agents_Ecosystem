@@ -165,17 +165,20 @@ def test_etsy_401_without_creds_raises():
 
 # -- Trends client (pytrends mocked) ---------------------------------------
 
-def _mock_pytrends(monkeypatch, values):
+def _mock_pytrends(monkeypatch, values, explore_widgets="default"):
+    import json
+
     import pandas as pd
+    import requests
 
     dates = pd.date_range("2025-10-01", periods=len(values), freq="W")
     df = pd.DataFrame({"planner": values}, index=dates)
 
     class FakeTrendReq:
-        def __init__(self, *a, **k):
-            pass
+        # _build_payload_via_get reads pt.headers for the explore GET.
+        headers = {"accept-language": "en-US"}
 
-        def build_payload(self, **k):
+        def __init__(self, *a, **k):
             pass
 
         def interest_over_time(self):
@@ -184,6 +187,27 @@ def _mock_pytrends(monkeypatch, values):
     mod = types.ModuleType("pytrends.request")
     mod.TrendReq = FakeTrendReq
     monkeypatch.setitem(sys.modules, "pytrends.request", mod)
+
+    # Mock the GET explore call (pytrends' POST explore is dead: HTTP 411).
+    if explore_widgets == "default":
+        widgets = [{"id": "TIMESERIES", "token": "tok",
+                    "request": {"q": "planner"}}]
+    else:
+        widgets = explore_widgets
+    body = ")]}'\n" + json.dumps({"widgets": widgets})
+
+    class FakeResp:
+        status_code = 200
+        text = body
+
+    class FakeSession:
+        headers = {}
+
+        def get(self, url, params=None, timeout=None):
+            assert "trends.google.com/trends/api/explore" in url
+            return FakeResp()
+
+    monkeypatch.setattr(requests, "session", lambda: FakeSession())
 
 
 def test_trends_rising(monkeypatch):
@@ -215,6 +239,76 @@ def test_trends_failure_becomes_unavailable(monkeypatch):
     mod.TrendReq = Boom
     monkeypatch.setitem(sys.modules, "pytrends.request", mod)
     with pytest.raises(MarketDataUnavailable):
+        TrendsClient().interest(["planner"])
+
+
+def test_trends_explore_uses_get_and_sets_timeseries_widget(monkeypatch):
+    import json
+
+    import requests
+
+    seen = {}
+
+    class FakeResp:
+        status_code = 200
+        text = ")]}'\n" + json.dumps(
+            {"widgets": [{"id": "TIMESERIES", "token": "tok123",
+                          "request": {"q": "x"}}]})
+
+    class FakeSession:
+        headers = {"accept-language": "en-US"}
+
+        def get(self, url, params=None, timeout=None):
+            seen["url"] = url
+            seen["params"] = params
+            return FakeResp()
+
+    monkeypatch.setattr(requests, "session", lambda: FakeSession())
+
+    class FakeTrendReq:
+        headers = {"accept-language": "en-US"}
+
+        def __init__(self, *a, **k):
+            pass
+
+    pt = FakeTrendReq()
+    TrendsClient()._build_payload_via_get(pt, ["cissp"])
+    assert "trends.google.com/trends/api/explore" in seen["url"]
+    assert pt.interest_over_time_widget["token"] == "tok123"
+    # keywords are embedded in the req payload, geo-scoped
+    req = json.loads(seen["params"]["req"])
+    assert req["comparisonItem"][0]["keyword"] == "cissp"
+    assert req["comparisonItem"][0]["geo"] == "US"
+
+
+def test_trends_explore_429_reports_rate_limit(monkeypatch):
+    import requests
+
+    class FakeResp:
+        status_code = 429
+        text = ""
+
+    class FakeSession:
+        headers = {}
+
+        def get(self, url, params=None, timeout=None):
+            return FakeResp()
+
+    monkeypatch.setattr(requests, "session", lambda: FakeSession())
+
+    class FakeTrendReq:
+        headers = {}
+
+        def __init__(self, *a, **k):
+            pass
+
+    with pytest.raises(MarketDataUnavailable, match="rate-limited"):
+        TrendsClient()._build_payload_via_get(FakeTrendReq(), ["cissp"])
+
+
+def test_trends_explore_without_timeseries_widget(monkeypatch):
+    _mock_pytrends(monkeypatch, [30] * 12, explore_widgets=[{"id": "GEO_MAP"}])
+    with pytest.raises(MarketDataUnavailable, match="no TIMESERIES"):
         TrendsClient().interest(["planner"])
 
 

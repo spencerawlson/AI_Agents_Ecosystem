@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from agents.creative.agent import CreativeAgent
 from agents.discovery.agent import DiscoveryAgent
@@ -73,9 +74,16 @@ class Runtime:
     handlers: dict
 
 
+def default_approvals_path() -> Path:
+    """Where approvals persist so the dashboard GUI and mission scripts
+    (separate processes) see the same approval queue."""
+    return Path(__file__).resolve().parent.parent / "data" / "approvals.json"
+
+
 def build_runtime(use_postgres: bool = False,
                   use_llm: bool | None = None,
-                  use_market: bool | None = None) -> Runtime:
+                  use_market: bool | None = None,
+                  approvals_persist: str | Path | bool | None = None) -> Runtime:
     """Wire every component together. Single composition root.
 
     use_llm: True forces real LLM sources, False forces heuristics,
@@ -86,6 +94,11 @@ def build_runtime(use_postgres: bool = False,
     LLM prompts, False disables it, None (default) enables it whenever
     the LLM gateway is on. Never breaks composition — any market
     failure degrades to data-free prompts.
+
+    approvals_persist: True (or a path) persists the approval gate to
+    disk so separate processes (dashboard GUI, mission scripts) share
+    one approval queue. None (default) keeps the gate in-memory, which
+    is what tests want. The APPROVALS_PATH env var is a fallback.
     """
     import logging
 
@@ -148,13 +161,19 @@ def build_runtime(use_postgres: bool = False,
     for agent_type, handler in handlers.items():
         orchestrator.register_handler(agent_type, handler)
 
+    persist = approvals_persist
+    if persist is None:
+        persist = os.environ.get("APPROVALS_PATH")
+    if persist is True:
+        persist = default_approvals_path()
+
     return Runtime(
         agent_registry=agent_registry,
         orchestrator=orchestrator,
         businesses=BusinessRegistry(),
         ledger=Ledger(),
         experiments=ExperimentEngine(),
-        approvals=ApprovalGate(),
+        approvals=ApprovalGate(persist_path=Path(persist) if persist else None),
         audit=audit_log,
         handlers=handlers,
     )

@@ -8,10 +8,14 @@ orchestrator's approval gate.
 
 from __future__ import annotations
 
+import logging
+
 from pydantic import BaseModel, Field
 
 from agents.base import BaseAgent
 from orchestrator.models import Task, utcnow
+
+log = logging.getLogger("agents.marketing")
 
 
 class Campaign(BaseModel):
@@ -122,7 +126,10 @@ class MarketingAgent(BaseAgent):
                 batch = seeds[i : i + 3]
                 try:
                     data = client.interest(batch)
-                except MarketDataUnavailable:
+                except MarketDataUnavailable as exc:
+                    # Log the reason — a silent {} here cost a full diagnostic
+                    # session when every keyword came back "unavailable".
+                    log.warning("Trends batch %s unavailable: %s", batch, exc)
                     data = {}
                 for kw in batch:
                     info = data.get(kw)
@@ -171,12 +178,20 @@ class MarketingAgent(BaseAgent):
                 )
             niche = task.inputs.get("niche", "")
             site_url = task.inputs.get("site_url", "")
+            features = [f for f in task.inputs.get("features", []) if f]
+            features_block = (
+                f"Real site features to build the value props around "
+                f"(do not invent others):\n"
+                + "\n".join(f"- {f}" for f in features)
+                + "\n" if features else ""
+            )
             prompt = (
                 f"You are a marketing strategist for {site_url}, an online learning "
                 f"platform in the niche: {niche}.\n"
+                f"{features_block}"
                 "Return ONLY a JSON object with exactly these keys:\n"
                 '- "audiences": 3 target audience segments (name + one-line pain point each)\n'
-                '- "value_props": 3 value propositions (one line each)\n'
+                '- "value_props": 3 value propositions (one line each, grounded in the real features above)\n'
                 '- "content_angles": 5 content angles for blog/social (one line each)\n'
                 '- "channels_ranked": 3 acquisition channels ranked best-first (one line each)'
             )

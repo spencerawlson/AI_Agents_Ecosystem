@@ -158,10 +158,66 @@ class EtsyMarketClient:
 # -- Google Trends -----------------------------------------------------
 
 class TrendsClient:
-    """12-month search-interest direction via pytrends (keyless)."""
+    """12-month search-interest direction via Google Trends (keyless).
+
+    NOTE (2026-10-04): pytrends 4.9.2 is the latest release and is
+    unmaintained. Its build_payload() POSTs the explore payload in the
+    query string with an empty body, which Google now rejects with
+    HTTP 411 (Length Required). We fetch the widget tokens with GET
+    instead (accepted by the endpoint) and only use pytrends for the
+    GET-based interest_over_time() call, which still works.
+    """
+
+    EXPLORE_URL = "https://trends.google.com/trends/api/explore"
 
     def __init__(self, geo: str = "US") -> None:
         self.geo = geo
+
+    def _build_payload_via_get(self, pt, kws: list[str]) -> None:
+        """Populate a TrendReq's TIMESERIES widget with a GET explore call."""
+        import json
+
+        import requests
+
+        token_payload = {
+            "hl": "en-US",
+            "tz": 360,
+            "req": json.dumps(
+                {
+                    "comparisonItem": [
+                        {"keyword": kw, "geo": self.geo, "time": "today 12-m"}
+                        for kw in kws
+                    ],
+                    "category": 0,
+                    "property": "",
+                }
+            ),
+        }
+        session = requests.session()
+        session.headers.update(pt.headers)
+        resp = session.get(
+            self.EXPLORE_URL, params=token_payload, timeout=(10, 25))
+        if resp.status_code == 429:
+            raise MarketDataUnavailable(
+                "Google Trends rate-limited this IP (HTTP 429) — "
+                "try again later or from another network")
+        if resp.status_code != 200:
+            raise MarketDataUnavailable(
+                f"Google Trends explore failed: HTTP {resp.status_code}")
+        try:
+            data = json.loads(resp.text[4:])  # strip ")]}',"
+        except Exception as exc:
+            raise MarketDataUnavailable(
+                f"could not parse Trends explore response: {exc}") from exc
+        pt.kw_list = list(kws)
+        pt.interest_over_time_widget = None
+        for widget in data.get("widgets", []):
+            if widget.get("id") == "TIMESERIES":
+                pt.interest_over_time_widget = widget
+                break
+        if pt.interest_over_time_widget is None:
+            raise MarketDataUnavailable(
+                "Trends explore returned no TIMESERIES widget")
 
     def interest(self, keywords: list[str]) -> dict:
         """{keyword: {avg_12mo, trend (rising|flat|falling), latest}}."""
@@ -170,14 +226,11 @@ class TrendsClient:
             return {}
         try:
             from pytrends.request import TrendReq
-            # NOTE: no retries/backoff kwargs — pytrends 4.9.2 passes
-            # method_whitelist to urllib3's Retry, which newer urllib3
-            # removed (TypeError). Flakiness is handled by the
-            # MarketDataUnavailable -> partial-snapshot policy instead.
             pt = TrendReq(hl="en-US", tz=360, timeout=(10, 25))
-            pt.build_payload(kw_list=kws, timeframe="today 12-m",
-                             geo=self.geo)
+            self._build_payload_via_get(pt, kws)
             df = pt.interest_over_time()
+        except MarketDataUnavailable:
+            raise
         except Exception as exc:
             raise MarketDataUnavailable(
                 f"Google Trends request failed: {exc}") from exc

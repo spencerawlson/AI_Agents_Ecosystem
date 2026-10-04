@@ -31,6 +31,68 @@ def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
+# Light, clean styling shared by the /reports and /approvals pages —
+# matches the /report page. Mobile-friendly, no dark ops-room styling.
+_PAGE_CSS = """
+body { font-family: sans-serif; margin: 0 auto; max-width: 960px;
+       padding: 16px; color: #222; }
+.muted { color: #666; font-size: 14px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0 20px; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left;
+         font-size: 14px; vertical-align: top; }
+th { background: #f0f0f0; }
+button { padding: 8px 14px; margin: 2px; border-radius: 6px;
+         border: 1px solid #ccc; background: #fff; cursor: pointer;
+         font-size: 14px; }
+button[name="approved"][value="true"] { background: #e6f4ea;
+         border-color: #34a853; }
+button[name="approved"][value="false"] { background: #fce8e6;
+         border-color: #ea4335; }
+blockquote { border-left: 4px solid #f59e0b; margin: 12px 0;
+             padding: 8px 12px; background: #fffbe6; }
+code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px;
+       font-size: 13px; }
+@media (max-width: 560px) { th, td { font-size: 13px; padding: 6px; } }
+"""
+
+
+def _approval_summary(a, registry) -> str:
+    """Human-readable HTML summary of an approval (not raw ids)."""
+    d = a.details or {}
+    when = ""
+    if getattr(a, "requested_at", None):
+        when = esc(str(a.requested_at).replace("T", " ")[:19])
+    if a.action == "mission_report_approval":
+        biz_name = d.get("business_name") or d.get("site_url") or "?"
+        report_name = d.get("report_name") or ""
+        link = (f"<br><a href='/reports/{esc(report_name)}'>View report</a>"
+                if report_name else "")
+        try:
+            spend = f"${float(d.get('total_spend_usd')):.4f}"
+        except (TypeError, ValueError):
+            spend = "?"
+        return (
+            f"<strong>Mission report</strong> — {esc(d.get('mission', 'mission'))} "
+            f"for <strong>{esc(biz_name)}</strong><br>"
+            f"<span class='muted'>{esc(d.get('drafts_count', '?'))} drafts · "
+            f"spend {spend} · requested {when}</span>{link}"
+        )
+    biz_name = ""
+    if a.business_id:
+        b = registry.get(a.business_id)
+        biz_name = b.name if b is not None else a.business_id
+    amount = f"${a.amount_usd:,.2f}" if a.amount_usd is not None else "—"
+    task = (f"task <code>{esc(a.task_id[:12])}…</code>"
+            if a.task_id else "no task")
+    return (
+        f"<strong>{esc(a.action)}</strong>"
+        + (f" — {esc(biz_name)}" if biz_name else "") + "<br>"
+        f"<span class='muted'>{task} · amount {amount} · "
+        f"requested by {esc(a.requested_by)} · {when}</span>"
+    )
+
+
 def create_app(
     orchestrator: Orchestrator | None = None,
     registry: BusinessRegistry | None = None,
@@ -67,7 +129,7 @@ def create_app(
 <h1>Portfolio</h1>
 <p>Businesses: {len(businesses)} | Revenue: ${total_revenue:,.2f} | Net profit: ${total_profit:,.2f}</p>
 <table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
 </body></html>"""
 
     @app.get("/businesses", response_class=HTMLResponse)
@@ -122,24 +184,94 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
     @app.get("/approvals", response_class=HTMLResponse)
     def approval_queue():
         gate: ApprovalGate = state["approvals"]
-        rows = "".join(
-            f"<tr><td>{esc(a.id)}</td><td>{esc(a.action)}</td><td>{a.amount_usd}</td>"
+        reg: BusinessRegistry = state["registry"]
+        pending = gate.pending()
+        decided = gate.decided(20)
+        pend_rows = "".join(
+            f"<tr><td>{_approval_summary(a, reg)}</td>"
             f"<td><form method='post' action='/approvals/{esc(a.id)}/decide'>"
             f"<button name='approved' value='true'>Approve</button>"
             f"<button name='approved' value='false'>Reject</button></form></td></tr>"
-            for a in gate.pending()
-        )
-        return f"""<html><body><h1>Approval queue</h1>
-<table border="1"><tr><th>ID</th><th>Action</th><th>Amount</th><th>Decide</th></tr>
-{rows}</table><p><a href="/">Back</a></p></body></html>"""
+            for a in pending
+        ) or "<tr><td colspan='2'>Nothing awaiting approval.</td></tr>"
+        dec_rows = "".join(
+            f"<tr><td>{_approval_summary(a, reg)}</td>"
+            f"<td>{esc(a.status.value)}</td>"
+            f"<td>{esc(a.decided_by or '—')}</td></tr>"
+            for a in decided
+        ) or "<tr><td colspan='3'>No decisions yet.</td></tr>"
+        return f"""<html><head><title>Approvals</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>{_PAGE_CSS}</style></head><body>
+<h1>✅ Approvals</h1>
+<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically.</p>
+<h2>Pending ({len(pending)})</h2>
+<div class="table-wrap"><table>
+<tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
+<h2>Recently decided</h2>
+<div class="table-wrap"><table>
+<tr><th>Request</th><th>Decision</th><th>By</th></tr>{dec_rows}</table></div>
+<p><a href="/">Back to portfolio</a> | <a href="/reports">📄 Reports</a></p>
+</body></html>"""
 
     @app.post("/approvals/{approval_id}/decide")
     def decide_approval(approval_id: str, approved: str = Form(...)):
         gate: ApprovalGate = state["approvals"]
-        gate.decide(approval_id, approved=approved.lower() == "true", decided_by="owner")
+        try:
+            gate.decide(approval_id, approved=approved.lower() == "true",
+                        decided_by="owner")
+        except ValueError as exc:
+            return HTMLResponse(
+                f"<html><body><p>Could not record decision: {esc(exc)}</p>"
+                f"<p><a href='/approvals'>Back</a></p></body></html>",
+                status_code=400,
+            )
         return HTMLResponse(
             "<html><body>Recorded. <a href='/approvals'>Back</a></body></html>"
         )
+
+    @app.get("/reports", response_class=HTMLResponse)
+    def reports_page():
+        """Mission reports (e.g. marketing missions), newest first."""
+        from dashboard.reports import list_reports
+
+        items = list_reports()
+        rows = "".join(
+            f"<tr><td><a href='/reports/{esc(r['name'])}'>{esc(r['title'])}</a></td>"
+            f"<td>{esc(r['mission'])}</td>"
+            f"<td>{esc(r['date'] or r['generated_at'] or '—')}</td>"
+            f"<td>{('$%.4f' % r['spend_usd']) if r['spend_usd'] is not None else '—'}</td></tr>"
+            for r in items
+        ) or ("<tr><td colspan='4'>No mission reports yet. Run a mission "
+                "(e.g. <code>python3 ecosystem/marketing_mission.py --llm</code>) "
+                "to produce one.</td></tr>")
+        return f"""<html><head><title>Mission reports</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>{_PAGE_CSS}</style></head><body>
+<h1>📄 Mission reports</h1>
+<p class="muted">Agent mission outputs, newest first. Reports are drafts —
+nothing in them was published.</p>
+<div class="table-wrap"><table>
+<tr><th>Report</th><th>Mission</th><th>Date</th><th>AI spend</th></tr>
+{rows}</table></div>
+<p><a href="/">Back to portfolio</a> | <a href="/approvals">✅ Approvals</a></p>
+</body></html>"""
+
+    @app.get("/reports/{name}", response_class=HTMLResponse)
+    def report_view(name: str):
+        """Render one mission report as safe HTML."""
+        from dashboard.reports import render_report
+
+        result = render_report(name)
+        if result is None:
+            raise HTTPException(404, "report not found")
+        title, body = result
+        return f"""<html><head><title>{esc(title)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>{_PAGE_CSS}</style></head><body>
+{body}
+<p><a href="/reports">Back to reports</a> | <a href="/">Portfolio</a></p>
+</body></html>"""
 
     @app.get("/experiment-001", response_class=HTMLResponse)
     def experiment_001():
@@ -384,7 +516,7 @@ th {{ background: #f0f0f0; }}
 <tr><th>Name</th><th>Type</th><th>Status</th><th>Revenue</th><th>Costs</th>
 <th>Net profit</th></tr>{biz_rows}</table></div>
 {exp_block}
-<p><a href="/">Back to portfolio</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/">Back to portfolio</a> | <a href="/reports">📄 Reports</a> | <a href="/game">🎮 Live game view</a></p>
 </body></html>"""
 
     @app.post("/api/tick")
@@ -421,7 +553,7 @@ th {{ background: #f0f0f0; }}
         from ecosystem.runtime import build_runtime
 
         use_pg = bool(os.environ.get("DATABASE_URL"))
-        rt = build_runtime(use_postgres=use_pg)
+        rt = build_runtime(use_postgres=use_pg, approvals_persist=True)
         app.state.runtime_holder["rt"] = rt
         state["orchestrator"] = rt.orchestrator
         state["registry"] = rt.businesses
