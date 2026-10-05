@@ -41,6 +41,10 @@ class Task(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
+    # -- quality: five-layer verification ("quintuple check") -------------
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    max_rework: int = 2
+    rework_count: int = 0
 
 
 class AgentRun(BaseModel):
@@ -57,6 +61,9 @@ class AgentRun(BaseModel):
     started_at: datetime = Field(default_factory=utcnow)
     finished_at: datetime | None = None
     error: str | None = None
+    # -- quality -----------------------------------------------------------
+    verification: dict | None = None
+    rework_count: int = 0
 
 
 class ApprovalStatus(str, Enum):

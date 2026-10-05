@@ -118,6 +118,12 @@ def run_tick(rt, tick: int) -> dict:
     winner = ranked[0] if ranked else None
 
     ai_spend = r1.cost_usd + r2.cost_usd
+    runs = [
+        {"agent_type": "discovery", "tokens_used": r1.tokens_used,
+         "cost_usd": r1.cost_usd},
+        {"agent_type": "research", "tokens_used": r2.tokens_used,
+         "cost_usd": r2.cost_usd},
+    ]
     business_id = None
     if winner is not None:
         biz = rt.businesses.create(winner.niche, winner.business_type)
@@ -140,10 +146,61 @@ def run_tick(rt, tick: int) -> dict:
         "score": winner.score if winner else None,
         "business_id": business_id,
         "ai_spend_usd": round(ai_spend, 4),
+        "runs": runs,
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def run_dispatcher(rt, args) -> int:
+    """Run the concurrent dispatcher: executes whatever tasks are submitted
+    to the orchestrator, across agents and businesses in parallel.
+
+    Submit work from another shell, e.g.:
+        python - <<'EOF'
+        from ecosystem.runtime import build_runtime
+        rt = build_runtime()
+        biz_a = rt.businesses.create("Evergreen Planners", "etsy")
+        biz_b = rt.businesses.create("Road to CISSP", "education_website")
+        rt.orchestrator.submit("operations", business_id=biz_a.id,
+                               inputs={"action": "check_health"},
+                               budget_usd=1.0, budget_tokens=2000)
+        rt.orchestrator.submit("marketing", business_id=biz_b.id,
+                               inputs={"action": "seo_keyword_map", "seeds": []},
+                               budget_usd=1.0, budget_tokens=4000)
+        EOF
+    Note: with the default in-memory store the dispatcher only sees tasks
+    submitted in this process. Use --use-postgres (separate process submits
+    against the same database) for cross-process work queues.
+    """
+    from orchestrator.dispatcher import Dispatcher, DispatcherPolicy
+
+    policy = DispatcherPolicy(
+        max_workers=args.max_workers,
+        max_per_agent=args.max_per_agent,
+        max_per_business=args.max_per_business,
+    )
+    dispatcher = Dispatcher(rt.orchestrator, policy=policy,
+                            approval_gate=rt.approvals,
+                            worker_id="worker-dispatcher")
+    dispatcher.start()
+    print(f"dispatcher online: {policy} "
+          f"store={'postgres' if args.use_postgres else 'memory'} "
+          "(Ctrl-C to stop gracefully)", flush=True)
+    try:
+        while True:
+            time.sleep(5)
+            stats = dispatcher.stats()
+            pending = len(rt.orchestrator.pending_tasks())
+            print(f"dispatcher: claimed={stats['claimed']} "
+                  f"completed={stats['completed']} failed={stats['failed']} "
+                  f"inflight={len(dispatcher.inflight())} pending={pending}",
+                  flush=True)
+    except KeyboardInterrupt:
+        print("dispatcher: shutting down...", flush=True)
+    dispatcher.stop()
+    return 0
+
+
+def main(argv: list[str] | None = None, rt=None) -> int:
     parser = argparse.ArgumentParser(description="Ecosystem headless worker")
     parser.add_argument("--interval", type=float, default=60.0,
                         help="seconds between ticks (default: 60)")
@@ -156,9 +213,34 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: 10; 0 disables)")
     parser.add_argument("--monitor-once", action="store_true",
                         help="run only the Etsy monitor once, then exit")
+    parser.add_argument("--llm", dest="use_llm", action="store_true",
+                        default=None,
+                        help="force real LLM inference (requires API key)")
+    parser.add_argument("--no-llm", dest="use_llm", action="store_false",
+                        help="force heuristic agents (no LLM calls)")
+    parser.add_argument("--no-market", dest="use_market", action="store_false",
+                        default=None,
+                        help="disable live market data (data-free prompts)")
+    parser.add_argument("--dispatcher", action="store_true",
+                        help="run the concurrent task dispatcher instead of "
+                             "the tick loop: executes submitted tasks across "
+                             "agents and businesses in parallel")
+    parser.add_argument("--max-workers", type=int, default=4,
+                        help="dispatcher threads (default: 4)")
+    parser.add_argument("--max-per-agent", type=int, default=2,
+                        help="dispatcher: concurrent tasks per agent type "
+                             "(default: 2)")
+    parser.add_argument("--max-per-business", type=int, default=2,
+                        help="dispatcher: concurrent tasks per business "
+                             "(default: 2)")
     args = parser.parse_args(argv)
 
-    rt = build_runtime(use_postgres=args.use_postgres)
+    if rt is None:
+        rt = build_runtime(use_postgres=args.use_postgres, use_llm=args.use_llm,
+                           use_market=args.use_market, approvals_persist=True)
+
+    if args.dispatcher:
+        return run_dispatcher(rt, args)
 
     if args.monitor_once:
         run_etsy_monitor_tick(rt, tick=1)

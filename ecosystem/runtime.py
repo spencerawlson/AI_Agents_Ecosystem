@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from agents.creative.agent import CreativeAgent
 from agents.discovery.agent import DiscoveryAgent
 from agents.marketing.agent import MarketingAgent
 from agents.operations.agent import OperationsAgent
 from agents.research.agent import ResearchAgent
+from agents.review.agent import ReviewAgent
 from agents.support.agent import SupportAgent
 from core.audit import AuditLog
 from core.experiments import ExperimentEngine
@@ -38,7 +40,26 @@ AGENT_CLASSES = (
     SupportAgent,
     CreativeAgent,
     OperationsAgent,
+    ReviewAgent,
 )
+
+
+def _build_agent(cls: type, gateway: "LLMGateway | None",
+                 market: "MarketDataProvider | None" = None):
+    """Construct an agent, wiring LLM sources when the gateway is on.
+
+    market (live Etsy + Trends data) is injected into the LLM sources so
+    prompts carry real numbers; silently ignored when unavailable.
+    """
+    from core.llm import LLMGateway  # noqa: F401  (re-export for type hints)
+
+    if gateway is not None and cls is DiscoveryAgent:
+        from agents.discovery.llm_source import LLMOpportunitySource
+        return cls(source=LLMOpportunitySource(gateway, market=market))
+    if gateway is not None and cls is ResearchAgent:
+        from agents.research.llm_source import LLMResearchSource
+        return cls(source=LLMResearchSource(gateway, market=market))
+    return cls()
 
 
 @dataclass
@@ -53,8 +74,53 @@ class Runtime:
     handlers: dict
 
 
-def build_runtime(use_postgres: bool = False) -> Runtime:
-    """Wire every component together. Single composition root."""
+def default_approvals_path() -> Path:
+    """Where approvals persist so the dashboard GUI and mission scripts
+    (separate processes) see the same approval queue."""
+    return Path(__file__).resolve().parent.parent / "data" / "approvals.json"
+
+
+def build_runtime(use_postgres: bool = False,
+                  use_llm: bool | None = None,
+                  use_market: bool | None = None,
+                  approvals_persist: str | Path | bool | None = None) -> Runtime:
+    """Wire every component together. Single composition root.
+
+    use_llm: True forces real LLM sources, False forces heuristics,
+    None (default) auto-detects from LLMGateway.enabled() (litellm +
+    API key present). The chosen mode is logged at startup.
+
+    use_market: True forces live market data (Etsy + Trends) into the
+    LLM prompts, False disables it, None (default) enables it whenever
+    the LLM gateway is on. Never breaks composition — any market
+    failure degrades to data-free prompts.
+
+    approvals_persist: True (or a path) persists the approval gate to
+    disk so separate processes (dashboard GUI, mission scripts) share
+    one approval queue. None (default) keeps the gate in-memory, which
+    is what tests want. The APPROVALS_PATH env var is a fallback.
+    """
+    import logging
+
+    from core.llm import LLMGateway
+
+    log = logging.getLogger("ecosystem.runtime")
+    llm_on = LLMGateway.enabled() if use_llm is None else bool(use_llm)
+    gateway = LLMGateway() if llm_on else None
+
+    market = None
+    market_on = llm_on and (True if use_market is None else bool(use_market))
+    if market_on:
+        from core.market_data import build_market_provider
+
+        try:
+            market = build_market_provider()
+        except Exception as exc:  # never break composition
+            log.warning("market data disabled (%s)", exc)
+            market = None
+        if market is None:
+            market_on = False
+
     agent_registry = AgentRegistry()
     handlers: dict = {}
     for cls in AGENT_CLASSES:
@@ -63,7 +129,18 @@ def build_runtime(use_postgres: bool = False) -> Runtime:
             capabilities=list(cls.capabilities),
             description=cls.description,
         )
-        handlers[cls.agent_type] = cls()
+        handlers[cls.agent_type] = _build_agent(cls, gateway, market)
+
+    log.warning("runtime mode: LLM %s (%s) | market data %s",
+                "ON" if llm_on else "OFF (heuristics)",
+                gateway.cheap_model if gateway else "no key/litellm",
+                "ON" if market_on else "OFF")
+    if use_llm and not LLMGateway.enabled():
+        # --llm was forced but the gateway can't actually run: say so now
+        # instead of letting the banner claim "LLM ON" and failing mid-run.
+        log.warning("WARNING: --llm requested but LLMGateway.enabled() is "
+                    "False (litellm not installed or no API key in env) — "
+                    "LLM actions will fail at dispatch")
 
     store = None
     if use_postgres:
@@ -78,9 +155,17 @@ def build_runtime(use_postgres: bool = False) -> Runtime:
             )
         store = PostgresTaskStore(url)
 
-    orchestrator = Orchestrator(registry=agent_registry, store=store)
+    audit_log = AuditLog()
+    orchestrator = Orchestrator(registry=agent_registry, store=store,
+                              audit=audit_log)
     for agent_type, handler in handlers.items():
         orchestrator.register_handler(agent_type, handler)
+
+    persist = approvals_persist
+    if persist is None:
+        persist = os.environ.get("APPROVALS_PATH")
+    if persist is True:
+        persist = default_approvals_path()
 
     return Runtime(
         agent_registry=agent_registry,
@@ -88,8 +173,8 @@ def build_runtime(use_postgres: bool = False) -> Runtime:
         businesses=BusinessRegistry(),
         ledger=Ledger(),
         experiments=ExperimentEngine(),
-        approvals=ApprovalGate(),
-        audit=AuditLog(),
+        approvals=ApprovalGate(persist_path=Path(persist) if persist else None),
+        audit=audit_log,
         handlers=handlers,
     )
 
@@ -99,7 +184,7 @@ def create_dashboard_app(rt: Runtime | None = None):
     from dashboard.app import create_app
 
     rt = rt or build_runtime(use_postgres=bool(os.environ.get("DATABASE_URL")))
-    return create_app(
+    app = create_app(
         orchestrator=rt.orchestrator,
         registry=rt.businesses,
         ledger=rt.ledger,
@@ -107,3 +192,5 @@ def create_dashboard_app(rt: Runtime | None = None):
         approvals=rt.approvals,
         audit=rt.audit,
     )
+    app.state.runtime_holder = {"rt": rt}
+    return app

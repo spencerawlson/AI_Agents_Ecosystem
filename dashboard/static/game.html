@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌱 Ecosystem Tycoon — Live</title>
+<style>
+  :root {
+    --bg: #fdf6ea;
+    --bg2: #fbeed9;
+    --card: #ffffff;
+    --ink: #3d3225;
+    --dim: #8a7a66;
+    --border: #f0e2cc;
+    --accent: #e8833a;
+    --accent-soft: #fdebd3;
+    --green: #2e9e5b;
+    --green-soft: #ddf3e5;
+    --red: #d64545;
+    --red-soft: #fbe3e3;
+    --amber: #c77f0a;
+    --amber-soft: #fdf0d0;
+    --blue: #3a7bd5;
+    --blue-soft: #e0edfb;
+    --purple: #8a5fc0;
+    --purple-soft: #ece2f8;
+    --pink: #d64f8b;
+    --pink-soft: #fbe4ef;
+    --teal: #1e9e8a;
+    --teal-soft: #dcf3ee;
+    --gold: #b8860b;
+    --gold-soft: #faf0d2;
+    --slate: #5b6b7f;
+    --slate-soft: #e6ebf1;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* ---------- ambient background ---------- */
+  #ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .5; animation: drift 26s ease-in-out infinite alternate; }
+  .blob.b1 { width: 480px; height: 480px; background: #ffe3b8; top: -140px; left: -120px; }
+  .blob.b2 { width: 420px; height: 420px; background: #d8efdc; bottom: -140px; right: -100px; animation-delay: -9s; }
+  .blob.b3 { width: 300px; height: 300px; background: #ffe9c9; top: 45%; left: 60%; animation-delay: -17s; }
+  @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(60px, 40px) scale(1.12); } }
+  .floater { position: absolute; font-size: 26px; opacity: .35; animation: floaty 14s ease-in-out infinite; }
+  @keyframes floaty { 0%,100% { transform: translateY(0) rotate(-6deg); } 50% { transform: translateY(-34px) rotate(8deg); } }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 22px;
+    background: rgba(255, 250, 240, .88);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border-bottom: 3px solid var(--border);
+    position: sticky; top: 0; z-index: 10; flex-wrap: wrap;
+    box-shadow: 0 6px 24px rgba(180, 130, 70, .10);
+  }
+  #hud .title {
+    font-size: 23px; font-weight: 900; letter-spacing: .5px;
+    background: linear-gradient(135deg, #2e7d46, #e8833a);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #tick-badge {
+    background: linear-gradient(135deg, var(--ink), #5c4d38); color: #fff;
+    font-weight: 800; font-size: 13px; letter-spacing: 1px;
+    padding: 7px 18px; border-radius: 999px;
+    box-shadow: 0 3px 10px rgba(61, 50, 37, .25);
+  }
+  .hud-stat { display: flex; flex-direction: column; min-width: 86px; }
+  .hud-stat .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; font-weight: 700; }
+  .hud-stat .value { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  #spark-wrap { display: flex; flex-direction: column; gap: 2px; }
+  #spark-wrap .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; font-weight: 700; }
+  #hud-spark { width: 130px; height: 38px; }
+  #verdict-chip {
+    margin-left: auto; padding: 7px 16px; border-radius: 999px;
+    font-weight: 800; font-size: 13px; letter-spacing: .5px; border: 2px solid;
+  }
+  #verdict-chip.ON_TRACK { color: var(--green); border-color: var(--green); background: var(--green-soft); }
+  #verdict-chip.BEHIND { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
+  #verdict-chip.STOP_LOSS { color: var(--red); border-color: var(--red); background: var(--red-soft); animation: wiggle 1s infinite; }
+  @keyframes wiggle { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-3deg); } 75% { transform: rotate(3deg); } }
+  #live-wrap { display: flex; align-items: center; gap: 6px; }
+  #live-dot { width: 12px; height: 12px; border-radius: 50%; background: #d8cbb6; display: inline-block; }
+  #live-dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pop .5s; }
+  @keyframes pop { 0% { transform: scale(1.7); } 100% { transform: scale(1); } }
+  #live-label { font-size: 11px; color: var(--dim); letter-spacing: 2px; font-weight: 800; }
+  #error-banner {
+    display: none; background: var(--red-soft); border-bottom: 2px solid var(--red);
+    color: var(--red); padding: 10px 22px; font-size: 13px; font-weight: 600;
+  }
+  #error-banner.show { display: block; }
+
+  /* ---------- layout ---------- */
+  #main { padding: 18px 22px 8px; flex: 1; max-width: 1400px; width: 100%; margin: 0 auto; }
+  .panel-title { font-size: 18px; font-weight: 900; margin: 20px 0 12px; display: flex; align-items: center; gap: 8px; }
+
+  /* ---------- crew cards ---------- */
+  #stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 1100px) { #stations { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { #stations { grid-template-columns: 1fr 1fr; } }
+  .char-card {
+    --c1: var(--accent-soft); --c2: #fff; --c-ink: var(--accent);
+    background: linear-gradient(180deg, #ffffff 0%, var(--c1) 130%);
+    border: 2px solid var(--border); border-radius: 22px;
+    padding: 18px 14px 12px; text-align: center;
+    box-shadow: 0 4px 14px rgba(180, 130, 70, .10);
+    transition: transform .15s, box-shadow .4s, border-color .4s;
+    position: relative; overflow: hidden;
+  }
+  .char-card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 6px;
+    background: linear-gradient(90deg, var(--c-ink), transparent);
+    opacity: .55;
+  }
+  .char-card:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(180, 130, 70, .18); }
+  .char-card.flash { border-color: var(--c-ink); box-shadow: 0 0 0 4px var(--c1), 0 8px 22px rgba(0,0,0,.12); }
+  .avatar {
+    width: 78px; height: 78px; margin: 2px auto 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 32% 28%, #ffffff 0%, var(--c1) 78%);
+    border: 3px solid #fff;
+    box-shadow: 0 4px 12px rgba(0,0,0,.10), inset 0 -4px 10px rgba(0,0,0,.05);
+    font-size: 40px; line-height: 1;
+  }
+  .char-card.working .avatar { animation: avatarPulse 1.1s ease-in-out infinite; }
+  @keyframes avatarPulse {
+    0%,100% { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,.10), 0 0 0 0 var(--c1); }
+    50% { transform: scale(1.07); box-shadow: 0 4px 12px rgba(0,0,0,.10), 0 0 0 10px transparent; }
+  }
+  .char-emoji { display: inline-block; }
+  .char-card.working .char-emoji { animation: bounce .7s infinite; }
+  @keyframes bounce { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-6px) rotate(4deg); } }
+  .char-name { font-size: 17px; font-weight: 800; margin-top: 10px; }
+  .char-role {
+    display: inline-block; font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 1.5px; color: var(--c-ink); background: #ffffffaa;
+    border: 1.5px solid var(--c-ink); border-radius: 999px; padding: 3px 12px; margin: 6px 0 8px;
+  }
+  .char-status { font-size: 13px; font-weight: 600; color: var(--dim); min-height: 20px; margin-bottom: 10px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .char-card.working .char-status { color: var(--c-ink); font-weight: 800; }
+  .char-stats { display: flex; justify-content: center; gap: 14px; border-top: 2px dashed var(--border); padding-top: 8px; font-size: 12px; }
+  .char-stats .s { display: flex; flex-direction: column; }
+  .char-stats .s-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); font-weight: 700; }
+  .char-stats .s-value { font-weight: 800; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .char-big { font-size: 28px; font-weight: 900; font-variant-numeric: tabular-nums; border-top: 2px dashed var(--border); padding-top: 8px; }
+  .char-sub { font-size: 12px; color: var(--dim); font-weight: 600; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- lower panels ---------- */
+  #lower { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { #lower { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 2px solid var(--border); border-radius: 22px; padding: 18px;
+    box-shadow: 0 4px 14px rgba(180, 130, 70, .10); }
+  .panel h2 { font-size: 15px; font-weight: 800; margin-bottom: 12px; }
+  .biz-row { display: flex; align-items: center; gap: 10px; background: var(--bg);
+    border: 2px solid var(--border); border-radius: 14px; padding: 10px 14px; margin-bottom: 8px;
+    animation: slideIn .35s ease; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .biz-row .biz-emoji { font-size: 26px; }
+  .biz-row .biz-info { flex: 1; min-width: 0; }
+  .biz-row .biz-name { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .biz-row .biz-type { font-size: 11px; color: var(--dim); font-weight: 600; }
+  .status-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+    padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+  .status-badge.researching { background: var(--blue-soft); color: var(--blue); }
+  .status-badge.validated { background: var(--purple-soft); color: var(--purple); }
+  .status-badge.approved, .status-badge.live, .status-badge.operating { background: var(--green-soft); color: var(--green); }
+  .status-badge.building { background: var(--amber-soft); color: var(--amber); }
+  .status-badge.paused, .status-badge.shut_down { background: var(--red-soft); color: var(--red); }
+  .status-badge.proposed, .status-badge.discovered { background: var(--bg2); color: var(--dim); }
+  .biz-profit { font-weight: 800; font-variant-numeric: tabular-nums; font-size: 15px; }
+  .empty-note { color: var(--dim); font-style: italic; padding: 14px; text-align: center; }
+  #events-panel { max-height: 420px; display: flex; flex-direction: column; }
+  #events-feed { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .event-row { background: var(--bg); border: 2px solid var(--border); border-radius: 12px;
+    padding: 8px 12px 8px 10px; font-size: 13px; line-height: 1.4;
+    border-left-width: 6px; animation: slideIn .3s ease; }
+  .event-row .e-voice { font-weight: 600; }
+  .event-row .e-meta { font-size: 11px; color: var(--dim); font-weight: 600; margin-top: 2px; }
+  .event-row.fresh { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* ---------- experiment 001 ---------- */
+  #exp001 { margin-top: 14px; }
+  #exp001.hidden { display: none; }
+  .exp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+  @media (max-width: 560px) { .exp-grid { grid-template-columns: repeat(2, 1fr); } }
+  .exp-cell { background: var(--bg); border: 2px solid var(--border); border-radius: 14px; padding: 10px 12px; text-align: center; }
+  .exp-cell .label { font-size: 10px; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; font-weight: 800; }
+  .exp-cell .value { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .goalbar { margin: 4px 0 12px; }
+  .goalbar .goal-label { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--dim); margin-bottom: 5px; }
+  .goalbar .track { height: 14px; background: var(--bg2); border: 2px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .goalbar .fill {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--green), #7ed491);
+    transition: width .8s cubic-bezier(.2,.8,.2,1);
+  }
+  .goalbar.money .fill { background: linear-gradient(90deg, #e8833a, #f5b04c); }
+  #exp-triggers { list-style: none; }
+  #exp-triggers li { font-size: 13px; font-weight: 600; color: var(--red); background: var(--red-soft);
+    border-radius: 10px; padding: 8px 12px; margin-top: 6px; }
+  #exp-triggers li.ok { color: var(--green); background: var(--green-soft); }
+
+  /* ---------- controls ---------- */
+  #controls {
+    display: flex; align-items: center; gap: 10px; padding: 14px 22px;
+    background: rgba(255, 250, 240, .92);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border-top: 3px solid var(--border);
+    position: sticky; bottom: 0; flex-wrap: wrap;
+    max-width: 1400px; width: 100%; margin: 18px auto 0;
+    border-left: 3px solid var(--border); border-right: 3px solid var(--border);
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -6px 24px rgba(180, 130, 70, .10);
+  }
+  button, select {
+    background: var(--card); color: var(--ink); border: 2px solid var(--border);
+    border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 800;
+    cursor: pointer; font-family: inherit;
+    box-shadow: 0 2px 8px rgba(180, 130, 70, .12);
+    transition: transform .12s, border-color .2s, box-shadow .2s;
+  }
+  button:hover:not(:disabled), #controls a.pill:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(232,131,58,.25); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+  button.primary { background: linear-gradient(135deg, #f09a4e, #e8833a); border-color: #e8833a; color: #fff; }
+  button.danger { background: var(--card); border-color: var(--red); color: var(--red); }
+  button.active-toggle { background: linear-gradient(135deg, #3aa866, #2e9e5b); border-color: var(--green); color: #fff; }
+  #controls .spacer { flex: 1; }
+  #controls .hint { font-size: 12px; color: var(--dim); font-weight: 600; }
+  #controls a.pill {
+    background: var(--card); color: var(--ink); border: 2px solid var(--border);
+    border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 800;
+    text-decoration: none; display: inline-block; font-family: inherit;
+    box-shadow: 0 2px 8px rgba(180, 130, 70, .12);
+    transition: transform .12s, border-color .2s, box-shadow .2s;
+  }
+  #confetti { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 560px) {
+    #main { padding: 14px 14px 8px; }
+    #hud { padding: 10px 14px; gap: 10px; }
+    #hud .title { font-size: 18px; }
+    #tick-badge { font-size: 11px; padding: 5px 12px; }
+    .hud-stat { min-width: 68px; }
+    .hud-stat .value { font-size: 17px; }
+    #spark-wrap { display: none; }
+    #verdict-chip { margin-left: 0; font-size: 12px; padding: 6px 12px; }
+    .panel-title { font-size: 15px; margin: 14px 0 8px; }
+    .avatar { width: 62px; height: 62px; font-size: 32px; }
+    .char-card { padding: 14px 8px 10px; }
+    .char-name { font-size: 14px; }
+    .char-stats { gap: 8px; }
+    #events-panel { max-height: 320px; }
+    .exp-cell { padding: 8px 8px; }
+    .exp-cell .value { font-size: 17px; }
+    .biz-row { padding: 10px 12px; gap: 8px; }
+    .biz-row .biz-emoji { font-size: 22px; }
+    #controls { padding: 12px 14px; gap: 8px; }
+    #controls > button, #controls > select, #controls > a.pill { flex: 1 1 44%; min-height: 48px; font-size: 15px; }
+    #controls .spacer { display: none; }
+    #controls .hint { flex-basis: 100%; text-align: center; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .blob, .floater, .char-card.working .avatar, .char-card.working .char-emoji { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="ambient" aria-hidden="true">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+  <span class="floater" style="top:12%;left:6%">🌱</span>
+  <span class="floater" style="top:22%;right:8%;animation-delay:-4s">💰</span>
+  <span class="floater" style="top:64%;left:3%;animation-delay:-8s">🚀</span>
+  <span class="floater" style="top:78%;right:5%;animation-delay:-11s">⭐</span>
+</div>
+<canvas id="confetti"></canvas>
+<header id="hud">
+  <div class="title">🌱 Ecosystem Tycoon</div>
+  <div id="tick-badge">TICK –</div>
+  <div class="hud-stat"><span class="label">Revenue</span><span class="value" id="hud-revenue">–</span></div>
+  <div class="hud-stat"><span class="label">Costs</span><span class="value" id="hud-costs">–</span></div>
+  <div class="hud-stat"><span class="label">Net profit</span><span class="value" id="hud-profit">–</span></div>
+  <div id="spark-wrap"><span class="label">Profit trend</span><canvas id="hud-spark" width="260" height="76"></canvas></div>
+  <div id="verdict-chip" style="display:none"></div>
+  <div id="live-wrap"><span id="live-dot"></span><span id="live-label">LIVE</span></div>
+</header>
+<div id="error-banner"></div>
+<div id="main">
+  <div class="panel-title">⭐ Your Crew</div>
+  <section id="stations"></section>
+  <div id="lower">
+    <div class="panel" id="businesses-panel">
+      <h2>🏪 Businesses</h2>
+      <div id="businesses-list"></div>
+    </div>
+    <div class="panel" id="events-panel">
+      <h2>📣 What Just Happened</h2>
+      <div id="events-feed"></div>
+    </div>
+  </div>
+  <div class="panel" id="exp001">
+    <h2>🧪 Experiment 001 — Evergreen Planners</h2>
+    <div class="goalbar money">
+      <div class="goal-label"><span>💵 Revenue goal</span><span id="exp-goal-text">$0 / $1,000</span></div>
+      <div class="track"><div class="fill" id="exp-goal-fill"></div></div>
+    </div>
+    <div class="goalbar">
+      <div class="goal-label"><span>📅 60-day clock</span><span id="exp-day-text">Day 0 / 60</span></div>
+      <div class="track"><div class="fill" id="exp-day-fill"></div></div>
+    </div>
+    <div class="exp-grid">
+      <div class="exp-cell"><div class="label">Pace</div><div class="value" id="exp-pace">–</div></div>
+      <div class="exp-cell"><div class="label">Verdict</div><div class="value" id="exp-verdict">–</div></div>
+      <div class="exp-cell"><div class="label">Orders</div><div class="value" id="exp-orders">–</div></div>
+      <div class="exp-cell"><div class="label">Revenue</div><div class="value" id="exp-revenue">–</div></div>
+      <div class="exp-cell"><div class="label">Spend</div><div class="value" id="exp-spend">–</div></div>
+      <div class="exp-cell"><div class="label">Avg order</div><div class="value" id="exp-aov">–</div></div>
+    </div>
+    <ul id="exp-triggers"></ul>
+  </div>
+</div>
+<footer id="controls">
+  <button id="btn-step" class="primary">⏭ Step</button>
+  <button id="btn-auto">▶ Auto</button>
+  <select id="speed" title="Auto speed">
+    <option value="4000">1×</option>
+    <option value="2000">2×</option>
+    <option value="1000">4×</option>
+  </select>
+  <button id="btn-pause">⏸ Pause</button>
+  <button id="btn-reset" class="danger">↺ Reset</button>
+  <a class="pill" href="/report">📊 Report</a>
+  <span class="spacer"></span>
+  <span class="hint">Step = one real orchestrator tick · Auto runs ticks on the speed interval</span>
+</footer>
+<script>
+"use strict";
+
+/* ---------------- helpers ---------------- */
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const fmtUSD = (n) => {
+  const v = Number(n) || 0;
+  return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const fmtInt = (n) => (Number(n) || 0).toLocaleString("en-US");
+const fmtTime = (ts) => {
+  if (ts == null || ts === "") return "";
+  const ms = Number(ts);
+  if (!isNaN(ms)) {
+    const t = ms < 1e12 ? ms * 1000 : ms;
+    return new Date(t).toLocaleTimeString("en-US", { hour12: false });
+  }
+  const d = new Date(ts);
+  return isNaN(d) ? "" : d.toLocaleTimeString("en-US", { hour12: false });
+};
+
+/* ---------------- the crew (fixed roster) ---------------- */
+const ROSTER = [
+  { name: "Scout",   emoji: "🔭", role: "Discovery",   agentType: "discovery",  c1: "#e0edfb", ink: "#3a7bd5" },
+  { name: "Analyst", emoji: "🔬", role: "Research",    agentType: "research",   c1: "#ece2f8", ink: "#8a5fc0" },
+  { name: "Builder", emoji: "🛠️", role: "Product",     agentType: null,         c1: "#fdebd3", ink: "#e8833a" },
+  { name: "Studio",  emoji: "🎨", role: "Creative",    agentType: "creative",   c1: "#fbe4ef", ink: "#d64f8b" },
+  { name: "Growth",  emoji: "📣", role: "Marketing",   agentType: "marketing",  c1: "#ddf3e5", ink: "#2e9e5b" },
+  { name: "Care",    emoji: "💬", role: "Support",     agentType: "support",    c1: "#dcf3ee", ink: "#1e9e8a" },
+  { name: "Ops",     emoji: "⚙️", role: "Operations",  agentType: "operations", c1: "#e6ebf1", ink: "#5b6b7f" },
+  { name: "Ledger",  emoji: "📒", role: "Finance",     agentType: null,         c1: "#faf0d2", ink: "#b8860b" },
+];
+// Agent types that actually execute work during a tick (see ecosystem/worker.py run_tick)
+const TICK_WORKERS = ["discovery", "research"];
+const VERDICT_LABEL = { ON_TRACK: "🟢 ON TRACK", BEHIND: "🟡 BEHIND", STOP_LOSS: "🔴 STOP LOSS" };
+const ACTOR_COLORS = {
+  discovery: "#3a7bd5", research: "#8a5fc0", marketing: "#2e9e5b", support: "#1e9e8a",
+  creative: "#d64f8b", operations: "#5b6b7f", game: "#e8833a", worker: "#c77f0a",
+  etsy_monitor: "#b8860b", system: "#8a7a66",
+};
+
+/* ---------------- state ---------------- */
+const state = {
+  snapshot: null,
+  prevTasks: {},       // agentType -> tasks_completed, for flash highlight
+  prevBizCount: null,
+  auto: false,
+  autoTimer: null,
+  tickInFlight: false,
+  profitHistory: [],   // {tick, profit} for the sparkline
+};
+
+/* ---------------- api ---------------- */
+async function api(path, method) {
+  const res = await fetch(path, { method: method || "GET" });
+  if (!res.ok) throw new Error("HTTP " + res.status + " on " + path);
+  return res.json();
+}
+function showError(msg) {
+  const b = $("error-banner");
+  b.textContent = "⚠ Can't reach the game server: " + msg + " — retrying…";
+  b.classList.add("show");
+}
+function hideError() { $("error-banner").classList.remove("show"); }
+function pulseLive() {
+  const d = $("live-dot");
+  d.classList.remove("on");
+  void d.offsetWidth;
+  d.classList.add("on");
+}
+
+/* ---------------- confetti ---------------- */
+const confettiPieces = [];
+function burstConfetti() {
+  const cv = $("confetti");
+  const ctx = cv.getContext("2d");
+  cv.width = innerWidth; cv.height = innerHeight;
+  const colors = ["#e8833a", "#2e9e5b", "#3a7bd5", "#d64f8b", "#b8860b", "#8a5fc0"];
+  for (let i = 0; i < 90; i++) {
+    confettiPieces.push({
+      x: innerWidth / 2 + (Math.random() - .5) * 200,
+      y: innerHeight * .35,
+      vx: (Math.random() - .5) * 9,
+      vy: Math.random() * -9 - 3,
+      s: Math.random() * 7 + 4,
+      r: Math.random() * Math.PI,
+      vr: (Math.random() - .5) * .3,
+      c: colors[i % colors.length],
+      life: 90 + Math.random() * 40,
+    });
+  }
+  if (!burstConfetti.running) { burstConfetti.running = true; requestAnimationFrame(confettiTick); }
+}
+function confettiTick() {
+  const cv = $("confetti");
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  for (let i = confettiPieces.length - 1; i >= 0; i--) {
+    const p = confettiPieces[i];
+    p.x += p.vx; p.y += p.vy; p.vy += .28; p.r += p.vr; p.life--;
+    if (p.life <= 0 || p.y > cv.height + 20) { confettiPieces.splice(i, 1); continue; }
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+    ctx.fillStyle = p.c; ctx.globalAlpha = Math.min(1, p.life / 40);
+    ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * .62);
+    ctx.restore();
+  }
+  if (confettiPieces.length) requestAnimationFrame(confettiTick);
+  else { burstConfetti.running = false; ctx.clearRect(0, 0, cv.width, cv.height); }
+}
+
+/* ---------------- sparkline ---------------- */
+function drawSpark() {
+  const cv = $("hud-spark");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const h = state.profitHistory;
+  if (h.length < 2) {
+    ctx.fillStyle = "#8a7a66"; ctx.font = "20px sans-serif";
+    ctx.fillText("—", 8, H / 2 + 7);
+    return;
+  }
+  const vals = h.map(p => p.profit);
+  const min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+  const span = (max - min) || 1;
+  const X = (i) => 6 + (i / (h.length - 1)) * (W - 12);
+  const Y = (v) => 6 + (1 - (v - min) / span) * (H - 12);
+  // zero line
+  ctx.strokeStyle = "#d8cbb6"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(W, Y(0)); ctx.stroke();
+  ctx.setLineDash([]);
+  // area + line
+  const up = vals[vals.length - 1] >= vals[0];
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  const col = up ? "#2e9e5b" : "#d64545";
+  grad.addColorStop(0, col + "55"); grad.addColorStop(1, col + "08");
+  ctx.beginPath(); ctx.moveTo(X(0), Y(vals[0]));
+  vals.forEach((v, i) => ctx.lineTo(X(i), Y(v)));
+  ctx.lineTo(X(vals.length - 1), H); ctx.lineTo(X(0), H); ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(X(0), Y(vals[0]));
+  vals.forEach((v, i) => ctx.lineTo(X(i), Y(v)));
+  ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.lineJoin = "round"; ctx.stroke();
+  // last point
+  ctx.beginPath(); ctx.arc(X(vals.length - 1), Y(vals[vals.length - 1]), 6, 0, 7);
+  ctx.fillStyle = col; ctx.fill();
+  ctx.beginPath(); ctx.arc(X(vals.length - 1), Y(vals[vals.length - 1]), 9, 0, 7);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+}
+
+/* ---------------- render ---------------- */
+function render(snapshot) {
+  state.snapshot = snapshot;
+  const t = snapshot.totals || {};
+  const tick = snapshot.tick;
+  const last = state.profitHistory[state.profitHistory.length - 1];
+  if (!last || last.tick !== tick) {
+    state.profitHistory.push({ tick: tick, profit: Number(t.net_profit) || 0 });
+    if (state.profitHistory.length > 40) state.profitHistory.shift();
+  }
+  const bizCount = (snapshot.businesses || []).length;
+  if (state.prevBizCount != null && bizCount > state.prevBizCount) burstConfetti();
+  state.prevBizCount = bizCount;
+  renderHUD(snapshot);
+  renderStations(snapshot);
+  renderBusinesses(snapshot.businesses || []);
+  renderEvents(snapshot.events || []);
+  renderExperiment(snapshot.experiment_001);
+  drawSpark();
+  pulseLive();
+}
+
+function renderHUD(s) {
+  $("tick-badge").textContent = "TICK " + (s.tick != null ? s.tick : "–");
+  const t = s.totals || {};
+  $("hud-revenue").textContent = fmtUSD(t.revenue);
+  $("hud-costs").textContent = fmtUSD(t.total_costs);
+  const p = $("hud-profit");
+  p.textContent = fmtUSD(t.net_profit);
+  p.className = "value " + ((Number(t.net_profit) || 0) >= 0 ? "pos" : "neg");
+  const chip = $("verdict-chip");
+  const e = s.experiment_001;
+  if (e && e.verdict) {
+    chip.style.display = "";
+    chip.className = e.verdict;
+    chip.textContent = VERDICT_LABEL[e.verdict] || e.verdict;
+  } else {
+    chip.style.display = "none";
+  }
+}
+
+function renderStations(s) {
+  const wrap = $("stations");
+  const byType = {};
+  for (const a of (s.agents || [])) byType[String(a.type || "").toLowerCase()] = a;
+  const totals = s.totals || {};
+  const businesses = s.businesses || [];
+  wrap.innerHTML = "";
+  for (const c of ROSTER) {
+    const card = document.createElement("div");
+    card.className = "char-card";
+    card.style.setProperty("--c1", c.c1);
+    card.style.setProperty("--c-ink", c.ink);
+    let inner = '<div class="avatar"><span class="char-emoji">' + c.emoji + "</span></div>" +
+      '<div class="char-name">' + esc(c.name) + "</div><br>" +
+      '<div class="char-role">' + esc(c.role) + "</div>";
+
+    if (c.agentType) {
+      // Real agent station: stats come from the API's agents array.
+      const a = byType[c.agentType] || {};
+      const tasks = Number(a.tasks_completed) || 0;
+      const prev = state.prevTasks[c.agentType];
+      const increased = prev != null && tasks > prev;
+      state.prevTasks[c.agentType] = tasks;
+      const working = state.tickInFlight && TICK_WORKERS.indexOf(c.agentType) !== -1;
+      if (working) card.classList.add("working");
+      if (increased) card.classList.add("flash");
+      const statusText = working ? "Working…" : (a.last_task ? a.last_task : "Standing by");
+      inner += '<div class="char-status"' +
+        ((a.last_task && !working) ? ' title="' + esc(a.last_task) + '"' : "") + ">" +
+        (working ? "⚡ " : "▸ ") + esc(statusText) + "</div>";
+      inner += '<div class="char-stats">' +
+        '<div class="s"><span class="s-label">Tasks ✓</span><span class="s-value">' + fmtInt(tasks) + "</span></div>" +
+        '<div class="s"><span class="s-label">Tokens</span><span class="s-value">' + fmtInt(a.tokens_used) + "</span></div>" +
+        '<div class="s"><span class="s-label">Cost</span><span class="s-value">' + fmtUSD(a.cost_usd) + "</span></div>" +
+        "</div>";
+      if (increased) setTimeout(() => card.classList.remove("flash"), 1400);
+    } else if (c.name === "Builder") {
+      // Product station: derived from totals + businesses (no agent_type).
+      const n = Number(totals.businesses) || 0;
+      const latest = businesses.length ? businesses[businesses.length - 1] : null;
+      inner += '<div class="char-big">' + fmtInt(n) + ' <span style="font-size:14px">🏪</span></div>' +
+        '<div class="char-sub" title="' + esc(latest ? latest.name : "") + '">' +
+        esc(latest ? "Latest: " + latest.name : "No businesses yet — press Step") + "</div>";
+    } else {
+      // Ledger station: real ledger totals (no agent_type).
+      const profit = Number(totals.net_profit) || 0;
+      inner += '<div class="char-stats">' +
+        '<div class="s"><span class="s-label">Revenue</span><span class="s-value pos">' + fmtUSD(totals.revenue) + "</span></div>" +
+        '<div class="s"><span class="s-label">Costs</span><span class="s-value">' + fmtUSD(totals.total_costs) + "</span></div>" +
+        '<div class="s"><span class="s-label">Net</span><span class="s-value ' + (profit >= 0 ? "pos" : "neg") + '">' + fmtUSD(profit) + "</span></div>" +
+        "</div>";
+    }
+    card.innerHTML = inner;
+    wrap.appendChild(card);
+  }
+}
+
+function renderBusinesses(businesses) {
+  const wrap = $("businesses-list");
+  wrap.innerHTML = "";
+  if (!businesses.length) {
+    wrap.innerHTML = '<div class="empty-note">No businesses yet — press Step and the crew will get to work! 🚀</div>';
+    return;
+  }
+  for (const b of businesses) {
+    const profit = Number(b.net_profit) || 0;
+    const row = document.createElement("div");
+    row.className = "biz-row";
+    row.innerHTML =
+      '<span class="biz-emoji">🏪</span>' +
+      '<div class="biz-info"><div class="biz-name">' + esc(b.name) + "</div>" +
+      '<div class="biz-type">' + esc(b.business_type || "") + "</div></div>" +
+      '<span class="status-badge ' + esc(String(b.status || "").toLowerCase()) + '">' + esc(b.status || "?") + "</span>" +
+      '<div class="biz-profit ' + (profit >= 0 ? "pos" : "neg") + '">' + fmtUSD(profit) + "</div>";
+    wrap.appendChild(row);
+  }
+}
+
+function eventVoice(e) {
+  // Game-voice interpretations of real audit events (newest data wins).
+  const r = e.result;
+  if (r && r.winner != null) {
+    const tick = (r.tick != null) ? "T" + r.tick + " · " : "";
+    return tick + "Analyst ranked the opportunities — '" + r.winner + "' wins (" + r.score + ")";
+  }
+  if (e.event === "stop_loss_triggered") return "⛔ Stop-loss triggered — check Experiment 001!";
+  if (e.event === "tick_completed") {
+    const who = e.actor === "game" ? "The crew" : (e.actor || "Someone");
+    return who + " finished a tick" + (e.business_id ? " and launched a business! 🎉" : ".");
+  }
+  return (e.actor || "system") + " — " + (e.event || "");
+}
+
+function renderEvents(events) {
+  const feed = $("events-feed");
+  feed.innerHTML = "";
+  let shown = 0;
+  for (const e of events) {  // API sends newest-first already
+    if (shown >= 100) break;
+    const row = document.createElement("div");
+    row.className = "event-row" + (shown === 0 ? " fresh" : "");
+    row.style.borderLeftColor = ACTOR_COLORS[e.actor] || ACTOR_COLORS.system;
+    const metaBits = [];
+    const t = fmtTime(e.ts);
+    if (t) metaBits.push(t);
+    const ids = [e.business_id, e.task_id].filter(Boolean).join(" · ");
+    if (ids) metaBits.push(ids);
+    row.innerHTML = '<div class="e-voice">' + esc(eventVoice(e)) + "</div>" +
+      (metaBits.length ? '<div class="e-meta">' + esc(metaBits.join(" · ")) + "</div>" : "");
+    feed.appendChild(row);
+    shown++;
+  }
+  if (!shown) feed.innerHTML = '<div class="empty-note">Quiet… for now. Press Step! 🎲</div>';
+  feed.scrollTop = 0;
+}
+
+function renderExperiment(e) {
+  const panel = $("exp001");
+  if (!e) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  const rev = Number(e.revenue_usd) || 0;
+  const goalPct = Math.min(100, (rev / 1000) * 100);
+  $("exp-goal-fill").style.width = goalPct + "%";
+  $("exp-goal-text").textContent = fmtUSD(rev) + " / $1,000";
+  const day = Number(e.days_elapsed) || 0;
+  $("exp-day-fill").style.width = Math.min(100, (day / 60) * 100) + "%";
+  $("exp-day-text").textContent = "Day " + day + " / 60";
+  $("exp-pace").textContent = (e.pace_pct != null ? e.pace_pct + "%" : "–");
+  const v = $("exp-verdict");
+  v.textContent = (VERDICT_LABEL[e.verdict] || e.verdict || "–");
+  v.className = "value " + (e.verdict === "ON_TRACK" ? "pos" : e.verdict === "STOP_LOSS" ? "neg" : "");
+  if (e.verdict === "BEHIND") v.style.color = "var(--amber)"; else v.style.color = "";
+  $("exp-orders").textContent = fmtInt(e.orders);
+  $("exp-revenue").textContent = fmtUSD(e.revenue_usd);
+  $("exp-spend").textContent = fmtUSD(e.spend_usd);
+  const orders = Number(e.orders) || 0;
+  $("exp-aov").textContent = orders > 0 ? fmtUSD(rev / orders) : "–";
+  const ul = $("exp-triggers");
+  ul.innerHTML = "";
+  const triggers = e.stop_loss_triggers || [];
+  if (!triggers.length) {
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.textContent = "✅ No stop-loss triggers active. Smooth sailing!";
+    ul.appendChild(li);
+  } else {
+    for (const t of triggers) {
+      const li = document.createElement("li");
+      li.textContent = "⛔ " + t;
+      ul.appendChild(li);
+    }
+  }
+}
+
+/* ---------------- actions ---------------- */
+async function refresh() {
+  try {
+    const s = await api("/api/snapshot");
+    hideError();
+    render(s);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function doTick() {
+  if (state.tickInFlight) return;
+  state.tickInFlight = true;
+  updateButtons();
+  renderStations(state.snapshot || { agents: [], totals: {}, businesses: [] });
+  try {
+    const res = await api("/api/tick", "POST");
+    hideError();
+    render(res.snapshot || res);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    state.tickInFlight = false;
+    updateButtons();
+    if (state.snapshot) renderStations(state.snapshot);
+  }
+}
+
+async function doReset() {
+  if (!confirm("Reset the game? Your whole crew's progress will be lost!")) return;
+  stopAuto();
+  try {
+    const res = await api("/api/reset", "POST");
+    hideError();
+    state.prevTasks = {};
+    state.prevBizCount = null;
+    state.profitHistory = [];
+    render(res.snapshot || res);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function startAuto() {
+  if (state.auto || state.tickInFlight) return;
+  state.auto = true;
+  const interval = Number($("speed").value) || 4000;
+  const loop = async () => {
+    if (!state.auto) return;
+    await doTick();
+    if (state.auto) state.autoTimer = setTimeout(loop, interval);
+  };
+  loop();
+  updateButtons();
+}
+
+function stopAuto() {
+  state.auto = false;
+  if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
+  updateButtons();
+}
+
+function updateButtons() {
+  $("btn-step").disabled = state.tickInFlight;
+  $("btn-auto").disabled = state.tickInFlight || state.auto;
+  $("btn-auto").classList.toggle("active-toggle", state.auto);
+  $("btn-auto").textContent = state.auto ? "⏸ Auto ON" : "▶ Auto";
+  $("btn-pause").disabled = !state.auto;
+}
+
+/* ---------------- wiring ---------------- */
+$("btn-step").addEventListener("click", doTick);
+$("btn-auto").addEventListener("click", startAuto);
+$("btn-pause").addEventListener("click", stopAuto);
+$("btn-reset").addEventListener("click", doReset);
+$("speed").addEventListener("change", () => {
+  if (state.auto) { stopAuto(); startAuto(); }
+});
+addEventListener("resize", () => { if (confettiPieces.length) { $("confetti").width = innerWidth; $("confetti").height = innerHeight; } });
+
+updateButtons();
+refresh();
+</script>
+</body>
+</html>

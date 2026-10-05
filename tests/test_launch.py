@@ -14,7 +14,7 @@ def test_runtime_registers_all_real_agents():
     for cls in AGENT_CLASSES:
         assert rt.agent_registry.get(cls.agent_type) is not None
         assert cls.agent_type in rt.handlers
-    assert len(rt.handlers) == 6
+    assert len(rt.handlers) == len(AGENT_CLASSES)
 
 
 def test_worker_tick_end_to_end():

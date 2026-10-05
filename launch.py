@@ -29,12 +29,14 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 
-def cmd_dashboard(args) -> int:
+def cmd_dashboard(args, rt=None) -> int:
     import uvicorn
 
     from ecosystem.runtime import build_runtime, create_dashboard_app
 
-    rt = build_runtime(use_postgres=args.use_postgres)
+    if rt is None:
+        rt = build_runtime(use_postgres=args.use_postgres,
+                           approvals_persist=True)
     app = create_dashboard_app(rt)
     print(f"dashboard: http://{args.host}:{args.port} "
           f"(store={'postgres' if args.use_postgres else 'memory'})", flush=True)
@@ -42,21 +44,27 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
-def cmd_worker(worker_argv: list[str], use_postgres: bool) -> int:
+def cmd_worker(worker_argv: list[str], use_postgres: bool, rt=None) -> int:
     from ecosystem.worker import main as worker_main
 
     argv = list(worker_argv)
     if use_postgres and "--use-postgres" not in argv:
         argv.append("--use-postgres")
-    return worker_main(argv)
+    return worker_main(argv, rt=rt)
 
 
 def cmd_all(args, worker_argv: list[str]) -> int:
+    # One shared runtime: the dashboard's approval queue IS the worker
+    # dispatcher's gate (same object), and approvals persist to disk so a
+    # mission script run separately still lands in the GUI queue.
+    from ecosystem.runtime import build_runtime
+
+    rt = build_runtime(use_postgres=args.use_postgres, approvals_persist=True)
     thread = threading.Thread(
-        target=cmd_worker, args=(worker_argv, args.use_postgres), daemon=True
+        target=cmd_worker, args=(worker_argv, args.use_postgres, rt), daemon=True
     )
     thread.start()
-    return cmd_dashboard(args)
+    return cmd_dashboard(args, rt=rt)
 
 
 def cmd_initdb(args) -> int:

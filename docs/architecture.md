@@ -27,6 +27,32 @@ Every agent:
 2. Produces **structured output** (no free-form prose as a primary artifact).
 3. Emits **auditable events** for every consequential action: agent, task, business, inputs, data sources, decision, action, timestamp, cost, result, approval status.
 4. Operates within **permission boundaries** — least privilege, credential isolation per business.
+5. Passes the **quintuple check** before its task completes — see below.
+
+## Output quality: the quintuple check
+
+No agent output is accepted on the producer's word alone. Every dispatch runs
+`core/quality.verify_output`, five independent layers:
+
+1. **Self-check** — the producing agent critiques its own output against the
+   task's acceptance criteria (`BaseAgent.self_check` hook).
+2. **Contract** — the output honours its declared contract (dict shape, plus
+   any registered pydantic model / validator for the agent type).
+3. **Deterministic re-verification** — registered pure-function validators
+   (`core/quality.register_validator`) re-check the output independently of
+   the producer. Pure functions only: reproducible, no network, no randomness.
+4. **Peer review** — a different agent (`agents/review`, capability
+   `peer_review`) critiques the output against the acceptance criteria:
+   criteria coverage, placeholder/empty detection, substance checks.
+5. **Evidence** — the verification report itself is checked for completeness
+   and attached to the run, so the audit trail shows *why* output was
+   accepted.
+
+A task completes only when all five layers pass. Failures become structured
+rework instructions fed back into `task.inputs["_rework_feedback"]`, bounded
+by `Task.max_rework` (default 2); exhausted rework marks the task failed
+with the verification findings as the error. Layers with nothing to check
+pass vacuously, so tasks without acceptance criteria behave as before.
 
 ## Data model (core entities)
 

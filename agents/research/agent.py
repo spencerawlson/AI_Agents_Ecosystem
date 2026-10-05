@@ -109,5 +109,11 @@ class ResearchAgent(BaseAgent):
             raw = self.source.research(opp)
             report = self.validate_output(raw, OpportunityReport)
             reports.append(report.model_dump())
-        self.record_usage(task, tokens=800 * len(reports), cost_usd=0.03 * len(reports))
+        usage = getattr(self.source, "last_usage", None)
+        if usage:  # real LLM usage: true tokens + true cost
+            self.record_usage(task, tokens=usage["tokens"],
+                              cost_usd=usage["cost_usd"])
+        else:  # heuristic fallback accounting
+            self.record_usage(task, tokens=800 * len(reports),
+                              cost_usd=0.03 * len(reports))
         return {"reports": reports, "count": len(reports)}

@@ -8,6 +8,7 @@ the creative that drove it.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -45,10 +46,14 @@ class CreativeAgent(BaseAgent):
         super().__init__()
         self._assets: dict[str, CreativeAsset] = {}
         self._counter = 0
+        # The dispatcher may run concurrent tasks on this one handler
+        # instance: ID generation must never hand out a duplicate.
+        self._id_lock = threading.Lock()
 
     def _next_id(self) -> str:
-        self._counter += 1
-        return f"asset_{self._counter:05d}"
+        with self._id_lock:
+            self._counter += 1
+            return f"asset_{self._counter:05d}"
 
     def create(
         self,
@@ -92,9 +97,11 @@ class CreativeAgent(BaseAgent):
         asset = self._assets.get(asset_id)
         if asset is None:
             raise ValueError(f"unknown asset: {asset_id}")
-        asset.impressions += impressions
-        asset.clicks += clicks
-        asset.conversions += conversions
+        # Read-modify-write on shared state: guard it for concurrent tasks.
+        with self._id_lock:
+            asset.impressions += impressions
+            asset.clicks += clicks
+            asset.conversions += conversions
         return asset
 
     def top_performers(self, business_id: str, limit: int = 5) -> list[CreativeAsset]:
@@ -123,5 +130,68 @@ class CreativeAgent(BaseAgent):
                 "title": title,
                 "status": "briefed",
                 "next": "human reviews brief, produces final product",
+            }
+        if action == "social_drafts":
+            from core.llm import LLMGateway
+
+            if not LLMGateway.enabled():
+                raise RuntimeError(
+                    "social_drafts requires LLM mode (--llm with OPENAI_API_KEY)"
+                )
+            niche = task.inputs.get("niche", "")
+            themes = [t for t in task.inputs.get("themes", []) if t]
+            count = int(task.inputs.get("count", 10))
+            business_id = task.business_id or "unknown"
+            theme_list = "\n".join(f"- {t}" for t in themes) or f"- {niche}"
+            prompt = (
+                f"You write social posts for an online learning platform in the "
+                f"niche: {niche}.\n"
+                f"Themes to cover:\n{theme_list}\n"
+                f"Return ONLY a JSON object with a single key \"drafts\": a list of "
+                f"exactly {count} drafts, each with keys \"platform\" (one of: x, "
+                'threads, linkedin), "text" (the post, under 280 chars for x/threads), '
+                '"hook" (the opening line, one sentence). No hashtags spam: max 3.'
+            )
+            result = LLMGateway().complete(
+                prompt,
+                tier="cheap",
+                system="You are a concise social media copywriter. JSON only.",
+                json_mode=True,
+            )
+            payload = result["json"] or {}
+            drafts = payload.get("drafts", payload) if isinstance(payload, dict) else payload
+            if not isinstance(drafts, list):
+                raise ValueError("LLM did not return a drafts list")
+            asset_ids: list[str] = []
+            kept: list[dict] = []
+            for d in drafts[:count]:
+                if not isinstance(d, dict) or not d.get("text"):
+                    continue
+                platform = d.get("platform", "x")
+                hook = d.get("hook", d["text"][:60])
+                asset = self.create(
+                    business_id,
+                    "social",
+                    f"[{platform}] {hook}"[:80],
+                    f"[{platform}] {d['text']}",
+                )
+                asset_ids.append(asset.id)
+                kept.append(
+                    {"platform": platform, "text": d["text"], "hook": hook,
+                     "asset_id": asset.id}
+                )
+            self.record_usage(
+                task,
+                tokens=result["input_tokens"] + result["output_tokens"],
+                cost_usd=result["cost_usd"],
+            )
+            return {
+                "niche": niche,
+                "drafts": kept,
+                "asset_ids": asset_ids,
+                "evidence": (
+                    f"{len(kept)} drafts returned; each draft has platform, "
+                    "text, hook and is stored as a creative asset"
+                ),
             }
         raise ValueError(f"unknown action: {action}")

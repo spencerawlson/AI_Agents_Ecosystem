@@ -7,6 +7,7 @@ fraud indicators, unusual complaints, sensitive situations.
 
 from __future__ import annotations
 
+import threading
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -60,10 +61,13 @@ class SupportAgent(BaseAgent):
         super().__init__()
         self._tickets: dict[str, Ticket] = {}
         self._counter = 0
+        # Guarded for concurrent dispatcher tasks on one handler instance.
+        self._id_lock = threading.Lock()
 
     def _next_id(self) -> str:
-        self._counter += 1
-        return f"tkt_{self._counter:05d}"
+        with self._id_lock:
+            self._counter += 1
+            return f"tkt_{self._counter:05d}"
 
     def _needs_escalation(self, subject: str, category: str, amount_usd: float | None) -> str | None:
         lowered = subject.lower()

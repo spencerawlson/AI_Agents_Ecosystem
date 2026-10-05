@@ -8,6 +8,7 @@ remediation workflows.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from enum import Enum
 
@@ -63,10 +64,13 @@ class OperationsAgent(BaseAgent):
         super().__init__()
         self._incidents: dict[str, Incident] = {}
         self._counter = 0
+        # Guarded for concurrent dispatcher tasks on one handler instance.
+        self._id_lock = threading.Lock()
 
     def _next_id(self) -> str:
-        self._counter += 1
-        return f"inc_{self._counter:05d}"
+        with self._id_lock:
+            self._counter += 1
+            return f"inc_{self._counter:05d}"
 
     def check_health(
         self,
