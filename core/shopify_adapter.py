@@ -20,6 +20,7 @@ Scopes (least privilege for store management):
   read_locations                        where stock lives
   read_publications / write_publications  publish to the Online Store
   read_orders                           order monitoring
+  read_content / write_content          SEO blog articles (created hidden)
 
 NOT requested: write_orders, refunds, payments, store settings — those
 stay human-only.
@@ -49,6 +50,7 @@ SCOPES = [
     "read_locations",
     "read_publications", "write_publications",
     "read_orders",
+    "read_content", "write_content",
 ]
 
 # transport(method, url, headers, body_bytes) -> (status, response_text)
@@ -134,7 +136,7 @@ mutation($id: ID!, $input: [PublicationInput!]!) {
 _ORDER_FIELDS = """
   id name createdAt displayFinancialStatus displayFulfillmentStatus
   totalPriceSet { shopMoney { amount currencyCode } }
-  lineItems(first: 50) { nodes { title sku quantity } }
+  lineItems(first: 50) { nodes { title sku quantity product { id } } }
 """
 
 _ORDERS_Q = """
@@ -145,6 +147,33 @@ query($first: Int!) {
 }""" % _ORDER_FIELDS
 
 _ORDER_Q = "query($id: ID!) { order(id: $id) { %s } }" % _ORDER_FIELDS
+
+_ORDERS_SINCE_Q = """
+query($cursor: String, $q: String!) {
+  orders(first: 100, after: $cursor, query: $q, sortKey: CREATED_AT) {
+    nodes { %s }
+    pageInfo { hasNextPage endCursor }
+  }
+}""" % _ORDER_FIELDS
+
+_PRODUCT_DETAIL_Q = """
+query($id: ID!) {
+  product(id: $id) {
+    %s
+    descriptionHtml
+    media(first: 10) { nodes { alt mediaContentType } }
+  }
+}""" % _PRODUCT_FIELDS
+
+_BLOGS_Q = "query { blogs(first: 5) { nodes { id title handle } } }"
+
+_ARTICLE_CREATE_M = """
+mutation($article: ArticleCreateInput!) {
+  articleCreate(article: $article) {
+    article { id title handle isPublished }
+    userErrors { field message }
+  }
+}"""
 
 _VARIANT_BY_SKU_Q = """
 query($q: String!) {
@@ -432,6 +461,36 @@ class ShopifyCommerceAdapter(CommerceAdapter):
                 "input": [{"publicationId": self.online_store_publication_id()}],
             })["publishablePublish"], "publishablePublish")
         return res["product"]
+
+    def get_product(self, product_id: str) -> dict | None:
+        return self.graphql(_PRODUCT_DETAIL_Q,
+                            {"id": _gid("Product", product_id)})["product"]
+
+    def list_orders_since(self, since_iso: str) -> list[dict]:
+        """All orders created at/after since_iso (paginated)."""
+        out, cursor = [], None
+        q = f"created_at:>='{since_iso}'"
+        while True:
+            page = self.graphql(_ORDERS_SINCE_Q, {"cursor": cursor, "q": q})["orders"]
+            out.extend(page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                return out
+            cursor = page["pageInfo"]["endCursor"]
+
+    def create_article(self, title: str, body_html: str, tags: list[str],
+                       summary: str = "", author: str = "Store Team",
+                       published: bool = False) -> dict:
+        """Create a blog article (hidden by default) on the first blog."""
+        blogs = self.graphql(_BLOGS_Q)["blogs"]["nodes"]
+        if not blogs:
+            raise ShopifyError("store has no blog; create one in Online Store > Blog posts")
+        res = self._check_user_errors(
+            self.graphql(_ARTICLE_CREATE_M, {"article": {
+                "blogId": blogs[0]["id"], "title": title, "body": body_html,
+                "summary": summary, "tags": tags, "isPublished": published,
+                "author": {"name": author},
+            }})["articleCreate"], "articleCreate")
+        return res["article"]
 
     def update_seo(self, product_id: str, title: str, description: str) -> dict:
         res = self._check_user_errors(

@@ -87,7 +87,7 @@ def test_render_markdown_escapes_everything_else():
 
 def _write_report(directory: Path, name: str, body: str, mtime: float) -> None:
     p = directory / name
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
     os.utime(p, (mtime, mtime))
 
 

@@ -180,7 +180,7 @@ Total AI spend this mission: **${ctx['total_spend_usd']:.4f}**
 {BANNER}
 """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(report)
+    path.write_text(report, encoding="utf-8")
 
 
 def main(argv=None) -> int:

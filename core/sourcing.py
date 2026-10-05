@@ -51,6 +51,8 @@ class ProductBrief(BaseModel):
     target_margin: float = DEFAULT_TARGET_MARGIN
     # Typical competitor price band, if known: [low, high].
     market_price_usd: list[float] | None = None
+    market_price_source: str = ""   # "owner", "llm estimate", ...
+    demand_trend: str = ""          # Google Trends 12-month direction
     suppliers: list[Supplier] = Field(default_factory=list)
 
 

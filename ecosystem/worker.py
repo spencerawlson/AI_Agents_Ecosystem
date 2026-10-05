@@ -94,28 +94,45 @@ def run_etsy_monitor_tick(rt, tick: int) -> dict | None:
     return snapshot
 
 
-def run_shopify_publish_tick(rt) -> list[dict]:
-    """Publish suppliers the owner approved since the last tick.
+def run_store_tick(rt, tick: int, optimize_every: int = 30) -> dict | None:
+    """Shopify store operations for this tick.
 
-    No-op unless Shopify credentials are configured. Never raises: a
-    store outage must not take the worker down.
+    Every tick: publish approved suppliers, launch approved ads, draft
+    paused ads for new products. Every `optimize_every` ticks also: spend
+    guard, profit, SEO fixes, blog drafts, store report. No-op unless
+    Shopify credentials are configured; never raises.
     """
     from core.shopify_adapter import ShopifyCommerceAdapter
 
     if not ShopifyCommerceAdapter.configured():
-        return []
-    from ecosystem.shopify_pipeline import publish_approved
+        return None
+    from core.ads import configured_ads_adapters
+    from core.llm import LLMGateway
+    from dashboard.reports import reports_dir
+    from ecosystem.shopify_pipeline import default_state_path
+    from ecosystem.store_ops import run_store_cycle
 
+    optimize = bool(optimize_every) and tick % optimize_every == 0
     try:
-        results = publish_approved(rt.approvals,
-                                   ShopifyCommerceAdapter.from_env())
+        summary = run_store_cycle(
+            rt.approvals, ShopifyCommerceAdapter.from_env(),
+            configured_ads_adapters(), default_state_path(), reports_dir(),
+            gateway=LLMGateway() if (optimize and LLMGateway.enabled()) else None,
+            optimize=optimize)
     except Exception as exc:  # noqa: BLE001 - worker must survive
-        print(f"shopify publish: ERROR {exc}", flush=True)
-        return []
-    for r in results:
-        print(f"shopify publish: {r.get('approval_id')} -> {r.get('status')}"
+        print(f"store: ERROR {exc}", flush=True)
+        return None
+    for r in summary["published"]:
+        print(f"store publish: {r.get('approval_id')} -> {r.get('status')}"
               + (f" ({r['error']})" if r.get("error") else ""), flush=True)
-    return results
+    for r in summary["ads"] + summary["drafted"]:
+        print(f"store ads: {r}", flush=True)
+    for g in summary["guard"]:
+        print(f"store guard: {g['campaign']} {g['action']} {g.get('reason', '')}",
+              flush=True)
+    for e in summary["errors"]:
+        print(f"store: ERROR {e}", flush=True)
+    return summary
 
 
 def run_tick(rt, tick: int) -> dict:
@@ -257,6 +274,10 @@ def main(argv: list[str] | None = None, rt=None) -> int:
     parser.add_argument("--max-per-business", type=int, default=2,
                         help="dispatcher: concurrent tasks per business "
                              "(default: 2)")
+    parser.add_argument("--store-optimize-every", type=int, default=30,
+                        help="run the Shopify optimisation pass (spend guard, "
+                             "profit, SEO, report) every N ticks (default: 30; "
+                             "0 disables)")
     args = parser.parse_args(argv)
 
     if rt is None:
@@ -294,7 +315,7 @@ def main(argv: list[str] | None = None, rt=None) -> int:
             print(f"tick {tick}: FAILED {result.get('error')}", flush=True)
         if args.monitor_every and tick % args.monitor_every == 0:
             run_etsy_monitor_tick(rt, tick)
-        run_shopify_publish_tick(rt)
+        run_store_tick(rt, tick, args.store_optimize_every)
         if args.ticks and tick >= args.ticks:
             break
         time.sleep(args.interval)

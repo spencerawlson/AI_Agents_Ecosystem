@@ -192,6 +192,19 @@ python -c "from ecosystem.etsy_monitor import EtsyMonitor;
 print(EtsyMonitor.record_spend(10.0, 'Etsy Ads top-up'))"
 ```
 
+### Shopify store (dropshipping)
+
+Trend-checked product discovery, supplier sourcing priced at a 60% margin,
+owner-approved publishing to Shopify, Meta/Google ads built paused and
+launched only on approval, plus an automatic spend guard, profit tracking,
+SEO fixes and blog drafts. Setup and approval rules:
+[docs/shopify-store.md](docs/shopify-store.md).
+
+```bash
+python ecosystem/shopify_pipeline.py check
+python ecosystem/shopify_pipeline.py discover --niche "home office" --llm --source
+```
+
 ### Real LLM inference
 
 Agents run on heuristics by default. With an API key, discovery and

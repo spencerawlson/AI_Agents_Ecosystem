@@ -100,6 +100,42 @@ def _approval_summary(a, registry) -> str:
             f"Shopify with this supplier. Approve one per product.</span>"
             f"{flag_txt}{link}"
         )
+    if a.action == "launch_ad_campaign":
+        report_name = d.get("report_name") or ""
+        link = (f"<br><a href='/reports/{esc(report_name)}'>View ads report</a>"
+                if report_name else "")
+        heads = " · ".join(str(h) for h in (d.get("headlines") or [])[:3])
+        try:
+            budget = (f"${float(d.get('daily_budget_usd')):.2f}/day × "
+                      f"{int(d.get('duration_days'))} days = "
+                      f"<strong>${float(d.get('total_budget_usd')):.2f} max</strong>")
+            ceiling = f"${float(d.get('max_cpa_usd')):.2f}"
+        except (TypeError, ValueError):
+            budget, ceiling = "?", "?"
+        return (
+            f"<strong>Launch {esc(str(d.get('platform', '?')).title())} ads</strong> — "
+            f"{esc(d.get('product_title', '?'))}<br>"
+            f"<span class='muted'>{budget} · {esc(', '.join(d.get('countries') or []))} · "
+            f"cost-per-sale ceiling {ceiling} · requested {when}</span>"
+            f"<br><span class='muted'>“{esc(d.get('primary_text', ''))}” — {esc(heads)}</span>"
+            f"<br><span class='muted'>Campaign is built and PAUSED. Approving starts "
+            f"spending; it auto-pauses if it loses money.</span>{link}"
+        )
+    if a.action == "ad_budget_increase":
+        try:
+            detail = (f"${float(d.get('current_daily_budget_usd')):.2f} → "
+                      f"<strong>${float(d.get('new_daily_budget_usd')):.2f}/day</strong> · "
+                      f"cost/sale ${float(d.get('cpa_usd')):.2f} vs ceiling "
+                      f"${float(d.get('max_cpa_usd')):.2f} · ROAS {d.get('roas')} · "
+                      f"{d.get('purchases')} sales")
+        except (TypeError, ValueError):
+            detail = "?"
+        amount = f"${a.amount_usd:,.2f}" if a.amount_usd is not None else "?"
+        return (
+            f"<strong>Scale {esc(str(d.get('platform', '?')).title())} ads</strong> — "
+            f"{esc(d.get('product_title', '?'))}<br>"
+            f"<span class='muted'>{detail} · adds up to {amount} · requested {when}</span>"
+        )
     biz_name = ""
     if a.business_id:
         b = registry.get(a.business_id)

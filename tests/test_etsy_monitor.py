@@ -38,7 +38,7 @@ def _monitor(monkeypatch, listings_n=12, receipts=None, spend=1.76,
 
 
 def test_fresh_launch_is_on_track(monkeypatch):
-    mon = _monitor(monkeypatch)
+    mon = _monitor(monkeypatch, today=etsy_monitor.LAUNCH_DATE)
     s = mon.check()
     assert s["verdict"] == "ON_TRACK"
     assert s["stop_loss_triggers"] == []

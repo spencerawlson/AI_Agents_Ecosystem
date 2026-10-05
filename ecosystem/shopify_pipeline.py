@@ -1,24 +1,35 @@
-"""Shopify product pipeline: brief -> supplier report -> owner approval
--> product live on the store.
+"""Shopify store pipeline: trends -> product briefs -> supplier report ->
+owner approval -> product live -> paused ads -> owner go-ahead -> live
+ads -> ongoing optimisation.
 
-  1. `source <brief.json>`   rank suppliers, price each at the brief's
-     target margin (default 60%), draft the listing copy + SEO, write a
-     report to reports/, and open ONE approval per supplier. Nothing is
-     published.
-  2. Owner contacts suppliers, then approves exactly one supplier in the
-     dashboard (/approvals) and rejects the rest.
-  3. `publish-approved`      for every approved supplier not yet handled:
-     create the product on Shopify and publish it to the Online Store.
-     Idempotent — safe to run on a schedule; one product per brief.
+  discover          product ideas (LLM or seed file) checked against
+                    Google Trends; writes briefs to data/briefs/ and a
+                    discovery report. --source chains into `source`.
+  source            suppliers from the brief (owner's Alibaba quotes) +
+                    CJ Dropshipping API search, priced at the brief's
+                    target margin (default 60%), listing copy + SEO
+                    drafted, report written, ONE approval per supplier.
+                    Nothing is published.
+  (owner)           contacts suppliers, approves exactly one in /approvals.
+  publish-approved  create + publish the approved product. Idempotent.
+  ads-draft         build PAUSED Meta/Google campaigns for a published
+                    product and open a launch approval per platform.
+  cycle             one full operations pass (what the worker runs each
+                    tick): publish approved, launch approved ads,
+                    auto-draft ads, spend guard, profit, SEO fixes, blog
+                    drafts, store report.
 
-Approvals persist to data/approvals.json and publish state to
+Approvals persist to data/approvals.json and pipeline state to
 data/shopify_state.json, so the dashboard, this script and the worker can
 run as separate processes.
 
 Usage:
     python ecosystem/shopify_pipeline.py check
+    python ecosystem/shopify_pipeline.py discover --niche "home office" --llm --source
     python ecosystem/shopify_pipeline.py source examples/shopify_brief.example.json [--llm]
     python ecosystem/shopify_pipeline.py publish-approved
+    python ecosystem/shopify_pipeline.py ads-draft <product_id> [--daily 10 --days 7]
+    python ecosystem/shopify_pipeline.py cycle [--llm]
 """
 
 from __future__ import annotations
@@ -54,18 +65,28 @@ def default_state_path() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "shopify_state.json"
 
 
-def _load_state(path: Path) -> dict:
+STATE_SECTIONS = ("approvals", "briefs", "products", "campaigns", "articles",
+                  "seo_fixes")
+
+
+def load_state(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        state = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"approvals": {}, "briefs": {}}
+        state = {}
+    for key in STATE_SECTIONS:
+        state.setdefault(key, {})
+    return state
 
 
-def _save_state(path: Path, state: dict) -> None:
+def save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
     os.replace(tmp, path)
+
+
+_load_state, _save_state = load_state, save_state
 
 
 def _slug(text: str, max_len: int = 24) -> str:
@@ -197,11 +218,13 @@ def _listing_section(listing: dict) -> str:
 
 def source(brief: ProductBrief, gate: ApprovalGate, reports_dir: Path,
            writer: ListingWriter | None = None,
-           now: datetime | None = None) -> dict:
+           now: datetime | None = None,
+           supplier_source=None) -> dict:
     """Rank suppliers, draft the listing, open approvals, write the report."""
     now = now or datetime.now(timezone.utc)
     writer = writer or ListingWriter()
-    ranked = rank_suppliers(brief)
+    ranked = rank_suppliers(brief, supplier_source)
+    source_errors = list(getattr(supplier_source, "errors", None) or [])
     listing = writer.write(brief)
 
     report_name = f"supplier_report_{_slug(brief.id, 40).lower()}_{now:%Y%m%d}.md"
@@ -220,6 +243,11 @@ def source(brief: ProductBrief, gate: ApprovalGate, reports_dir: Path,
                 "price_usd": q["price_usd"],
                 "margin": q["margin"],
                 "landed_cost_usd": q["landed_cost_usd"],
+                "fees_usd": q["fees_usd"],
+                "max_ad_cost_per_order_usd": q["max_ad_cost_per_order_usd"],
+                "niche": brief.niche,
+                "keywords": brief.keywords,
+                "facts": brief.description,
                 "flags": scored.flags,
                 "report_name": report_name,
                 "product": _product_payload(brief, scored, listing),
@@ -229,6 +257,9 @@ def source(brief: ProductBrief, gate: ApprovalGate, reports_dir: Path,
         approval_ids[scored.supplier.name] = approval.id
 
     report = render_supplier_report(brief, ranked, now.isoformat(), approval_ids)
+    if source_errors:
+        report += ("\n## Supplier search problems\n\n"
+                   + "\n".join(f"- {e}" for e in source_errors) + "\n")
     report += "\n" + _listing_section(listing)
     report += (f"\n## Spend\n\nTotal AI spend this mission: "
                f"**${writer.spend_usd:.4f}** ({writer.tokens} tokens)\n")
@@ -236,7 +267,8 @@ def source(brief: ProductBrief, gate: ApprovalGate, reports_dir: Path,
     report_path = reports_dir / report_name
     report_path.write_text(report, encoding="utf-8")
     return {"report_path": str(report_path), "approval_ids": approval_ids,
-            "suppliers": len(ranked), "listing": listing}
+            "suppliers": len(ranked), "listing": listing,
+            "source_errors": source_errors}
 
 
 # -- Step 3: publish approved ------------------------------------------------
@@ -275,6 +307,22 @@ def publish_approved(gate: ApprovalGate, adapter,
                 state["briefs"][brief_id] = appr.id
                 _save_state(state_path, state)
             live = adapter.publish_product(rec["product_id"])
+            state["products"][rec["product_id"]] = {
+                "brief_id": brief_id,
+                "approval_id": appr.id,
+                "title": d["product"]["title"],
+                "url": live.get("onlineStoreUrl"),
+                "image_url": (d["product"].get("image_urls") or [None])[0],
+                "niche": d.get("niche", ""),
+                "keywords": d.get("keywords", []),
+                "facts": d.get("facts", ""),
+                "price_usd": d["product"]["price_usd"],
+                "landed_cost_usd": d.get("landed_cost_usd",
+                                         d["product"].get("cost_usd", 0.0)),
+                "fees_usd": d.get("fees_usd", 0.0),
+                "max_ad_cost_per_order_usd": d.get("max_ad_cost_per_order_usd", 0.0),
+                "published_at": datetime.now(timezone.utc).isoformat(),
+            }
             rec = {**rec, "status": "published",
                    "handle": live.get("handle"),
                    "url": live.get("onlineStoreUrl"),
@@ -292,66 +340,224 @@ def publish_approved(gate: ApprovalGate, adapter,
     return results
 
 
+# -- Discovery ---------------------------------------------------------------
+
+def default_briefs_dir() -> Path:
+    env = os.environ.get("BRIEFS_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent.parent / "data" / "briefs"
+
+
+def discover_briefs(idea_source, niches: list[str], briefs_dir: Path,
+                    reports_dir: Path, trends=None, limit: int = 8, keep: int = 3,
+                    now: datetime | None = None) -> dict:
+    """Ideas -> Trends check -> brief files + discovery report."""
+    from core.product_discovery import _slug as idea_slug
+    from core.product_discovery import discover
+
+    now = now or datetime.now(timezone.utc)
+    briefs, ideas = discover(idea_source, niches, limit=limit, trends=trends, keep=keep)
+    briefs_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for b in briefs:
+        path = briefs_dir / f"{b.id}.json"
+        if path.exists():  # never clobber a brief the owner already filled in
+            existing = ProductBrief.model_validate_json(path.read_text(encoding="utf-8"))
+            if existing.suppliers:
+                paths.append(path)
+                continue
+        path.write_text(b.model_dump_json(indent=2), encoding="utf-8")
+        paths.append(path)
+
+    def cell(x):
+        return str(x).replace("|", "/").replace("\n", " ")
+
+    kept = {b.id for b in briefs}
+    lines = [f"# Product Discovery — {cell(', '.join(niches) or 'open search')}", "",
+             f"_Generated {now.isoformat()}_", "",
+             "> Briefs were written for the top ideas. Nothing was sourced or "
+             "published.", "",
+             "| Idea | Niche | Trend (12 mo) | Retail band | Score | Kept | Flags |",
+             "|------|-------|---------------|-------------|-------|------|-------|"]
+    for i in sorted(ideas, key=lambda x: x.score, reverse=True):
+        band = (f"${i.market_price_usd[0]:.0f}-${i.market_price_usd[1]:.0f}"
+                if i.market_price_usd else "?")
+        lines.append(f"| {cell(i.product_name)} | {cell(i.niche)} | {i.trend} | {band} | "
+                     f"{i.score} | {'yes' if idea_slug(i.product_name) in kept else ''} | "
+                     f"{cell('; '.join(i.flags))} |")
+    spend = getattr(idea_source, "spend_usd", 0.0)
+    tokens = getattr(idea_source, "tokens", 0)
+    lines += ["", "## Briefs", ""] + [f"- `{pth}`" for pth in paths]
+    lines += ["", "## Spend", "",
+              f"Total AI spend this mission: **${spend:.4f}** ({tokens} tokens)", ""]
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report = reports_dir / f"product_discovery_{now:%Y%m%d}.md"
+    report.write_text("\n".join(lines), encoding="utf-8")
+    return {"briefs": briefs, "brief_paths": [str(x) for x in paths],
+            "ideas": ideas, "report_path": str(report)}
+
+
 # -- CLI ---------------------------------------------------------------------
+
+def _gateway(want: bool):
+    if not want:
+        return None
+    from core.llm import LLMGateway
+    if not LLMGateway.enabled():
+        print("--llm given but no LLM key/litellm available; using templates",
+              file=sys.stderr)
+        return None
+    return LLMGateway()
+
+
+def _shopify_or_none():
+    from core.shopify_adapter import ShopifyCommerceAdapter, ShopifyCredentialsError
+    try:
+        return ShopifyCommerceAdapter.from_env()
+    except ShopifyCredentialsError:
+        return None
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("check", help="verify Shopify credentials")
+    sub.add_parser("check", help="verify Shopify / CJ / ads credentials")
+    p_disc = sub.add_parser("discover", help="trend-checked product briefs")
+    p_disc.add_argument("--niche", action="append", default=[],
+                        help="focus niche (repeatable)")
+    p_disc.add_argument("--seeds", type=Path,
+                        help="JSON list of {product_name, keywords, ...} ideas")
+    p_disc.add_argument("--limit", type=int, default=8)
+    p_disc.add_argument("--keep", type=int, default=3)
+    p_disc.add_argument("--no-trends", action="store_true")
+    p_disc.add_argument("--source", action="store_true",
+                        help="run supplier sourcing for each new brief")
+    p_disc.add_argument("--llm", action="store_true")
     p_src = sub.add_parser("source", help="supplier report + approvals")
     p_src.add_argument("brief", type=Path)
     p_src.add_argument("--llm", action="store_true",
                        help="write listing copy with the LLM gateway")
     sub.add_parser("publish-approved", help="publish approved suppliers")
+    p_ads = sub.add_parser("ads-draft", help="paused campaigns for a product")
+    p_ads.add_argument("product_id")
+    p_ads.add_argument("--daily", type=float)
+    p_ads.add_argument("--days", type=int)
+    p_ads.add_argument("--llm", action="store_true")
+    p_cyc = sub.add_parser("cycle", help="one full store operations pass")
+    p_cyc.add_argument("--llm", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
 
+    from core.ads import AdCopyWriter, configured_ads_adapters
+    from core.supplier_search import CJDropshippingSource, default_supplier_source
     from dashboard.reports import reports_dir
     from ecosystem.runtime import default_approvals_path
 
     gate = ApprovalGate(persist_path=os.environ.get("APPROVALS_PATH")
                         or default_approvals_path())
+    gateway = _gateway(getattr(args, "llm", False))
+
+    if args.cmd == "discover":
+        from core.market_data import TrendsClient
+        from core.product_discovery import LLMIdeaSource, SeedIdeaSource
+
+        if args.seeds:
+            idea_source = SeedIdeaSource(json.loads(args.seeds.read_text(encoding="utf-8")))
+        elif gateway is not None:
+            idea_source = LLMIdeaSource(gateway)
+        else:
+            print("discover needs --llm (with an API key) or --seeds FILE", file=sys.stderr)
+            return 2
+        out = discover_briefs(idea_source, args.niche, default_briefs_dir(), reports_dir(),
+                              trends=None if args.no_trends else TrendsClient(),
+                              limit=args.limit, keep=args.keep)
+        print(f"report: {out['report_path']}")
+        for pth in out["brief_paths"]:
+            print(f"brief: {pth}")
+        if args.source:
+            for pth in out["brief_paths"]:
+                brief = ProductBrief.model_validate_json(Path(pth).read_text(encoding="utf-8"))
+                res = source(brief, gate, reports_dir(), ListingWriter(gateway),
+                             supplier_source=default_supplier_source())
+                print(f"{brief.id}: {res['suppliers']} supplier approval(s); "
+                      f"report {res['report_path']}")
+        return 0
 
     if args.cmd == "source":
         brief = ProductBrief.model_validate_json(
             args.brief.read_text(encoding="utf-8"))
-        gateway = None
-        if args.llm:
-            from core.llm import LLMGateway
-            if not LLMGateway.enabled():
-                print("--llm given but no LLM key/litellm available; "
-                      "using template copy", file=sys.stderr)
-            else:
-                gateway = LLMGateway()
-        out = source(brief, gate, reports_dir(), ListingWriter(gateway))
+        if not CJDropshippingSource.configured():
+            print("note: CJ_API_KEY not set - only suppliers listed in the brief "
+                  "are used", file=sys.stderr)
+        out = source(brief, gate, reports_dir(), ListingWriter(gateway),
+                     supplier_source=default_supplier_source())
         print(f"report: {out['report_path']}")
         print(f"{out['suppliers']} supplier approval(s) opened - review at "
               f"/approvals, approve ONE")
+        for e in out["source_errors"]:
+            print(f"supplier search problem: {e}", file=sys.stderr)
         return 0
 
-    from core.shopify_adapter import (ShopifyCommerceAdapter,
-                                      ShopifyCredentialsError)
+    shopify = _shopify_or_none()
+    ads = configured_ads_adapters()
 
-    try:
-        adapter = ShopifyCommerceAdapter.from_env()
-    except ShopifyCredentialsError as exc:
-        print(f"Shopify not configured: {exc}. Set SHOPIFY_SHOP and "
-              "SHOPIFY_ACCESS_TOKEN (or SHOPIFY_CLIENT_ID + "
-              "SHOPIFY_CLIENT_SECRET).", file=sys.stderr)
-        return 2
     if args.cmd == "check":
-        info = adapter.shop_info()
-        print(f"connected: {info['name']} ({info['myshopifyDomain']}) "
-              f"currency={info['currencyCode']} api={adapter.api_version}")
-        return 0
+        if shopify is None:
+            print("Shopify: NOT configured (SHOPIFY_SHOP + SHOPIFY_ACCESS_TOKEN or "
+                  "SHOPIFY_CLIENT_ID/SECRET)")
+        else:
+            info = shopify.shop_info()
+            print(f"Shopify: connected to {info['name']} ({info['myshopifyDomain']}) "
+                  f"currency={info['currencyCode']} api={shopify.api_version}")
+        cj = "configured" if CJDropshippingSource.configured() else "NOT configured (CJ_API_KEY)"
+        print(f"CJ Dropshipping: {cj}")
+        print(f"Ads: {', '.join(ads) if ads else 'none configured (META_* / GOOGLE_ADS_*)'}")
+        return 0 if shopify is not None else 2
 
-    results = publish_approved(gate, adapter)
-    for r in results:
-        print(json.dumps(r))
-    if not results:
-        print("nothing approved to publish")
-    return 1 if any(r.get("error") for r in results) else 0
+    if shopify is None:
+        print("Shopify not configured: set SHOPIFY_SHOP and SHOPIFY_ACCESS_TOKEN "
+              "(or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET).", file=sys.stderr)
+        return 2
+
+    if args.cmd == "publish-approved":
+        results = publish_approved(gate, shopify)
+        for r in results:
+            print(json.dumps(r))
+        if not results:
+            print("nothing approved to publish")
+        return 1 if any(r.get("error") for r in results) else 0
+
+    if args.cmd == "ads-draft":
+        from ecosystem.ads_pipeline import AdsPolicy, draft_campaigns
+
+        if not ads:
+            print("no ad platform configured (META_* or GOOGLE_ADS_* env vars)",
+                  file=sys.stderr)
+            return 2
+        state_path = default_state_path()
+        state = load_state(state_path)
+        pid = args.product_id
+        if pid not in state["products"]:
+            pid = f"gid://shopify/Product/{pid}"
+        results = draft_campaigns(state, pid, ads, gate, AdCopyWriter(gateway),
+                                  AdsPolicy.from_env(), reports_dir(),
+                                  daily_budget_usd=args.daily, duration_days=args.days)
+        save_state(state_path, state)
+        for r in results:
+            print(json.dumps(r))
+        if not results:
+            print("campaigns already drafted for this product")
+        return 1 if any(r["status"] == "failed" for r in results) else 0
+
+    from ecosystem.store_ops import run_store_cycle
+
+    summary = run_store_cycle(gate, shopify, ads, default_state_path(), reports_dir(),
+                              gateway=gateway)
+    print(json.dumps({k: v for k, v in summary.items() if k != "performance"},
+                     indent=2, default=str))
+    return 1 if summary["errors"] else 0
 
 
 if __name__ == "__main__":
