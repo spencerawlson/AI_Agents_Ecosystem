@@ -94,6 +94,30 @@ def run_etsy_monitor_tick(rt, tick: int) -> dict | None:
     return snapshot
 
 
+def run_shopify_publish_tick(rt) -> list[dict]:
+    """Publish suppliers the owner approved since the last tick.
+
+    No-op unless Shopify credentials are configured. Never raises: a
+    store outage must not take the worker down.
+    """
+    from core.shopify_adapter import ShopifyCommerceAdapter
+
+    if not ShopifyCommerceAdapter.configured():
+        return []
+    from ecosystem.shopify_pipeline import publish_approved
+
+    try:
+        results = publish_approved(rt.approvals,
+                                   ShopifyCommerceAdapter.from_env())
+    except Exception as exc:  # noqa: BLE001 - worker must survive
+        print(f"shopify publish: ERROR {exc}", flush=True)
+        return []
+    for r in results:
+        print(f"shopify publish: {r.get('approval_id')} -> {r.get('status')}"
+              + (f" ({r['error']})" if r.get("error") else ""), flush=True)
+    return results
+
+
 def run_tick(rt, tick: int) -> dict:
     orch = rt.orchestrator
     scorer = ScoringEngine()
@@ -270,6 +294,7 @@ def main(argv: list[str] | None = None, rt=None) -> int:
             print(f"tick {tick}: FAILED {result.get('error')}", flush=True)
         if args.monitor_every and tick % args.monitor_every == 0:
             run_etsy_monitor_tick(rt, tick)
+        run_shopify_publish_tick(rt)
         if args.ticks and tick >= args.ticks:
             break
         time.sleep(args.interval)

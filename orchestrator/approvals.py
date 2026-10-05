@@ -181,6 +181,14 @@ class ApprovalGate:
                   reverse=True)
         return done[:limit]
 
+    def all(self) -> list[Approval]:
+        """Every approval, oldest first (consumers act on decided ones)."""
+        self._refresh()
+        with self._lock:
+            items = list(self._approvals.values())
+        items.sort(key=lambda a: a.requested_at)
+        return items
+
     def get(self, approval_id: str) -> Approval | None:
         self._refresh()
         with self._lock:

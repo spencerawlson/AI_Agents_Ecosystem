@@ -1,0 +1,41 @@
+{
+  "id": "posture-corrector-2026-10",
+  "niche": "remote workers with back pain",
+  "product_name": "Adjustable Posture Corrector",
+  "keywords": ["posture corrector", "posture corrector for women", "back brace for posture", "upper back support"],
+  "description": "Adjustable, breathable upper-back brace worn under or over clothing. One size fits chest 28-48 in.",
+  "product_type": "Health & Wellness",
+  "vendor": "Your Store Name",
+  "target_margin": 0.60,
+  "market_price_usd": [19.99, 39.99],
+  "suppliers": [
+    {
+      "name": "Example Supplier A (replace me)",
+      "url": "https://www.alibaba.com/product-detail/REPLACE_ME.html",
+      "unit_cost_usd": 3.80,
+      "shipping_cost_usd": 4.50,
+      "moq": 2,
+      "lead_time_days": 9,
+      "rating": 4.8,
+      "years_on_platform": 6,
+      "verified": true,
+      "trade_assurance": true,
+      "image_urls": [],
+      "notes": "Placeholder data: replace with real quotes before approving."
+    },
+    {
+      "name": "Example Supplier B (replace me)",
+      "url": "https://www.alibaba.com/product-detail/REPLACE_ME_TOO.html",
+      "unit_cost_usd": 2.90,
+      "shipping_cost_usd": 6.80,
+      "moq": 200,
+      "lead_time_days": 22,
+      "rating": 4.4,
+      "years_on_platform": 1,
+      "verified": false,
+      "trade_assurance": false,
+      "image_urls": [],
+      "notes": "Placeholder data."
+    }
+  ]
+}

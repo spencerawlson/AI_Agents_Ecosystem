@@ -78,6 +78,28 @@ def _approval_summary(a, registry) -> str:
             f"<span class='muted'>{esc(d.get('drafts_count', '?'))} drafts · "
             f"spend {spend} · requested {when}</span>{link}"
         )
+    if a.action == "approve_supplier":
+        report_name = d.get("report_name") or ""
+        link = (f"<br><a href='/reports/{esc(report_name)}'>View supplier report</a>"
+                if report_name else "")
+        try:
+            price = f"${float(d.get('price_usd')):.2f}"
+            margin = f"{float(d.get('margin')):.0%}"
+        except (TypeError, ValueError):
+            price, margin = "?", "?"
+        flags = d.get("flags") or []
+        flag_txt = (f"<br><span class='muted'>check: {esc('; '.join(flags))}</span>"
+                    if flags else "")
+        return (
+            f"<strong>Supplier #{esc(d.get('rank', '?'))}</strong> — "
+            f"{esc(d.get('supplier_name', '?'))} for "
+            f"<strong>{esc(d.get('product_name', '?'))}</strong><br>"
+            f"<span class='muted'>score {esc(d.get('score', '?'))} · "
+            f"price {price} · margin {margin} · requested {when}</span>"
+            f"<br><span class='muted'>Approving publishes this product to "
+            f"Shopify with this supplier. Approve one per product.</span>"
+            f"{flag_txt}{link}"
+        )
     biz_name = ""
     if a.business_id:
         b = registry.get(a.business_id)
@@ -204,7 +226,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>{_PAGE_CSS}</style></head><body>
 <h1>✅ Approvals</h1>
-<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically.</p>
+<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p>
 <h2>Pending ({len(pending)})</h2>
 <div class="table-wrap"><table>
 <tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
