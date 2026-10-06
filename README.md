@@ -13,6 +13,19 @@ Discover → Research → Validate → Build → Launch → Market →
 Operate → Measure → Optimize → Scale or Shut Down → Reinvest
 ```
 
+## Current focus: road2cissp.com
+
+The agents' main job is marketing **[road2cissp.com](https://road2cissp.com)**.
+They audit the live site, research keywords, measure traffic, write a weekly
+growth strategy with experiments you approve, and draft the content each
+experiment needs. Nothing is published or spent without you. See
+[docs/road2cissp-growth.md](docs/road2cissp-growth.md).
+
+```bash
+python launch.py worker                                  # growth program runs every tick
+python ecosystem/road2cissp_growth.py run --force all    # run every job now
+```
+
 ## First milestone
 
 Not $60K. The first engineering/business milestone is:
@@ -120,7 +133,7 @@ Failed experiments are documented and terminated; their data stays available so 
 pip install -e .
 python -m pytest tests/ -q                # 39/39 passing
 python launch.py                          # dashboard → http://0.0.0.0:8000
-python launch.py worker                   # headless agent tick loop
+python launch.py worker                   # headless agent loop (road2cissp growth)
 python launch.py all                      # dashboard + worker together
 ```
 
@@ -132,6 +145,8 @@ No simulation, no mocks.
 
 `launch.py` commands: `dashboard` (default), `worker`, `all`, `initdb`.
 Worker flags go after `--`: `python launch.py worker -- --ticks 5 --interval 30`.
+Opt-in extras: `--discovery` (new-business opportunity pipeline each tick) and
+`--store` (Shopify). `--no-growth` turns the road2cissp program off.
 Add `--use-postgres` (with `DATABASE_URL` set) to persist tasks in Postgres
 instead of the in-memory store.
 
@@ -192,9 +207,9 @@ python -c "from ecosystem.etsy_monitor import EtsyMonitor;
 print(EtsyMonitor.record_spend(10.0, 'Etsy Ads top-up'))"
 ```
 
-### Shopify store (dropshipping)
+### Shopify store (dropshipping) — paused, opt-in
 
-Trend-checked product discovery, supplier sourcing priced at a 60% margin,
+Off by default. Run it with `python launch.py worker -- --store`. Trend-checked product discovery, supplier sourcing priced at a 60% margin,
 owner-approved publishing to Shopify, Meta/Google ads built paused and
 launched only on approval, plus an automatic spend guard, profit tracking,
 SEO fixes and blog drafts. Setup and approval rules:

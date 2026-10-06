@@ -78,6 +78,30 @@ def _approval_summary(a, registry) -> str:
             f"<span class='muted'>{esc(d.get('drafts_count', '?'))} drafts · "
             f"spend {spend} · requested {when}</span>{link}"
         )
+    if a.action == "marketing_experiment":
+        report_name = d.get("report_name") or ""
+        link = (f"<br><a href='/reports/{esc(report_name)}'>View growth report</a>"
+                if report_name else "")
+        try:
+            budget = float(d.get("budget_usd") or 0)
+            budget_txt = "organic ($0)" if budget == 0 else f"<strong>${budget:,.2f}</strong>"
+        except (TypeError, ValueError):
+            budget_txt = "?"
+        steps = "".join(f"<li>{esc(s)}</li>" for s in (d.get("actions") or [])[:6])
+        return (
+            f"<strong>Marketing experiment</strong> — {esc(d.get('name', '?'))} "
+            f"for <strong>{esc(d.get('business_name', '?'))}</strong><br>"
+            f"<span class='muted'>{esc(d.get('channel', ''))} · "
+            f"{esc(d.get('duration_days', '?'))} days · budget {budget_txt} · "
+            f"requested {when}</span><br>"
+            f"<span class='muted'>Hypothesis: {esc(d.get('hypothesis', ''))}<br>"
+            f"KPI: {esc(d.get('kpi', ''))} → {esc(d.get('target', ''))} · "
+            f"stop if: {esc(d.get('stop_rule', ''))}</span>"
+            + (f"<ul class='muted'>{steps}</ul>" if steps else "")
+            + "<span class='muted'>Approving starts the experiment: agents draft "
+              "its content for you to post. Nothing is published or spent "
+              f"automatically.</span>{link}"
+        )
     if a.action == "approve_supplier":
         report_name = d.get("report_name") or ""
         link = (f"<br><a href='/reports/{esc(report_name)}'>View supplier report</a>"

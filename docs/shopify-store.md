@@ -1,5 +1,7 @@
 # Shopify store pipeline
 
+> **Paused.** The agents now focus on road2cissp.com ([road2cissp-growth.md](road2cissp-growth.md)). This pipeline is off by default; run it with `python launch.py worker -- --store`.
+
 Trends → product briefs → supplier report → **owner approves a supplier** →
 product live → paused ads → **owner approves the launch** → live ads →
 orders fulfilled through CJ with tracking → spend guard, profit tracking,

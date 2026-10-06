@@ -1,9 +1,14 @@
 """Headless worker: runs the ecosystem's real agent loop on a tick interval.
 
-Each tick = one opportunity pipeline cycle through the real orchestrator:
-discovery → research → 12-factor scoring → winner becomes a business →
-AI spend recorded in the real ledger. No simulation, no mocks — the same
-components the dashboard serves.
+Focus: the agents' job is marketing road2cissp.com. Every tick runs the
+Road to CISSP growth program's due jobs (site audit, keyword research,
+metrics, weekly strategy, content drafts — see ecosystem/road2cissp_growth.py).
+Cadences live in the program's state file, so frequent ticks are cheap.
+
+Opt-in extras (off by default so the agents stay focused):
+    --discovery   opportunity pipeline each tick (discovery → research →
+                  scoring → winner becomes a business)
+    --store       Shopify store operations (paused project)
 
 Usage:
     python launch.py worker                # run forever, 60s between ticks
@@ -137,6 +142,27 @@ def run_store_tick(rt, tick: int, optimize_every: int = 30) -> dict | None:
               flush=True)
     for e in summary["errors"]:
         print(f"store: ERROR {e}", flush=True)
+    return summary
+
+
+def run_growth_tick(rt, tick: int) -> dict | None:
+    """Road to CISSP growth program: run whatever jobs are due. Never raises."""
+    from ecosystem.road2cissp_growth import run_growth_cycle
+
+    try:
+        summary = run_growth_cycle(rt)
+    except Exception as exc:  # noqa: BLE001 - worker must survive
+        print(f"growth: ERROR {exc}", flush=True)
+        return None
+    for key in ("events", "ran", "errors"):
+        for line in summary[key]:
+            print(f"growth {key[:-1] if key != 'ran' else 'job'}: {line}", flush=True)
+    if tick == 1:
+        for line in summary["skipped"]:
+            print(f"growth skipped: {line}", flush=True)
+    if summary["report"]:
+        print(f"growth report: {summary['report']} "
+              f"(spend ${summary['spend_usd']:.4f})", flush=True)
     return summary
 
 
@@ -279,6 +305,15 @@ def main(argv: list[str] | None = None, rt=None) -> int:
     parser.add_argument("--max-per-business", type=int, default=2,
                         help="dispatcher: concurrent tasks per business "
                              "(default: 2)")
+    parser.add_argument("--no-growth", dest="growth", action="store_false",
+                        default=True,
+                        help="disable the road2cissp.com growth program")
+    parser.add_argument("--discovery", action="store_true",
+                        help="also run the opportunity discovery pipeline "
+                             "each tick (off by default: focus is road2cissp)")
+    parser.add_argument("--store", action="store_true",
+                        help="also run Shopify store operations (paused "
+                             "project; off by default)")
     parser.add_argument("--store-optimize-every", type=int, default=30,
                         help="run the Shopify optimisation pass (spend guard, "
                              "profit, SEO, report) every N ticks (default: 30; "
@@ -298,29 +333,36 @@ def main(argv: list[str] | None = None, rt=None) -> int:
 
     print(f"worker online: interval={args.interval}s "
           f"store={'postgres' if args.use_postgres else 'memory'} "
+          f"focus={'road2cissp.com' if args.growth else 'none'} "
+          f"discovery={'on' if args.discovery else 'off'} "
+          f"shopify={'on' if args.store else 'off'} "
           f"etsy_monitor_every={args.monitor_every}", flush=True)
 
     tick = 0
     while True:
         tick += 1
-        try:
-            result = run_tick(rt, tick)
-        except Exception as exc:  # noqa: BLE001 - worker must survive ticks
-            print(f"tick {tick}: ERROR {exc}", flush=True)
-            result = {"tick": tick, "ok": False}
-        if result["ok"]:
-            print(
-                f"tick {tick}: {result['opportunities']} opps, "
-                f"{result['pursued']} pursued, winner='{result['winner']}' "
-                f"({result['score']}) → {result['business_id']} "
-                f"spend=${result['ai_spend_usd']}",
-                flush=True,
-            )
-        else:
-            print(f"tick {tick}: FAILED {result.get('error')}", flush=True)
+        if args.growth:
+            run_growth_tick(rt, tick)
+        if args.discovery:
+            try:
+                result = run_tick(rt, tick)
+            except Exception as exc:  # noqa: BLE001 - worker must survive ticks
+                print(f"tick {tick}: ERROR {exc}", flush=True)
+                result = {"tick": tick, "ok": False}
+            if result["ok"]:
+                print(
+                    f"tick {tick}: {result['opportunities']} opps, "
+                    f"{result['pursued']} pursued, winner='{result['winner']}' "
+                    f"({result['score']}) → {result['business_id']} "
+                    f"spend=${result['ai_spend_usd']}",
+                    flush=True,
+                )
+            else:
+                print(f"tick {tick}: FAILED {result.get('error')}", flush=True)
         if args.monitor_every and tick % args.monitor_every == 0:
             run_etsy_monitor_tick(rt, tick)
-        run_store_tick(rt, tick, args.store_optimize_every)
+        if args.store:
+            run_store_tick(rt, tick, args.store_optimize_every)
         if args.ticks and tick >= args.ticks:
             break
         time.sleep(args.interval)

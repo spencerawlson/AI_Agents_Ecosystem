@@ -194,4 +194,82 @@ class CreativeAgent(BaseAgent):
                     "text, hook and is stored as a creative asset"
                 ),
             }
+        if action == "content_pieces":
+            return self._content_pieces(task)
         raise ValueError(f"unknown action: {action}")
+
+    # What each content type must contain, for the prompt and validation.
+    CONTENT_SPECS = {
+        "blog": ('{"type": "blog", "title", "target_keyword", "meta_description", '
+                 '"body_markdown" (900-1400 words, H2 sections, ends with a CTA '
+                 'to the site)}', ("title", "body_markdown")),
+        "social": ('{"type": "social", "platform" (linkedin, x or threads), "text"}',
+                   ("platform", "text")),
+        "community": ('{"type": "community", "venue" (e.g. r/cissp), "context" (the '
+                      'kind of question it answers), "text" (a genuinely helpful '
+                      'answer; mention the site only at the end, disclosed as '
+                      '"I built")}', ("venue", "text")),
+        "email": ('{"type": "email", "subject", "body"}', ("subject", "body")),
+        "landing": ('{"type": "landing", "route" (suggested URL path), "title", '
+                    '"meta_description", "h1", "body_markdown"}',
+                    ("route", "title", "body_markdown")),
+    }
+
+    def _content_pieces(self, task: Task) -> dict:
+        """Draft the content one marketing experiment needs. Drafts only —
+        each piece is stored as a creative asset; nothing is published."""
+        from agents.marketing.agent import _compact, clean_llm_text
+        from core.llm import LLMGateway
+
+        if not LLMGateway.enabled():
+            raise RuntimeError(
+                "content_pieces requires LLM mode (--llm with an API key)")
+        exp = task.inputs.get("experiment", {})
+        profile = task.inputs.get("profile", {})
+        types = [t for t in exp.get("content_needed", []) if t in self.CONTENT_SPECS]
+        if not types:
+            types = ["social"]
+        per_type = {"blog": 1, "landing": 1, "email": 2, "social": 4, "community": 3}
+        wanted = "\n".join(
+            f"- {per_type[t]} x {self.CONTENT_SPECS[t][0]}" for t in types)
+        prompt = (
+            "You produce marketing content for this website.\n"
+            f"SITE PROFILE (facts — never invent features, prices or stats):\n"
+            f"{_compact(profile, 3000)}\n\n"
+            f"EXPERIMENT THIS CONTENT SERVES:\n{_compact(exp, 2000)}\n\n"
+            "Write in a direct, practical, expert voice for IT and security "
+            "learners. No hype, no fake testimonials, max 3 hashtags.\n"
+            'Return ONLY a JSON object {"pieces": [...]} containing:\n' + wanted
+        )
+        rework = task.inputs.get("_rework_feedback")
+        if rework:
+            prompt += f"\n\nYour previous attempt was rejected by review: {rework}"
+        result = LLMGateway().complete(
+            prompt, tier="cheap",
+            system="You are a precise technical content marketer. JSON only.",
+            json_mode=True)
+        self.record_usage(task, tokens=result["input_tokens"] + result["output_tokens"],
+                          cost_usd=result["cost_usd"])
+        payload = clean_llm_text(result["json"] or {})
+        raw = payload.get("pieces", []) if isinstance(payload, dict) else payload
+        business_id = task.business_id or "unknown"
+        pieces = []
+        for p in raw if isinstance(raw, list) else []:
+            if not isinstance(p, dict) or p.get("type") not in types:
+                continue
+            if not all(p.get(k) for k in self.CONTENT_SPECS[p["type"]][1]):
+                continue
+            label = p.get("title") or p.get("subject") or p.get("venue") \
+                or p.get("platform") or p["type"]
+            body = p.get("body_markdown") or p.get("text") or p.get("body") or ""
+            asset = self.create(business_id, p["type"], f"[{exp.get('slug', '')}] "
+                                f"{label}"[:80], body)
+            pieces.append({**p, "asset_id": asset.id})
+        if not pieces:
+            raise ValueError("LLM returned no usable content pieces")
+        return {
+            "experiment": exp.get("slug", ""),
+            "pieces": pieces,
+            "evidence": f"{len(pieces)} content drafts ({', '.join(sorted({p['type'] for p in pieces}))}) "
+                        "stored as creative assets; nothing published",
+        }
