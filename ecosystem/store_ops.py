@@ -18,8 +18,9 @@ Every cycle (worker tick or `shopify_pipeline.py optimize`):
                       makes it visible in Shopify admin.
   5. Report           reports/store_report_<date>.md
 
-run_store_cycle() also publishes approved suppliers, applies ad
-approvals and auto-drafts paused campaigns for newly published products.
+run_store_cycle() also publishes approved suppliers, fulfils paid orders
+through CJ (ecosystem/fulfillment.py), applies ad approvals and
+auto-drafts paused campaigns for newly published products.
 """
 
 from __future__ import annotations
@@ -272,11 +273,24 @@ def draft_articles(state: dict, shopify, gateway, now: datetime,
 def write_store_report(path: Path, now: datetime, perf: dict, state: dict,
                        guard: list[dict], seo: list[dict], articles: list[dict],
                        other: list[str], spend_usd: float) -> None:
+    from ecosystem.fulfillment import fulfilment_overview
+
     def cell(x):
         return str(x).replace("|", "/").replace("\n", " ")
 
     lines = [f"# Store Report — {now:%Y-%m-%d}", "",
-             f"_Generated {now.isoformat()}_", "", "## Profit by product", ""]
+             f"_Generated {now.isoformat()}_", ""]
+    fo = fulfilment_overview(state)
+    lines += ["## Orders", ""]
+    if fo["counts"]:
+        lines.append(" · ".join(f"{k}: {v}" for k, v in sorted(fo["counts"].items())))
+        if fo["attention"]:
+            lines += ["", "**Needs you:**", ""]
+            lines += [f"- {cell(a['order'])} ({a['status']}): {cell(a['why'])}"
+                      for a in fo["attention"]]
+    else:
+        lines.append("No orders processed yet.")
+    lines += ["", "## Profit by product", ""]
     if perf:
         lines += ["| Product | Units | Revenue | Gross profit | Ad spend | Net profit |",
                   "|---------|-------|---------|--------------|----------|------------|"]
@@ -334,14 +348,15 @@ def write_store_report(path: Path, now: datetime, perf: dict, state: dict,
 def run_store_cycle(gate: ApprovalGate, shopify, ads_adapters: dict[str, AdsAdapter],
                     state_path: Path, reports_dir: Path | None = None,
                     gateway=None, policy: AdsPolicy | None = None,
-                    optimize: bool = True, now: datetime | None = None) -> dict:
+                    optimize: bool = True, now: datetime | None = None,
+                    cj_orders=None, fulfilment_policy=None) -> dict:
     """One full operations pass. Never raises on a single-step failure."""
     from ecosystem.shopify_pipeline import load_state, publish_approved, save_state
 
     now = now or datetime.now(timezone.utc)
     policy = policy or AdsPolicy.from_env()
-    summary: dict = {"published": [], "ads": [], "drafted": [], "guard": [],
-                     "seo": [], "articles": [], "errors": []}
+    summary: dict = {"published": [], "fulfilment": [], "ads": [], "drafted": [],
+                     "guard": [], "seo": [], "articles": [], "errors": []}
     if shopify is not None:
         try:
             summary["published"] = publish_approved(gate, shopify, state_path)
@@ -349,6 +364,16 @@ def run_store_cycle(gate: ApprovalGate, shopify, ads_adapters: dict[str, AdsAdap
             summary["errors"].append(f"publish: {exc}")
 
     state = load_state(state_path)
+    if shopify is not None:
+        from ecosystem.fulfillment import FulfilmentPolicy, process_orders
+        try:
+            summary["fulfilment"] = process_orders(
+                state, shopify, cj_orders, gate,
+                fulfilment_policy or FulfilmentPolicy.from_env(), now,
+                save=lambda: save_state(state_path, state))
+        except Exception as exc:  # noqa: BLE001
+            summary["errors"].append(f"fulfilment: {exc}")
+        save_state(state_path, state)
     try:
         summary["ads"] = apply_approvals(state, ads_adapters, gate, now)
     except Exception as exc:  # noqa: BLE001
@@ -384,6 +409,7 @@ def run_store_cycle(gate: ApprovalGate, shopify, ads_adapters: dict[str, AdsAdap
         summary["performance"] = perf
         if reports_dir is not None and (state["products"] or state["campaigns"]):
             other = [f"published {r['approval_id']} -> {r['status']}" for r in summary["published"]]
+            other += [f"order {r['order']} -> {r['status']}" for r in summary["fulfilment"]]
             other += [f"ads {r['campaign']} -> {r['status']}" for r in summary["ads"]]
             other += [f"drafted {r['platform']} campaign -> {r['status']}" for r in summary["drafted"]]
             other += [f"error: {e}" for e in summary["errors"]]

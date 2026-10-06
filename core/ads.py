@@ -220,6 +220,15 @@ class MetaAdsAdapter(AdsAdapter):
             raise AdsError(f"Meta {path}: HTTP {status}: {msg}")
         return data
 
+    def verify(self) -> dict:
+        """Live read-only check of the ad account."""
+        data = self._req("GET", self.account,
+                         {"fields": "name,account_status,currency"})
+        # 1 = ACTIVE; anything else (disabled, unsettled, ...) can't run ads.
+        return {"name": data.get("name"), "currency": data.get("currency"),
+                "active": data.get("account_status") == 1,
+                "account_status": data.get("account_status")}
+
     def create_paused(self, plan: CampaignPlan) -> dict:
         refs: dict = {}
         try:
@@ -330,7 +339,8 @@ class GoogleAdsAdapter(AdsAdapter):
         self.refresh_token = refresh_token
         self.cid = customer_id.replace("-", "")
         self.login_cid = (login_customer_id or "").replace("-", "") or None
-        self.base = f"https://googleads.googleapis.com/{api_version}/customers/{self.cid}"
+        self.api_root = f"https://googleads.googleapis.com/{api_version}"
+        self.base = f"{self.api_root}/customers/{self.cid}"
         self._transport = transport or _urllib_transport
         self._token: str | None = None
 
@@ -379,6 +389,20 @@ class GoogleAdsAdapter(AdsAdapter):
         if status != 200:
             raise AdsError(f"Google Ads {path}: HTTP {status}: {text[:400]}")
         return json.loads(text) if text else {}
+
+    def verify(self) -> dict:
+        """Live read-only check: customers these credentials can reach."""
+        headers = {"Authorization": f"Bearer {self._access_token()}",
+                   "developer-token": self.developer_token}
+        status, text = self._transport(
+            "GET", f"{self.api_root}/customers:listAccessibleCustomers", headers, None)
+        if status != 200:
+            raise AdsError(f"Google Ads verify: HTTP {status}: {text[:300]}")
+        names = json.loads(text).get("resourceNames", [])
+        ids = [n.rsplit("/", 1)[-1] for n in names]
+        # Via a manager account the client id may not be listed directly.
+        return {"accessible": ids,
+                "customer_listed": self.cid in ids or (self.login_cid in ids)}
 
     def _rn(self, kind: str, temp_id: int) -> str:
         return f"customers/{self.cid}/{kind}/{temp_id}"

@@ -107,7 +107,9 @@ def run_store_tick(rt, tick: int, optimize_every: int = 30) -> dict | None:
     if not ShopifyCommerceAdapter.configured():
         return None
     from core.ads import configured_ads_adapters
+    from core.cj_orders import CJOrders
     from core.llm import LLMGateway
+    from core.supplier_search import CJDropshippingSource
     from dashboard.reports import reports_dir
     from ecosystem.shopify_pipeline import default_state_path
     from ecosystem.store_ops import run_store_cycle
@@ -118,13 +120,16 @@ def run_store_tick(rt, tick: int, optimize_every: int = 30) -> dict | None:
             rt.approvals, ShopifyCommerceAdapter.from_env(),
             configured_ads_adapters(), default_state_path(), reports_dir(),
             gateway=LLMGateway() if (optimize and LLMGateway.enabled()) else None,
-            optimize=optimize)
+            optimize=optimize,
+            cj_orders=CJOrders.from_env() if CJDropshippingSource.configured() else None)
     except Exception as exc:  # noqa: BLE001 - worker must survive
         print(f"store: ERROR {exc}", flush=True)
         return None
     for r in summary["published"]:
         print(f"store publish: {r.get('approval_id')} -> {r.get('status')}"
               + (f" ({r['error']})" if r.get("error") else ""), flush=True)
+    for r in summary["fulfilment"]:
+        print(f"store order: {r}", flush=True)
     for r in summary["ads"] + summary["drafted"]:
         print(f"store ads: {r}", flush=True)
     for g in summary["guard"]:

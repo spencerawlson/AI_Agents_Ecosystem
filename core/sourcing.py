@@ -38,6 +38,10 @@ class Supplier(BaseModel):
     trade_assurance: bool = False
     image_urls: list[str] = Field(default_factory=list)
     notes: str = ""
+    # Machine ids for automated ordering (CJ product pid / variant vid).
+    supplier_product_id: str = ""
+    supplier_variant_id: str = ""
+    shipping_method: str = ""
 
 
 class ProductBrief(BaseModel):

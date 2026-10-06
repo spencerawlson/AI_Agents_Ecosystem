@@ -390,6 +390,9 @@ class FakeStore:
     def list_orders_since(self, since):
         return self.orders
 
+    def orders_to_fulfil(self):
+        return []
+
     def update_seo(self, pid, title, desc):
         self.seo_updates.append((pid, title, desc))
         self.products[pid]["seo"] = {"title": title, "description": desc}

@@ -56,28 +56,29 @@ def _first_price(value: object) -> float | None:
         return None
 
 
-class CJDropshippingSource:
-    """SupplierSource backed by the CJ Dropshipping API."""
+class CJClient:
+    """Authenticated CJ Dropshipping API v2 client (shared by search and
+    order placement)."""
 
     platform = "cjdropshipping"
 
     def __init__(self, api_key: str, transport: Transport | None = None,
-                 dest_country: str = "US", per_keyword: int = 5,
-                 max_suppliers: int = 6,
                  sleep: Callable[[float], None] = time.sleep) -> None:
         if not api_key:
             raise SupplierSearchError("CJ api key is required")
         self.api_key = api_key
         self._transport = transport or _urllib_transport
-        self.dest_country = dest_country
-        self.per_keyword = per_keyword
-        self.max_suppliers = max_suppliers
         self._sleep = sleep
         self._token: str | None = None
 
     @classmethod
-    def from_env(cls, **kw) -> "CJDropshippingSource":
+    def from_env(cls, **kw):
         return cls(os.environ.get("CJ_API_KEY", ""), **kw)
+
+    def verify(self) -> dict:
+        """Live read-only check: obtains an access token."""
+        self._access_token()
+        return {"ok": True}
 
     @staticmethod
     def configured() -> bool:
@@ -113,6 +114,19 @@ class CJDropshippingSource:
             if not self._token:
                 raise SupplierSearchError("CJ returned no access token")
         return self._token
+
+
+class CJDropshippingSource(CJClient):
+    """SupplierSource backed by the CJ Dropshipping API."""
+
+    def __init__(self, api_key: str, transport: Transport | None = None,
+                 dest_country: str = "US", per_keyword: int = 5,
+                 max_suppliers: int = 6,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        super().__init__(api_key, transport=transport, sleep=sleep)
+        self.dest_country = dest_country
+        self.per_keyword = per_keyword
+        self.max_suppliers = max_suppliers
 
     def _shipping(self, vid: str) -> tuple[float | None, int | None, str]:
         """Cheapest tracked option for one unit -> (usd, days, method)."""
@@ -160,6 +174,9 @@ class CJDropshippingSource:
             shipping_cost_usd=ship or 0.0,
             moq=1,
             lead_time_days=days,
+            supplier_product_id=str(pid),
+            supplier_variant_id=str(v["vid"]),
+            shipping_method=method,
             # CJ handles per-order fulfilment + tracking; not an Alibaba
             # verified/Trade Assurance listing, so those stay False.
             image_urls=list(dict.fromkeys(images))[:8],

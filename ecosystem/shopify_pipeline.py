@@ -66,7 +66,7 @@ def default_state_path() -> Path:
 
 
 STATE_SECTIONS = ("approvals", "briefs", "products", "campaigns", "articles",
-                  "seo_fixes")
+                  "seo_fixes", "orders")
 
 
 def load_state(path: Path) -> dict:
@@ -249,6 +249,16 @@ def source(brief: ProductBrief, gate: ApprovalGate, reports_dir: Path,
                 "keywords": brief.keywords,
                 "facts": brief.description,
                 "flags": scored.flags,
+                "supplier": {
+                    "name": scored.supplier.name,
+                    "platform": scored.supplier.platform,
+                    "url": scored.supplier.url,
+                    "product_id": scored.supplier.supplier_product_id,
+                    "variant_id": scored.supplier.supplier_variant_id,
+                    "shipping_method": scored.supplier.shipping_method,
+                    "unit_cost_usd": scored.supplier.unit_cost_usd,
+                    "shipping_cost_usd": scored.supplier.shipping_cost_usd,
+                },
                 "report_name": report_name,
                 "product": _product_payload(brief, scored, listing),
             },
@@ -321,6 +331,8 @@ def publish_approved(gate: ApprovalGate, adapter,
                                          d["product"].get("cost_usd", 0.0)),
                 "fees_usd": d.get("fees_usd", 0.0),
                 "max_ad_cost_per_order_usd": d.get("max_ad_cost_per_order_usd", 0.0),
+                "supplier": d.get("supplier") or {"name": d.get("supplier_name"),
+                                                  "platform": "unknown"},
                 "published_at": datetime.now(timezone.utc).isoformat(),
             }
             rec = {**rec, "status": "published",
@@ -419,6 +431,65 @@ def _shopify_or_none():
         return None
 
 
+def run_check(shopify, ads: dict, cj=None) -> int:
+    """Live, read-only connection test for every configured integration."""
+    from core.supplier_search import CJClient, CJDropshippingSource
+
+    problems = 0
+
+    def line(name: str, ok: bool | None, detail: str) -> None:
+        nonlocal problems
+        mark = {True: "OK  ", False: "FAIL", None: "--  "}[ok]
+        problems += ok is False
+        print(f"[{mark}] {name}: {detail}")
+
+    if shopify is None:
+        line("Shopify", False, "not configured (SHOPIFY_SHOP + SHOPIFY_ACCESS_TOKEN "
+             "or SHOPIFY_CLIENT_ID/SECRET)")
+    else:
+        try:
+            v = shopify.verify()
+            shop = v["shop"]
+            line("Shopify", not v["missing_scopes"],
+                 f"{shop['name']} ({shop['myshopifyDomain']}, {shop['currencyCode']}, "
+                 f"api {shopify.api_version})"
+                 + (f" - missing scopes: {', '.join(v['missing_scopes'])}"
+                    if v["missing_scopes"] else ""))
+        except Exception as exc:  # noqa: BLE001
+            line("Shopify", False, str(exc)[:200])
+
+    if cj is None and CJDropshippingSource.configured():
+        cj = CJClient.from_env()
+    if cj is None:
+        line("CJ Dropshipping", None, "not configured (CJ_API_KEY) - supplier search "
+             "and order fulfilment stay manual")
+    else:
+        try:
+            cj.verify()
+            auto_pay = os.environ.get("CJ_AUTO_PAY", "").lower() in ("1", "true", "yes")
+            line("CJ Dropshipping", True, "API key accepted; orders "
+                 + ("paid automatically from CJ wallet" if auto_pay
+                    else "created unpaid - pay in CJ dashboard (CJ_AUTO_PAY=false)"))
+        except Exception as exc:  # noqa: BLE001
+            line("CJ Dropshipping", False, str(exc)[:200])
+
+    if not ads:
+        line("Ads", None, "none configured (META_* / GOOGLE_ADS_*)")
+    for platform, adapter in ads.items():
+        try:
+            v = adapter.verify()
+            if platform == "meta":
+                line("Meta Ads", v["active"], f"{v['name']} ({v['currency']}), "
+                     f"account_status={v['account_status']}")
+            else:
+                line("Google Ads", v["customer_listed"],
+                     f"accessible customers: {', '.join(v['accessible']) or 'none'}")
+        except Exception as exc:  # noqa: BLE001
+            line(platform.title() + " Ads", False, str(exc)[:200])
+    print("all connected" if not problems else f"{problems} problem(s)")
+    return 0 if not problems else 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -504,17 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     ads = configured_ads_adapters()
 
     if args.cmd == "check":
-        if shopify is None:
-            print("Shopify: NOT configured (SHOPIFY_SHOP + SHOPIFY_ACCESS_TOKEN or "
-                  "SHOPIFY_CLIENT_ID/SECRET)")
-        else:
-            info = shopify.shop_info()
-            print(f"Shopify: connected to {info['name']} ({info['myshopifyDomain']}) "
-                  f"currency={info['currencyCode']} api={shopify.api_version}")
-        cj = "configured" if CJDropshippingSource.configured() else "NOT configured (CJ_API_KEY)"
-        print(f"CJ Dropshipping: {cj}")
-        print(f"Ads: {', '.join(ads) if ads else 'none configured (META_* / GOOGLE_ADS_*)'}")
-        return 0 if shopify is not None else 2
+        return run_check(shopify, ads)
 
     if shopify is None:
         print("Shopify not configured: set SHOPIFY_SHOP and SHOPIFY_ACCESS_TOKEN "
@@ -551,10 +612,12 @@ def main(argv: list[str] | None = None) -> int:
             print("campaigns already drafted for this product")
         return 1 if any(r["status"] == "failed" for r in results) else 0
 
+    from core.cj_orders import CJOrders
     from ecosystem.store_ops import run_store_cycle
 
-    summary = run_store_cycle(gate, shopify, ads, default_state_path(), reports_dir(),
-                              gateway=gateway)
+    summary = run_store_cycle(
+        gate, shopify, ads, default_state_path(), reports_dir(), gateway=gateway,
+        cj_orders=CJOrders.from_env() if CJDropshippingSource.configured() else None)
     print(json.dumps({k: v for k, v in summary.items() if k != "performance"},
                      indent=2, default=str))
     return 1 if summary["errors"] else 0

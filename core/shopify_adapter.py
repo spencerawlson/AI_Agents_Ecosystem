@@ -21,6 +21,11 @@ Scopes (least privilege for store management):
   read_publications / write_publications  publish to the Online Store
   read_orders                           order monitoring
   read_content / write_content          SEO blog articles (created hidden)
+  read_/write_merchant_managed_fulfillment_orders
+                                        mark orders shipped with tracking
+Customer names/addresses on orders are "protected customer data": enable
+it for the app (Dev Dashboard > app > API access) or fulfilment cannot
+read shipping addresses.
 
 NOT requested: write_orders, refunds, payments, store settings — those
 stay human-only.
@@ -51,6 +56,8 @@ SCOPES = [
     "read_publications", "write_publications",
     "read_orders",
     "read_content", "write_content",
+    "read_merchant_managed_fulfillment_orders",
+    "write_merchant_managed_fulfillment_orders",
 ]
 
 # transport(method, url, headers, body_bytes) -> (status, response_text)
@@ -164,6 +171,39 @@ query($id: ID!) {
     media(first: 10) { nodes { alt mediaContentType } }
   }
 }""" % _PRODUCT_FIELDS
+
+_TO_FULFIL_Q = """
+query($cursor: String, $q: String!) {
+  orders(first: 50, after: $cursor, query: $q, sortKey: CREATED_AT) {
+    nodes {
+      id name createdAt email phone cancelledAt
+      displayFinancialStatus displayFulfillmentStatus
+      shippingAddress { name address1 address2 city province provinceCode
+                        zip country countryCodeV2 phone }
+      lineItems(first: 50) { nodes { id sku quantity product { id } } }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}"""
+
+_FULFILLMENT_ORDERS_Q = """
+query($id: ID!) {
+  order(id: $id) { fulfillmentOrders(first: 10) { nodes { id status } } }
+}"""
+
+_FULFILLMENT_CREATE_M = """
+mutation($fulfillment: FulfillmentInput!) {
+  fulfillmentCreate(fulfillment: $fulfillment) {
+    fulfillment { id status }
+    userErrors { field message }
+  }
+}"""
+
+_SCOPES_Q = """
+query {
+  shop { name myshopifyDomain currencyCode }
+  currentAppInstallation { accessScopes { handle } }
+}"""
 
 _BLOGS_Q = "query { blogs(first: 5) { nodes { id title handle } } }"
 
@@ -491,6 +531,49 @@ class ShopifyCommerceAdapter(CommerceAdapter):
                 "author": {"name": author},
             }})["articleCreate"], "articleCreate")
         return res["article"]
+
+    def verify(self) -> dict:
+        """Live read-only check: shop identity + any missing access scopes."""
+        data = self.graphql(_SCOPES_Q)
+        granted = {s["handle"] for s in
+                   data["currentAppInstallation"]["accessScopes"]}
+        # write_X implies read_X in Shopify's scope model.
+        have = granted | {h.replace("write_", "read_", 1) for h in granted}
+        return {"shop": data["shop"],
+                "missing_scopes": [s for s in SCOPES if s not in have]}
+
+    def orders_to_fulfil(self) -> list[dict]:
+        """Paid, unfulfilled, not cancelled orders, oldest first."""
+        out, cursor = [], None
+        q = "financial_status:paid AND fulfillment_status:unfulfilled AND status:open"
+        while True:
+            page = self.graphql(_TO_FULFIL_Q, {"cursor": cursor, "q": q})["orders"]
+            out.extend(o for o in page["nodes"] if not o.get("cancelledAt"))
+            if not page["pageInfo"]["hasNextPage"]:
+                return out
+            cursor = page["pageInfo"]["endCursor"]
+
+    def fulfil_with_tracking(self, order_id: str, tracking_number: str,
+                             company: str | None = None, url: str | None = None,
+                             notify_customer: bool = True) -> dict:
+        """Mark every open fulfillment order shipped; Shopify emails the customer."""
+        nodes = self.graphql(_FULFILLMENT_ORDERS_Q, {"id": _gid("Order", order_id)}
+                             )["order"]["fulfillmentOrders"]["nodes"]
+        open_ids = [n["id"] for n in nodes if n["status"] in ("OPEN", "IN_PROGRESS")]
+        if not open_ids:
+            raise ShopifyError(f"order {order_id} has no open fulfillment orders")
+        tracking: dict[str, Any] = {"number": tracking_number}
+        if company:
+            tracking["company"] = company
+        if url:
+            tracking["url"] = url
+        res = self._check_user_errors(
+            self.graphql(_FULFILLMENT_CREATE_M, {"fulfillment": {
+                "lineItemsByFulfillmentOrder": [{"fulfillmentOrderId": i} for i in open_ids],
+                "trackingInfo": tracking,
+                "notifyCustomer": notify_customer,
+            }})["fulfillmentCreate"], "fulfillmentCreate")
+        return res["fulfillment"]
 
     def update_seo(self, product_id: str, title: str, description: str) -> dict:
         res = self._check_user_errors(

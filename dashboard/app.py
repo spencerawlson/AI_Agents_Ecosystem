@@ -100,6 +100,19 @@ def _approval_summary(a, registry) -> str:
             f"Shopify with this supplier. Approve one per product.</span>"
             f"{flag_txt}{link}"
         )
+    if a.action == "supplier_order_over_cost":
+        try:
+            detail = (f"approved ${float(d.get('approved_cost_usd')):.2f} → now "
+                      f"<strong>${float(d.get('current_cost_usd')):.2f}</strong>")
+        except (TypeError, ValueError):
+            detail = "?"
+        return (
+            f"<strong>Supplier cost went up</strong> — order "
+            f"{esc(d.get('order_name', '?'))}: {esc(', '.join(d.get('products') or []))}<br>"
+            f"<span class='muted'>{detail} · {esc(d.get('shipping_method', ''))} · "
+            f"requested {when}</span><br><span class='muted'>Approve to place the CJ "
+            f"order at the new cost. Reject to handle this order yourself.</span>"
+        )
     if a.action == "launch_ad_campaign":
         report_name = d.get("report_name") or ""
         link = (f"<br><a href='/reports/{esc(report_name)}'>View ads report</a>"
