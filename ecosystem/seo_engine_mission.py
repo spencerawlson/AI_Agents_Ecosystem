@@ -30,6 +30,7 @@ Usage (on the Fedora server):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -141,7 +142,9 @@ def main(argv=None) -> int:
         return 1
     print(f"inventory: {len(inventory.pages)} pages", flush=True)
 
-    rt = build_runtime(use_llm=args.llm, approvals_persist=True)
+    rt = build_runtime(use_llm=args.llm,
+                     use_postgres=bool(os.environ.get("DATABASE_URL")),
+                     approvals_persist=True)
     orch = rt.orchestrator
     biz = rt.businesses.create(
         name=args.name or domain, business_type="seo_content_engine",

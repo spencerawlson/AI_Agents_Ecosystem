@@ -168,8 +168,13 @@ def word_count(markdown: str) -> int:
 def validate_article_package(pkg: dict, inventory: SiteInventory,
                              min_words: int = 900,
                              max_words: int = 3500) -> dict:
-    """Deterministic quality gate. Returns {"errors": [...], "warnings":
-    [...]} — errors block publishing, warnings are reported to the human."""
+    """Deterministic quality gate. Returns {"passed", "errors",
+    "warnings", "error_count", "warning_count"} — errors block
+    publishing, warnings are reported to the human. The scalar summary
+    fields are load-bearing: the framework's peer reviewer treats a
+    report whose values are all empty lists as a placeholder field, so
+    a clean article (no errors, no warnings) failed review on the
+    shape of its own success report until these were added."""
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -177,7 +182,8 @@ def validate_article_package(pkg: dict, inventory: SiteInventory,
         if not pkg.get(key):
             errors.append(f"missing or empty: {key}")
     if errors:
-        return {"errors": errors, "warnings": warnings}
+        return {"passed": False, "errors": errors, "warnings": warnings,
+                "error_count": len(errors), "warning_count": 0}
 
     title = str(pkg["title"])
     meta = str(pkg["meta_description"])
@@ -240,7 +246,8 @@ def validate_article_package(pkg: dict, inventory: SiteInventory,
     if "## " not in body:
         errors.append("body has no H2 sections")
 
-    return {"errors": errors, "warnings": warnings}
+    return {"passed": not errors, "errors": errors, "warnings": warnings,
+            "error_count": len(errors), "warning_count": len(warnings)}
 
 
 # ---------------------------------------------------------------------------

@@ -116,6 +116,25 @@ def test_good_package_passes_gate():
     assert word_count(pkg["body_markdown"]) >= 900
     result = validate_article_package(pkg, _inventory())
     assert result["errors"] == []
+    assert result["passed"] is True
+    assert result["error_count"] == 0
+
+
+def test_clean_gate_report_survives_peer_review():
+    """Regression (live failure, 2026-10-18): a clean article's quality
+    report was {"errors": [], "warnings": []} — the framework's peer
+    reviewer reads a dict of empty lists as a placeholder field, so the
+    article reworked until the task failed. The report now carries
+    scalar summary fields and must pass review on its own shape."""
+    from agents.review.agent import ReviewAgent, _has_substance
+    from orchestrator.models import Task
+
+    result = validate_article_package(_good_pkg(), _inventory())
+    assert _has_substance(result)
+    task = Task(agent_type="creative", business_id="biz_1", inputs={},
+                budget_usd=1.0, budget_tokens=1000,
+                acceptance_criteria=[])
+    assert ReviewAgent().review(task, {"quality": result}) == []
 
 
 def test_gate_blocks_hallucinated_link():

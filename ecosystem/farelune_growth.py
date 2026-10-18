@@ -32,6 +32,7 @@ Usage (FedServ):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,7 +157,9 @@ def main(argv=None) -> int:
     parser.add_argument("--no-llm", dest="llm", action="store_false")
     args = parser.parse_args(argv)
 
-    rt = build_runtime(use_llm=args.llm, approvals_persist=True)
+    rt = build_runtime(use_llm=args.llm,
+                     use_postgres=bool(os.environ.get("DATABASE_URL")),
+                     approvals_persist=True)
     biz = get_or_create_business(rt)
 
     if args.pnl:
