@@ -32,6 +32,25 @@ def test_worker_tick_end_to_end():
     assert pnl.net_profit == entries[0].amount_usd
 
 
+def test_tick_never_duplicates_a_business():
+    """Regression: the game loop created a fresh business for the winning
+    niche on every tick (five ticks = five copies of the same venture).
+    One niche = one business; later ticks add their research spend to it."""
+    from core.models import BusinessStatus, Opportunity
+    from ecosystem.worker import _find_or_create_business
+
+    rt = build_runtime()
+    winner = Opportunity(niche="notion templates for freelancers",
+                         business_type="digital_product")
+    biz1, created1 = _find_or_create_business(rt, winner)
+    assert created1 is True
+    assert biz1.status == BusinessStatus.RESEARCHING
+    biz2, created2 = _find_or_create_business(rt, winner)
+    assert created2 is False
+    assert biz2.id == biz1.id
+    assert len(rt.businesses.list()) == 1
+
+
 def test_dashboard_app_builds():
     from ecosystem.runtime import create_dashboard_app
 

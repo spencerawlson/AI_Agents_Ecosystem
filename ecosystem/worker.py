@@ -166,6 +166,21 @@ def run_growth_tick(rt, tick: int) -> dict | None:
     return summary
 
 
+def _find_or_create_business(rt, winner) -> tuple:
+    """One business per niche, ever. The tick loop used to create a fresh
+    business record for the winning niche on EVERY tick, so five ticks on
+    the same winner produced five duplicate 'researching' businesses and
+    a portfolio of copies instead of one venture accumulating real
+    research cost. Reuse the existing non-terminated business for the
+    niche; create (and move to RESEARCHING) only when none exists."""
+    for biz in rt.businesses.list():
+        if biz.name == winner.niche and biz.status != BusinessStatus.TERMINATED:
+            return biz, False
+    biz = rt.businesses.create(winner.niche, winner.business_type)
+    rt.businesses.transition(biz.id, BusinessStatus.RESEARCHING)
+    return biz, True
+
+
 def run_tick(rt, tick: int) -> dict:
     orch = rt.orchestrator
     scorer = ScoringEngine()
@@ -197,9 +212,10 @@ def run_tick(rt, tick: int) -> dict:
          "cost_usd": r2.cost_usd},
     ]
     business_id = None
+    business_reused = False
     if winner is not None:
-        biz = rt.businesses.create(winner.niche, winner.business_type)
-        rt.businesses.transition(biz.id, BusinessStatus.RESEARCHING)
+        biz, created = _find_or_create_business(rt, winner)
+        business_reused = not created
         business_id = biz.id
         rt.ledger.record(business_id=biz.id, kind="ai_spend",
                          amount_usd=-ai_spend,
@@ -217,6 +233,7 @@ def run_tick(rt, tick: int) -> dict:
         "winner": winner.niche if winner else None,
         "score": winner.score if winner else None,
         "business_id": business_id,
+        "business_reused": business_reused,
         "ai_spend_usd": round(ai_spend, 4),
         "runs": runs,
     }
