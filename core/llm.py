@@ -82,16 +82,29 @@ class LLMGateway:
         tier: str = CHEAP,
         system: str | None = None,
         json_mode: bool = True,
+        timeout: int | None = None,
     ) -> dict:
         """Run one completion. Returns {text, json, model, input_tokens,
-        output_tokens, cost_usd}. Raises LLMUnavailable on any failure."""
+        output_tokens, cost_usd}. Raises LLMUnavailable on any failure.
+
+        timeout: per-call override for long-form work. The gateway
+        default (60s) is right for short calls, but a 1,500-word article
+        legitimately generates for minutes — the first live SEO article
+        died at the 60s default (the provider SDK's silent retries
+        stretched it to ~3 minutes before giving up). When a caller
+        passes an explicit timeout, SDK retries are disabled so the
+        caller's own error handling sees the failure once, at the
+        deadline it chose."""
         litellm = self._require_litellm()
         model = self.model_for(tier)
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        kwargs: dict[str, Any] = {"timeout": self.timeout}
+        kwargs: dict[str, Any] = {
+            "timeout": timeout if timeout is not None else self.timeout}
+        if timeout is not None:
+            kwargs["num_retries"] = 0
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         try:

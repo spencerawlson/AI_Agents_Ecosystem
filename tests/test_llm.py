@@ -79,6 +79,22 @@ def test_gateway_complete_parses_json_and_cost(monkeypatch):
         "type": "json_object"}
 
 
+def test_gateway_timeout_override_for_long_form(monkeypatch):
+    """A caller generating long-form content can raise the per-call
+    timeout past the 60s gateway default; SDK retries are disabled so
+    the failure (if any) surfaces once, at the chosen deadline."""
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    mod = install_fake(monkeypatch, {"ok": True})
+    gw = LLMGateway()
+    gw.complete("short call")
+    assert mod.completion.calls[0]["kwargs"]["timeout"] == 60
+    assert "num_retries" not in mod.completion.calls[0]["kwargs"]
+    gw.complete("long article", timeout=600)
+    assert mod.completion.calls[1]["kwargs"]["timeout"] == 600
+    assert mod.completion.calls[1]["kwargs"]["num_retries"] == 0
+
+
 def test_gateway_unavailable_without_key(monkeypatch):
     _clear_keys(monkeypatch)
     install_fake(monkeypatch, {})

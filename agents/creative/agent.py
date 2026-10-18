@@ -271,7 +271,7 @@ class CreativeAgent(BaseAgent):
         result = LLMGateway().complete(
             prompt, tier=LLMGateway.SMART,
             system="You are a precise, expert long-form SEO writer. JSON only.",
-            json_mode=True)
+            json_mode=True, timeout=600)
         self.record_usage(
             task, tokens=result["input_tokens"] + result["output_tokens"],
             cost_usd=result["cost_usd"])
