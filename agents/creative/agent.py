@@ -39,6 +39,7 @@ class CreativeAgent(BaseAgent):
         "ad_concepts",
         "social_content",
         "email_campaigns",
+        "seo_articles",
     ]
     description = "Generates versioned creative assets tied to campaigns."
 
@@ -196,7 +197,111 @@ class CreativeAgent(BaseAgent):
             }
         if action == "content_pieces":
             return self._content_pieces(task)
+        if action == "seo_article":
+            return self._seo_article(task)
         raise ValueError(f"unknown action: {action}")
+
+    def self_check(self, task: Task, output: dict) -> list[str]:
+        if task.inputs.get("action") == "seo_article":
+            return list((output.get("quality") or {}).get("errors", []))
+        return []
+
+    def _seo_article(self, task: Task) -> dict:
+        """Write one SEO article package for the SEO engine mission.
+
+        The contract is enforced on the way out by the deterministic
+        gate in core.seo_content: the writer may only link to pages in
+        the provided candidate set (drawn from the live site inventory),
+        must hit the word band, and must ship a real FAQ. Findings ride
+        along in the output ("quality") so the orchestrator's review
+        layers and the mission report see exactly what the gate saw.
+        Draft only — publishing is the mission's separate, gated step."""
+        from agents.marketing.agent import clean_llm_text
+        from core.llm import LLMGateway
+        from core.seo_content import SiteInventory, SitePage, \
+            validate_article_package
+
+        if not LLMGateway.enabled():
+            raise RuntimeError(
+                "seo_article requires LLM mode (--llm with an API key)")
+        keyword = str(task.inputs.get("keyword", "")).strip()
+        if not keyword:
+            raise ValueError("seo_article needs a target keyword")
+        niche = task.inputs.get("niche", "")
+        site_url = str(task.inputs.get("site_url", "")).rstrip("/")
+        facts = [str(f) for f in task.inputs.get("facts", []) if f]
+        candidates = [c for c in task.inputs.get("link_candidates", [])
+                      if isinstance(c, dict) and c.get("url")]
+        inventory_urls = [str(u) for u in
+                          task.inputs.get("inventory_urls", []) if u]
+        for c in candidates:
+            if c["url"] not in inventory_urls:
+                inventory_urls.append(c["url"])
+        word_target = int(task.inputs.get("word_target", 1500))
+        link_list = "\n".join(
+            f"- {c['url']}  ({c.get('title', '')})" for c in candidates
+        ) or "(none provided)"
+        fact_list = "\n".join(f"- {f}" for f in facts) or "(no facts provided)"
+        prompt = (
+            f"You are an expert SEO writer for a site in this niche: {niche}.\n"
+            f"Write ONE article targeting the keyword: \"{keyword}\".\n\n"
+            f"SITE FACTS (the only facts you may assert — never invent "
+            f"features, prices, statistics or testimonials):\n{fact_list}\n\n"
+            f"ALLOWED INTERNAL LINKS (use at least 3, exactly as written, "
+            f"woven into the body where they genuinely help the reader):\n"
+            f"{link_list}\n\n"
+            f"Return ONLY a JSON object with keys:\n"
+            f"- \"title\": <= 60 characters, contains the keyword naturally\n"
+            f"- \"meta_description\": 120-160 characters, written to earn "
+            f"the click\n"
+            f"- \"slug\": kebab-case, derived from the keyword\n"
+            f"- \"target_keyword\": \"{keyword}\"\n"
+            f"- \"body_markdown\": {word_target} words (±20%), Markdown with "
+            f"## sections, a short intro, practical depth, and a closing "
+            f"section that points to the site's relevant pages\n"
+            f"- \"faq\": at least 3 entries {{\"q\": ..., \"a\": ...}} "
+            f"answering real questions a searcher would ask\n"
+            f"- \"internal_links\": the allowed URLs you actually used\n"
+            f"Write like a knowledgeable human practitioner, not a content "
+            f"farm: specific, direct, no filler, no keyword stuffing."
+        )
+        rework = task.inputs.get("_rework_feedback")
+        if rework:
+            prompt += f"\n\nYour previous attempt was rejected by review: {rework}"
+        result = LLMGateway().complete(
+            prompt, tier=LLMGateway.SMART,
+            system="You are a precise, expert long-form SEO writer. JSON only.",
+            json_mode=True)
+        self.record_usage(
+            task, tokens=result["input_tokens"] + result["output_tokens"],
+            cost_usd=result["cost_usd"])
+        payload = clean_llm_text(result["json"] or {})
+        pkg = payload.get("package", payload) if isinstance(payload, dict) \
+            else {}
+        if not (isinstance(pkg, dict) and pkg.get("title")
+                and pkg.get("body_markdown")):
+            raise ValueError("LLM returned no usable article package")
+        pkg.setdefault("target_keyword", keyword)
+        inventory = SiteInventory(
+            site_url=site_url,
+            pages=[SitePage(url=u) for u in inventory_urls])
+        quality = validate_article_package(
+            pkg, inventory, min_words=int(word_target * 0.7))
+        business_id = task.business_id or "unknown"
+        asset = self.create(business_id, "seo_article",
+                            str(pkg["title"])[:80],
+                            str(pkg["body_markdown"]))
+        return {
+            "keyword": keyword,
+            "package": pkg,
+            "quality": quality,
+            "asset_id": asset.id,
+            "evidence": (
+                f"article package for {keyword!r}: "
+                f"{len(quality['errors'])} gate errors, "
+                f"{len(quality['warnings'])} warnings; stored as creative "
+                f"asset {asset.id}; nothing published"),
+        }
 
     # What each content type must contain, for the prompt and validation.
     CONTENT_SPECS = {
