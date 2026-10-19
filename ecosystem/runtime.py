@@ -167,11 +167,27 @@ def build_runtime(use_postgres: bool = False,
     if persist is True:
         persist = default_approvals_path()
 
+    # Shared state: with ECOSYSTEM_STATE_DB set, businesses and the
+    # ledger live in one SQLite file shared by every process (dashboard,
+    # worker, missions) instead of per-process memory — real businesses
+    # become visible in the GUI and survive restarts. Unset = the
+    # original in-memory behavior (tests stay hermetic).
+    state_db = os.environ.get("ECOSYSTEM_STATE_DB")
+    if state_db:
+        from core.state_store import SharedBusinessRegistry, SharedLedger
+
+        businesses: BusinessRegistry = SharedBusinessRegistry(state_db)
+        ledger: Ledger = SharedLedger(state_db)
+        log.info("shared state: businesses + ledger in %s", state_db)
+    else:
+        businesses = BusinessRegistry()
+        ledger = Ledger()
+
     return Runtime(
         agent_registry=agent_registry,
         orchestrator=orchestrator,
-        businesses=BusinessRegistry(),
-        ledger=Ledger(),
+        businesses=businesses,
+        ledger=ledger,
         experiments=ExperimentEngine(),
         approvals=ApprovalGate(persist_path=Path(persist) if persist else None),
         audit=audit_log,
