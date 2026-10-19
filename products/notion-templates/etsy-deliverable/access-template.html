@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Freelancer OS — Access</title>
+<style>
+  @page { size: Letter; margin: 22mm 20mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", sans-serif; color: #14202e; margin: 0; }
+  .brand { font-size: 11pt; letter-spacing: 2.5px; text-transform: uppercase; color: #16a34a; font-weight: bold; }
+  h1 { font-size: 26pt; margin: 6mm 0 2mm 0; color: #0b2239; }
+  .tier { font-size: 12.5pt; color: #44586c; margin: 0 0 8mm 0; }
+  .linkbox { border: 2.5px dashed #b3541e; background: #fdf6ec; border-radius: 4mm;
+             padding: 6mm 7mm; margin: 0 0 8mm 0; }
+  .linkbox .label { font-size: 10pt; letter-spacing: 1.5px; text-transform: uppercase; color: #b3541e; font-weight: bold; }
+  .linkbox .url { font-size: 13.5pt; font-weight: bold; color: #14202e; word-break: break-all; margin-top: 2mm; }
+  h2 { font-size: 13pt; color: #0b2239; margin: 7mm 0 2.5mm 0; }
+  ol { margin: 0; padding-left: 6mm; font-size: 11.5pt; line-height: 1.55; }
+  .note { font-size: 10.5pt; color: #44586c; line-height: 1.5; margin-top: 7mm; }
+  .foot { margin-top: 12mm; padding-top: 4mm; border-top: 0.4mm solid #d5dde5;
+          font-size: 9.5pt; color: #7b8a99; display: flex; justify-content: space-between; }
+  .master { color: #b3541e; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="brand">Freelancer OS</div>
+  <h1>Your template is ready</h1>
+  <p class="tier">{{TIER_LINE}}</p>
+
+  <div class="linkbox">
+    <div class="label">Your Notion template link</div>
+    <div class="url">{{DUPLICATE_LINK}}</div>
+  </div>
+
+  <h2>Get set up in three steps</h2>
+  <ol>
+    <li>Open the link above (sign in to Notion, or create a free account).</li>
+    <li>Click <strong>Duplicate</strong> in the top-right corner and choose your workspace.</li>
+    <li>Open <strong>Clients</strong>, <strong>Projects</strong> and <strong>Invoices</strong> and delete every entry marked <strong>[Sample]</strong> — they are there to show you how the system works.</li>
+  </ol>
+
+  <p class="note">That is everything. Your home page — <strong>Freelancer HQ</strong> —
+  shows today's tasks, active projects, unpaid invoices and your client pipeline
+  in one place. Works with a free Notion account; no other software needed.</p>
+
+  <p class="note"><strong>Something not working?</strong> If the link will not open or the
+  template will not duplicate, message the shop and it will be fixed or refunded.</p>
+
+  <div class="foot">
+    <span>Freelancer OS — Notion Template Pack</span>
+    <span class="master">MASTER COPY — regenerate before uploading</span>
+  </div>
+</body>
+</html>
