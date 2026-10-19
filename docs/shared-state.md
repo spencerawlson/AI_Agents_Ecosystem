@@ -14,14 +14,32 @@ its real P&L) the moment they exist.
 
 ## Turn it on (FedServ)
 
-Use the same value in every shell that runs ecosystem code:
+**Recommended: put it in the repo's `.env` file** (gitignored, never
+committed). `build_runtime()` loads `<repo>/.env` for every entry
+point — dashboard, worker, missions — filling only variables the
+shell hasn't already set, so no terminal needs any exports at all:
+
+```bash
+# ~/Projects/AI_Agents_Ecosystem/.env
+OPENAI_API_KEY=<your key>
+ECOSYSTEM_STATE_DB=/home/srspady/Projects/AI_Agents_Ecosystem/data/ecosystem_state.db
+```
+
+Use an absolute path for the database (`.env` values are literal —
+`~` is not expanded). The same file is the durable home for the API
+key: every process gets the real brain, not just the shell that
+happened to export it. (`ECOSYSTEM_ENV_FILE` overrides the file's
+location; a real shell export always wins over the file.)
+
+Alternatively, export the variable in every shell that runs ecosystem
+code:
 
 ```bash
 export ECOSYSTEM_STATE_DB=~/Projects/AI_Agents_Ecosystem/data/ecosystem_state.db
 ```
 
-Then restart the dashboard (so it rebuilds its runtime on the shared
-store) and run missions as usual — e.g.
+Either way, restart the dashboard (so it rebuilds its runtime on the
+shared store) and run missions as usual — e.g.
 `python3 ecosystem/farelune_growth.py` — and the business appears in
 the portfolio and the game view.
 

@@ -80,6 +80,43 @@ def default_approvals_path() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "approvals.json"
 
 
+_dotenv_loaded = False
+
+
+def _load_dotenv() -> None:
+    """Load the repo's .env file into os.environ (once per process).
+
+    The ecosystem's config — OPENAI_API_KEY, ECOSYSTEM_STATE_DB,
+    DATABASE_URL, APPROVALS_PATH — used to live only in whichever
+    shell happened to launch a process, so the dashboard, the worker
+    and the missions kept starting in different modes depending on
+    which terminal started them (an evening of FedServ runs in
+    2026-10-18 turned on exactly this). A .env file at the repo root
+    (gitignored, never committed) is now read by every entry point
+    through build_runtime. Variables already set in the real
+    environment always win — the file only fills gaps.
+    ECOSYSTEM_ENV_FILE overrides the file location.
+    """
+    global _dotenv_loaded
+    if _dotenv_loaded:
+        return
+    _dotenv_loaded = True
+    path = Path(os.environ.get("ECOSYSTEM_ENV_FILE")
+                or Path(__file__).resolve().parent.parent / ".env")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def build_runtime(use_postgres: bool = False,
                   use_llm: bool | None = None,
                   use_market: bool | None = None,
@@ -104,6 +141,7 @@ def build_runtime(use_postgres: bool = False,
 
     from core.llm import LLMGateway
 
+    _load_dotenv()
     log = logging.getLogger("ecosystem.runtime")
     llm_on = LLMGateway.enabled() if use_llm is None else bool(use_llm)
     gateway = LLMGateway() if llm_on else None
