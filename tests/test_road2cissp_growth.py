@@ -289,3 +289,151 @@ def test_worker_opt_in_discovery_and_store():
         worker.main(["--ticks", "1", "--interval", "0", "--monitor-every", "0",
                      "--no-growth", "--discovery", "--store"], rt=rt)
     assert not g.called and d.called and s.called
+
+
+# -- real money: Stripe revenue, external costs, P&L --------------------------
+
+
+def test_site_profile_pricing_matches_the_real_product():
+    # The strategy agent plans from SITE_PROFILE; it used to say "Free.
+    # Nothing is locked" long after the $19/mo subscription shipped.
+    assert "$19/month" in growth.SITE_PROFILE["pricing"]
+    assert "free" in growth.SITE_PROFILE["pricing"].lower()
+
+
+def test_record_revenue_and_cost_hit_the_books():
+    rt = build_runtime()
+    biz_id = growth._business_id(rt)
+    growth.record_revenue(rt, biz_id, 190.0, "10 subs, Oct")
+    growth.record_external_cost(rt, biz_id, 12.0, "Domain renewal (USD)")
+    pnl = rt.ledger.pnl(biz_id)
+    assert pnl.revenue == pytest.approx(190.0)
+    assert pnl.total_costs == pytest.approx(12.0)
+    assert pnl.net_profit == pytest.approx(178.0)
+    kinds = {e.kind for e in rt.ledger.entries(biz_id)}
+    assert kinds == {"revenue", "external_cost"}
+    entry = rt.ledger.entries(biz_id)[0]
+    assert "Stripe" in entry.description and "owner-reported" in entry.description
+
+
+def test_record_money_rejects_bad_input():
+    rt = build_runtime()
+    biz_id = growth._business_id(rt)
+    with pytest.raises(ValueError):
+        growth.record_revenue(rt, biz_id, 0)
+    with pytest.raises(ValueError):
+        growth.record_external_cost(rt, biz_id, -5, "x")
+    with pytest.raises(ValueError):
+        growth.record_external_cost(rt, biz_id, 5, "")
+
+
+def test_cli_record_revenue_and_pnl(capsys):
+    rt = build_runtime()
+    with patch("ecosystem.runtime.build_runtime", return_value=rt):
+        assert growth.main(["record-revenue", "--amount", "19",
+                            "--note", "first sub"]) == 0
+        assert growth.main(["pnl"]) == 0
+    out = capsys.readouterr().out
+    assert "booked revenue $19.00" in out
+    assert "revenue $19.00" in out
+
+
+# -- seo article run ----------------------------------------------------------
+
+
+def _seo_pkg(keyword):
+    from core.seo_content import slugify
+    links = ["https://road2cissp.com/practice",
+             "https://road2cissp.com/labs",
+             "https://road2cissp.com/tracks"]
+    sections = []
+    for i in range(6):
+        sections.append(
+            f"## Section {i}\n\n"
+            + " ".join(["Learners pass faster when every study session ends "
+                        "with timed practice, a review of the misses and a "
+                        "short lab that makes the concept stick."] * 12))
+    body = (f"# {keyword.title()}: A Practical Guide\n\n"
+            f"A grounded plan for {keyword}, built on practice.\n\n"
+            + "\n\n".join(sections)
+            + f"\n\nDrill with [practice questions]({links[0]}), open the "
+              f"[hands-on labs]({links[1]}), and follow the [tracks]({links[2]}). "
+              "Every internal link in this guide points to a page from the "
+              "live site inventory, so nothing here leads to a dead end.")
+    return {
+        "title": f"{keyword.title()}: A Practical Guide"[:60],
+        "meta_description": ("A practical, no-fluff guide built on timed "
+                             "practice, hands-on labs and honest review, "
+                             "written for busy learners today."),
+        "slug": slugify(keyword),
+        "target_keyword": keyword,
+        "body_markdown": body,
+        "faq": [
+            {"q": "How long does preparation take?",
+             "a": "Most learners need 8-12 weeks of steady daily practice."},
+            {"q": "Are practice questions enough?",
+             "a": "No — pair them with labs so concepts become skills."},
+            {"q": "What does it cost?",
+             "a": "A free account covers starter lessons; full access is "
+                  "$19/month."},
+        ],
+        "internal_links": links,
+    }
+
+
+def _seo_gateway():
+    import re as _re
+    gw_cls = MagicMock()
+    gw_cls.enabled.return_value = True
+    gw_cls.SMART = "smart"
+    inst = MagicMock()
+
+    def complete(prompt, **kw):
+        m = _re.search(r'targeting the keyword: "([^"]+)"', prompt)
+        pkg = _seo_pkg(m.group(1)) if m else {}
+        return {"text": "{}", "json": pkg, "model": "fake",
+                "input_tokens": 900, "output_tokens": 2400,
+                "cost_usd": 0.05}
+
+    inst.complete.side_effect = complete
+    gw_cls.return_value = inst
+    return gw_cls
+
+
+def test_seo_run_drafts_gated_articles_and_books_costs(tmp_path):
+    from core.seo_content import SiteInventory, SitePage
+
+    inv = SiteInventory(site_url="https://road2cissp.com", pages=[
+        SitePage(url="https://road2cissp.com/", title="Home"),
+        SitePage(url="https://road2cissp.com/practice", title="Practice"),
+        SitePage(url="https://road2cissp.com/labs", title="Labs"),
+        SitePage(url="https://road2cissp.com/tracks", title="Tracks"),
+    ])
+    trends = MagicMock()
+    trends.interest.side_effect = lambda kws: {
+        k: {"avg_12mo": 30.0, "trend": "rising", "latest": 35.0} for k in kws}
+    rt = build_runtime(use_llm=True)
+    now = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    with patch("core.llm.LLMGateway", _seo_gateway()), \
+         patch("core.market_data.TrendsClient", return_value=trends), \
+         patch("core.seo_content.fetch_inventory", return_value=inv):
+        s1 = growth.run_seo(rt, state_path=tmp_path / "state.json",
+                            reports_root=tmp_path / "reports", count=2,
+                            now=now)
+        assert not s1["errors"], s1["errors"]
+        assert len(s1["articles"]) == 2
+        drafts = list((tmp_path / "reports" / "seo" / "road2cissp_com")
+                      .glob("*.md"))
+        assert len(drafts) == 2
+        # keyword map books its flat $0.01 usage; each article books
+        # the fake gateway's $0.05 — the same shape as the live runs.
+        pnl = rt.ledger.pnl(growth._business_id(rt))
+        assert pnl.total_costs == pytest.approx(0.11)
+        assert s1["report"] and Path(s1["report"]).exists()
+
+        s2 = growth.run_seo(rt, state_path=tmp_path / "state.json",
+                            reports_root=tmp_path / "reports", count=2,
+                            now=now)
+        assert not s2["errors"], s2["errors"]
+        assert len(s2["articles"]) == 2
+        assert not set(s1["articles"]) & set(s2["articles"])  # no repeats

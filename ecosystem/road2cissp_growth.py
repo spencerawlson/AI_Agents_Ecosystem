@@ -25,6 +25,17 @@ CLI:
     python ecosystem/road2cissp_growth.py status
     python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
     python ecosystem/road2cissp_growth.py outcome <slug> --worked "r/cissp answers drove 60 visits"
+    python ecosystem/road2cissp_growth.py seo [--count 2]
+    python ecosystem/road2cissp_growth.py record-revenue --amount 190 --note "10 subs, Oct"
+    python ecosystem/road2cissp_growth.py record-cost --amount 12 --label "Domain renewal"
+    python ecosystem/road2cissp_growth.py pnl
+
+The seo subcommand runs the gated SEO article pipeline against the
+live sitemap (same engine as the Farelune program): keyword map, then
+articles that must pass the deterministic quality gate, exported as
+drafts under reports/seo/road2cissp_com/ — never published. Revenue is
+Stripe subscription money, booked by hand from the Stripe dashboard
+(owner-reported, source named in the entry) until an API sync exists.
 """
 
 from __future__ import annotations
@@ -52,8 +63,10 @@ SITE_PROFILE = {
     "what": "Free online learning platform taking learners from IT "
             "fundamentals to the CISSP: networking, security, Python, cloud "
             "and cybersecurity.",
-    "pricing": "Free. Nothing is locked; sign-in (Google/GitHub OAuth) saves "
-               "progress and unlocks the AI tutor.",
+    "pricing": "Freemium: a free account covers 3 lessons and 2 hands-on "
+               "labs; full access to every track, lab and the AI tutor is a "
+               "$19/month subscription (Stripe). Sign-in is Google/GitHub "
+               "OAuth.",
     "features": SITE_FEATURES + [
         "AI study tutor (hints, explanations, weak-spot analysis) for signed-in learners",
         "CISSP roadmap, learning paths and courses → modules → lessons",
@@ -61,7 +74,8 @@ SITE_PROFILE = {
     ],
     "public_pages": ["/", "/academy/roadmap", "/academy/paths", "/academy/courses",
                      "/academy/exam", "/library", "/lab", "/labs", "/practice"],
-    "goal": "Grow organic traffic, sign-ins and returning learners.",
+    "goal": "Grow organic traffic, free sign-ups and $19/month "
+            "subscriptions, with learners who keep coming back.",
     "known_competitors": [
         "Destination Certification", "Thor Teaches", "Pete Zerger (Inside Cloud "
         "and Security)", "Boson ExSim", "Pocket Prep", "Official ISC2 study "
@@ -92,7 +106,23 @@ BUDGETS = {  # (usd, tokens) hard caps per agent task
     "keywords": (1.0, 4000),
     "strategy": (3.0, 30000),
     "content": (2.0, 20000),
+    "seo_keywords": (1.0, 4000),
+    "seo_article": (3.0, 24000),
 }
+
+# Article seeds for the seo subcommand, Security+ first (the wedge
+# track), then the CISSP capstone terms.
+SEO_SEED_KEYWORDS = [
+    "security+ practice questions",
+    "security+ study guide",
+    "how to pass security+",
+    "security+ flashcards",
+    "security+ exam cost",
+    "cissp study guide",
+    "cissp practice questions",
+    "free cybersecurity labs online",
+]
+SEO_NICHE = "CISSP and CompTIA Security+ exam preparation"
 
 BANNER = ("> **NOTHING WAS PUBLISHED AND NO MARKETING MONEY WAS SPENT.** Experiments "
           "run only after you approve them at /approvals; every draft waits for you "
@@ -153,6 +183,39 @@ def _business_id(rt) -> str:
         biz = rt.businesses.create(BUSINESS_NAME, "education_website",
                                    domain="road2cissp.com")
     return biz.id
+
+
+def record_revenue(rt, business_id: str, amount_usd: float,
+                   note: str = ""):
+    """Book owner-reported Stripe subscription revenue. The entry names
+    its source so the books never pretend to be an API sync."""
+    if amount_usd <= 0:
+        raise ValueError("revenue amount must be positive")
+    suffix = f": {note}" if note else ""
+    return rt.ledger.record(
+        business_id=business_id, kind="revenue", amount_usd=amount_usd,
+        description=f"Stripe subscription revenue — owner-reported{suffix}")
+
+
+def record_external_cost(rt, business_id: str, amount_usd: float,
+                         label: str):
+    """Book a real-world cost (domain, hosting) against the business."""
+    if amount_usd <= 0:
+        raise ValueError("cost amount must be positive")
+    if not label:
+        raise ValueError("a label naming the cost is required")
+    return rt.ledger.record(
+        business_id=business_id, kind="external_cost",
+        amount_usd=-amount_usd, description=label)
+
+
+def print_pnl(rt, biz) -> None:
+    pnl = rt.ledger.pnl(biz.id)
+    status = getattr(biz, "status", "")
+    state = getattr(status, "value", status)
+    print(f"{biz.name} [{state}]")
+    print(f"  revenue ${pnl.revenue:.2f} · costs "
+          f"${pnl.total_costs:.2f} · net ${pnl.net_profit:.2f}")
 
 
 def _dispatch(rt, biz_id, agent_type, action, inputs, job, criteria):
@@ -419,6 +482,117 @@ def run_growth_cycle(rt, state_path: Path | None = None, reports_root: Path | No
 
 # -- report ----------------------------------------------------------------
 
+# -- seo article run ---------------------------------------------------------
+
+
+def run_seo(rt, state_path: Path | None = None, reports_root: Path | None = None,
+            count: int = 2, word_target: int = 1500,
+            now: datetime | None = None) -> dict:
+    """One gated SEO article run against the live site (Farelune pattern):
+    crawl the sitemap inventory, map keywords, write articles that must
+    pass the deterministic quality gate, export them as drafts. Real
+    per-step LLM costs are posted to the ledger as they happen. Drafts
+    are NEVER published. Returns a summary dict; never raises for a
+    step failure."""
+    from core.seo_content import fetch_inventory, slugify, \
+        suggest_internal_links
+    from core.seo_publish import FileExportPublisher
+    from dashboard.reports import reports_dir
+
+    now = now or datetime.now(timezone.utc)
+    state_path = state_path or default_state_path()
+    reports_root = reports_root or reports_dir()
+    state = load_state(state_path)
+    biz_id = _business_id(rt)
+    summary = {"ran": [], "errors": [], "spend_usd": 0.0, "articles": [],
+               "report": None}
+
+    def booked(run, label):
+        if run is not None and run.cost_usd:
+            summary["spend_usd"] += run.cost_usd
+            rt.ledger.record(business_id=biz_id, kind="ai_spend",
+                             amount_usd=-run.cost_usd,
+                             description=f"road2cissp seo: {label}")
+
+    try:
+        inventory = fetch_inventory(SITE_URL)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        summary["errors"].append(f"inventory: {exc}")
+        return summary
+    summary["ran"].append(f"inventory: {len(inventory.pages)} live pages")
+
+    run = _dispatch(rt, biz_id, "marketing", "seo_keyword_map",
+                    {"niche": SEO_NICHE, "seeds": SEO_SEED_KEYWORDS},
+                    "seo_keywords",
+                    ["at least 1 keyword returned",
+                     "no invented numbers — gaps marked 'unavailable' "
+                     "explicitly"])
+    booked(run, "seo_keyword_map")
+    if run.status != TaskStatus.COMPLETED:
+        summary["errors"].append(f"keywords: {run.error}")
+        return summary
+
+    drafted = state.setdefault("seo_articles", {})
+    scored = sorted(
+        run.output["keywords"],
+        key=lambda k: (k.get("avg_12mo") is None, -(k.get("avg_12mo") or 0)))
+    chosen = [k for k in scored
+              if slugify(k["keyword"]) not in drafted][: max(1, count)]
+    if not chosen:
+        summary["ran"].append("seo: every mapped keyword already drafted")
+        save_state(state_path, state)
+        return summary
+
+    facts = [SITE_PROFILE["what"], SITE_PROFILE["pricing"],
+             *SITE_PROFILE["features"]]
+    publisher = FileExportPublisher(reports_root / "seo" / "road2cissp_com")
+    for entry_kw in chosen:
+        keyword = entry_kw["keyword"]
+        candidates = suggest_internal_links(keyword, inventory, limit=8)
+        if len(candidates) < 3:
+            have = {c["url"] for c in candidates}
+            for page in inventory.pages:
+                if len(candidates) >= 3:
+                    break
+                if page.url not in have:
+                    candidates.append({"url": page.url, "title": page.title})
+        run = _dispatch(
+            rt, biz_id, "creative", "seo_article",
+            {"keyword": keyword, "niche": SEO_NICHE, "site_url": SITE_URL,
+             "facts": facts, "link_candidates": candidates,
+             "inventory_urls": sorted(inventory.urls),
+             "word_target": word_target},
+            "seo_article",
+            ["article package has title, meta_description, slug, "
+             "body_markdown, faq, internal_links",
+             "internal links only from the live site inventory"])
+        booked(run, f"seo_article {keyword!r}")
+        if run.status != TaskStatus.COMPLETED:
+            summary["errors"].append(f"article {keyword!r}: {run.error}")
+            continue
+        pkg = run.output["package"]
+        result = publisher.publish(pkg, SITE_URL)
+        drafted[pkg["slug"]] = {"keyword": keyword, "at": now.isoformat(),
+                                "path": result["markdown"]}
+        summary["articles"].append(pkg["slug"])
+        summary["ran"].append(
+            f"article drafted: {pkg['slug']} → {result['markdown']}")
+    save_state(state_path, state)
+
+    if summary["articles"] or summary["errors"]:
+        path = reports_root / f"road2cissp_seo_{now:%Y%m%d}.md"
+        lines = [f"# Road to CISSP — SEO article run ({now:%Y-%m-%d})", "",
+                 "> **NOTHING WAS PUBLISHED.** Every article below is a "
+                 "draft waiting for the owner's review.", ""]
+        lines += [f"- {line}" for line in summary["ran"]]
+        lines += [f"- ERROR: {line}" for line in summary["errors"]]
+        lines += ["", f"Real AI spend this run: ${summary['spend_usd']:.4f}"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        summary["report"] = str(path)
+    return summary
+
+
 def _cell(v) -> str:
     return str(v if v is not None else "—").replace("|", "/").replace("\n", " ")
 
@@ -538,6 +712,19 @@ def main(argv=None) -> int:
     g = p_o.add_mutually_exclusive_group(required=True)
     g.add_argument("--worked", metavar="NOTE")
     g.add_argument("--failed", metavar="NOTE")
+    p_s = sub.add_parser("seo", help="run the gated SEO article pipeline once")
+    p_s.add_argument("--count", type=int, default=2)
+    p_s.add_argument("--word-target", type=int, default=1500)
+    p_s.add_argument("--llm", dest="llm", action="store_true", default=None)
+    p_s.add_argument("--no-llm", dest="llm", action="store_false")
+    p_r = sub.add_parser("record-revenue",
+                         help="book Stripe subscription revenue (owner-reported)")
+    p_r.add_argument("--amount", type=float, required=True)
+    p_r.add_argument("--note", default="")
+    p_c = sub.add_parser("record-cost", help="book a real-world cost")
+    p_c.add_argument("--amount", type=float, required=True)
+    p_c.add_argument("--label", required=True)
+    sub.add_parser("pnl", help="print the business P&L from the ledger")
     args = parser.parse_args(argv)
 
     path = default_state_path()
@@ -555,10 +742,48 @@ def main(argv=None) -> int:
             print(f"report: {summary['report']}")
         return 1 if summary["errors"] and not summary["ran"] else 0
 
+    if args.cmd == "seo":
+        from core.llm import LLMGateway
+        from ecosystem.runtime import build_runtime
+
+        rt = build_runtime(use_llm=args.llm, approvals_persist=True)
+        llm_on = LLMGateway.enabled() if args.llm is None else args.llm
+        if not llm_on:
+            print("seo: needs LLM mode (set an API key)")
+            return 2
+        summary = run_seo(rt, count=args.count,
+                          word_target=args.word_target)
+        for line in summary["ran"]:
+            print(f"ran: {line}")
+        for line in summary["errors"]:
+            print(f"error: {line}")
+        print(f"spend: ${summary['spend_usd']:.4f}")
+        if summary["report"]:
+            print(f"report: {summary['report']}")
+        return 1 if summary["errors"] and not summary["articles"] else 0
+
+    if args.cmd in ("record-revenue", "record-cost", "pnl"):
+        from ecosystem.runtime import build_runtime
+
+        rt = build_runtime(approvals_persist=True)
+        biz_id = _business_id(rt)
+        if args.cmd == "record-revenue":
+            entry = record_revenue(rt, biz_id, args.amount, args.note)
+            print(f"booked revenue ${entry.amount_usd:.2f}: "
+                  f"{entry.description}")
+        elif args.cmd == "record-cost":
+            entry = record_external_cost(rt, biz_id, args.amount,
+                                          args.label)
+            print(f"booked cost ${-entry.amount_usd:.2f}: "
+                  f"{entry.description}")
+        print_pnl(rt, rt.businesses.get(biz_id))
+        return 0
+
     state = load_state(path)
     if args.cmd == "status":
         for job in ("audit", "keywords", "metrics", "strategy"):
             print(f"{job:9} last run {state['last_run'].get(job, 'never')}")
+        print(f"seo articles drafted: {len(state.get('seo_articles', {}))}")
         for slug, e in state["experiments"].items():
             print(f"- [{e['status']}] {slug}: {e['name']}"
                   + (f" (ends {e['ends_at'][:10]})" if e.get("ends_at") else ""))
