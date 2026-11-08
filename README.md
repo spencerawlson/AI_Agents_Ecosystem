@@ -20,17 +20,17 @@ The repo holds three kinds of thing that share one runtime:
 | Part | Where | Status |
 |------|-------|--------|
 | **Engine** — orchestrator, agents, ledger, experiments, approvals | `orchestrator/`, `agents/`, `core/` | Working; runs every worker tick |
-| **Ventoryn** — the SaaS web app (landing, Live Ops, admin; Google sign-in, Stripe, 2FA) | `dashboard/`, `core/saas.py` | Working; needs Google OAuth env vars to sign in |
+| **Ventoryn** — the SaaS web app (landing, Live Ops, admin; Google sign-in, Stripe, 2FA) | `ventoryn/`, `ventoryn/saas.py` | Working; needs Google OAuth env vars to sign in |
 | **Businesses** — growth programs and assets for road2cissp, Etsy Experiment 001, Shopify, Notion templates, Farelune, ProofFlow | `ecosystem/`, `products/`, `docs/` | Mixed; road2cissp growth runs in the worker by default |
 
 The road2cissp growth program audits the live site, researches keywords,
 measures traffic, writes a weekly strategy with experiments you approve, and
 drafts the content each experiment needs. Nothing is published or spent
-without you. See [docs/road2cissp-growth.md](docs/road2cissp-growth.md).
+without you. See [businesses/road2cissp/README.md](businesses/road2cissp/README.md).
 
 ```bash
 python launch.py worker                                  # growth program runs every tick
-python ecosystem/road2cissp_growth.py run --force all    # run every job now
+python businesses/road2cissp/growth.py run --force all    # run every job now
 ```
 
 ## First milestone
@@ -84,23 +84,35 @@ The orchestrator is an internal privileged decision layer. Stores, customers, an
 ## Repository layout
 
 ```
-├── orchestrator/     Central decision and coordination engine
-│                     (models, registry, engine, approvals)
-├── agents/           Specialized agents:
-│                       discovery, research, marketing, creative,
-│                       support, operations (+ base framework)
-├── core/             Shared systems:
-│                       registry, ledger, experiments, scoring,
-│                       audit, analytics, reporting, allocation,
-│                       portfolio, memory, predictive, optimization,
-│                       intelligence, integrations, shutdown
-├── dashboard/        Portfolio dashboard (FastAPI + HTML)
-├── infra/            Docker Compose (PostgreSQL 16, Redis 7),
-│                     SQLAlchemy models, Postgres task store
-├── docs/             Architecture, roadmap
-├── examples/         End-to-end pipeline demos
+├── orchestrator/     ENGINE — decision and coordination (models, registry,
+│                     engine, dispatcher, approvals)
+├── agents/           ENGINE — discovery, research, marketing, creative,
+│                     support, operations, review (+ base framework)
+├── core/             ENGINE — ledger, experiments, scoring, audit, state
+│                     store, LLM gateway, adapters (Etsy, Shopify, CJ),
+│                     audits (site, GEO, app store), analytics, reporting
+├── infra/            ENGINE — Docker Compose, SQLAlchemy models, Postgres
+├── ecosystem/        RUNTIME — build_runtime, the worker loop, analyze,
+│                     marketing/SEO missions, daily plan, social analytics
+├── ventoryn/         APP — the Ventoryn SaaS: landing, Live Ops, portfolio,
+│                     approvals, reports, admin; accounts, billing, 2FA
+│                     (saas, totp, signature, token_crypto); ui.py is the
+│                     design system
+├── businesses/       BUSINESSES — one folder each: growth program, docs,
+│   ├── road2cissp/       assets. Ownership is not set here: a business
+│   ├── farelune/         belongs to the account recorded on it (claim it
+│   ├── proofflow/        at /businesses).
+│   ├── notion_templates/
+│   ├── etsy_evergreen/   (Experiment 001)
+│   └── shopify_store/    (paused, opt-in)
+├── docs/             Platform docs; docs/archive/ for retired plans
+├── examples/         Engine pipeline demos
 └── tests/            pytest suite (python -m pytest -q)
 ```
+
+Dependency direction: the engine (`orchestrator/`, `agents/`, `core/`,
+`infra/`) never imports `ecosystem/`, `ventoryn/` or a business. The runtime
+layer (`ecosystem/`) wires businesses into the worker and serves `ventoryn/`.
 
 ## Development phases
 
@@ -234,11 +246,11 @@ Off by default. Run it with `python launch.py worker -- --store`. Trend-checked 
 owner-approved publishing to Shopify, Meta/Google ads built paused and
 launched only on approval, plus an automatic spend guard, profit tracking,
 SEO fixes and blog drafts. Setup and approval rules:
-[docs/shopify-store.md](docs/shopify-store.md).
+[businesses/shopify_store/README.md](businesses/shopify_store/README.md).
 
 ```bash
-python ecosystem/shopify_pipeline.py check
-python ecosystem/shopify_pipeline.py discover --niche "home office" --llm --source
+python businesses/shopify_store/pipeline.py check
+python businesses/shopify_store/pipeline.py discover --niche "home office" --llm --source
 ```
 
 ### Real LLM inference

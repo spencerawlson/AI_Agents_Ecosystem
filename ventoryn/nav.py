@@ -52,7 +52,7 @@ HEADER_CSS = """
 /* Ventoryn app bar: navy, full width, sticky — the same bar as the
    public landing nav. Brand centered, hamburger far right; the 44px
    spacer on the left balances the burger. One navigation for every
-   signed-in page. Colors come from dashboard.ui tokens. */
+   signed-in page. Colors come from ventoryn.ui tokens. */
 .v-header { position: sticky; top: 0; z-index: 40; width: 100%;
   margin: 0; background: var(--v-navy, #0b0e1e);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 6px 20px rgba(11, 14, 30, .18); }

@@ -21,23 +21,23 @@ NOTHING IS PUBLISHED OR SPENT AUTOMATICALLY. Drafts are files under
 reports/road2cissp_drafts/; the weekly report is reports/road2cissp_growth_<date>.md.
 
 CLI:
-    python ecosystem/road2cissp_growth.py run [--force all|audit,strategy,...]
-    python ecosystem/road2cissp_growth.py status
-    python ecosystem/road2cissp_growth.py daily-plan [--date YYYY-MM-DD]
-    python ecosystem/road2cissp_growth.py daily-plan-done <item-id>
-    python ecosystem/road2cissp_growth.py daily-plan-skip <item-id>
-    python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
-    python ecosystem/road2cissp_growth.py outcome <slug> --worked "r/cissp answers drove 60 visits"
-    python ecosystem/road2cissp_growth.py seo [--count 2]
-    python ecosystem/road2cissp_growth.py listen [--limit 5]
-    python ecosystem/road2cissp_growth.py record-revenue --amount 190 --note "10 subs, Oct"
-    python ecosystem/road2cissp_growth.py record-conversion --amount 19 --touches "community:r/cissp"
-    python ecosystem/road2cissp_growth.py attribution [--model linear]
-    python ecosystem/road2cissp_growth.py video --script script.json [--audio voiceover.mp3]
-    python ecosystem/road2cissp_growth.py video --from-experiment reddit-answers
-    python ecosystem/road2cissp_growth.py geo
-    python ecosystem/road2cissp_growth.py record-cost --amount 12 --label "Domain renewal"
-    python ecosystem/road2cissp_growth.py pnl
+    python businesses/road2cissp/growth.py run [--force all|audit,strategy,...]
+    python businesses/road2cissp/growth.py status
+    python businesses/road2cissp/growth.py daily-plan [--date YYYY-MM-DD]
+    python businesses/road2cissp/growth.py daily-plan-done <item-id>
+    python businesses/road2cissp/growth.py daily-plan-skip <item-id>
+    python businesses/road2cissp/growth.py record-metrics --visitors 420 --signups 12
+    python businesses/road2cissp/growth.py outcome <slug> --worked "r/cissp answers drove 60 visits"
+    python businesses/road2cissp/growth.py seo [--count 2]
+    python businesses/road2cissp/growth.py listen [--limit 5]
+    python businesses/road2cissp/growth.py record-revenue --amount 190 --note "10 subs, Oct"
+    python businesses/road2cissp/growth.py record-conversion --amount 19 --touches "community:r/cissp"
+    python businesses/road2cissp/growth.py attribution [--model linear]
+    python businesses/road2cissp/growth.py video --script script.json [--audio voiceover.mp3]
+    python businesses/road2cissp/growth.py video --from-experiment reddit-answers
+    python businesses/road2cissp/growth.py geo
+    python businesses/road2cissp/growth.py record-cost --amount 12 --label "Domain renewal"
+    python businesses/road2cissp/growth.py pnl
 
 The seo subcommand runs the gated SEO article pipeline against the
 live sitemap (same engine as the Farelune program): keyword map, then
@@ -56,7 +56,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ecosystem.marketing_mission import SEED_KEYWORDS, SITE_FEATURES
 from orchestrator.models import ApprovalStatus, TaskStatus
@@ -154,7 +154,7 @@ BANNER = ("> **NOTHING WAS PUBLISHED AND NO MARKETING MONEY WAS SPENT.** Experim
 # -- state -----------------------------------------------------------------
 
 def default_state_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "data" / "road2cissp_growth.json"
+    return Path(__file__).resolve().parents[2] / "data" / "road2cissp_growth.json"
 
 
 def load_state(path: Path) -> dict:
@@ -480,7 +480,7 @@ def run_growth_cycle(rt, state_path: Path | None = None, reports_root: Path | No
     """Run every due job once. Never raises for a job failure — failures are
     reported in the summary and retried after RETRY_AFTER."""
     from core.llm import LLMGateway
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     now = now or datetime.now(timezone.utc)
     force = force or set()
@@ -577,7 +577,7 @@ def run_seo(rt, state_path: Path | None = None, reports_root: Path | None = None
     from core.seo_content import fetch_inventory, slugify, \
         suggest_internal_links
     from core.seo_publish import FileExportPublisher
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     now = now or datetime.now(timezone.utc)
     state_path = state_path or default_state_path()
@@ -701,7 +701,7 @@ def run_listen(rt, state_path: Path | None = None,
     papered over)."""
     from core.community_listening import REPLY_THRESHOLD, listen_reddit
     from core.llm import LLMGateway
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     now = now or datetime.now(timezone.utc)
     state_path = state_path or default_state_path()
@@ -831,7 +831,7 @@ def run_attribution(rt, state_path: Path | None = None,
     dispatched, no money is spent, nothing is published."""
     from core.attribution import build_attribution, classify_source
     from core.site_metrics import MetricsUnavailable, PlausibleClient
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     now = now or datetime.now(timezone.utc)
     state_path = state_path or default_state_path()
@@ -932,7 +932,7 @@ def run_video(rt, state_path: Path | None = None,
     from core.video_render import (
         SIZES, load_script, render_video, validate_script,
     )
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     now = now or datetime.now(timezone.utc)
     state_path = state_path or default_state_path()
@@ -1065,7 +1065,7 @@ def run_geo(state_path: Path | None = None,
     answer-ready pages. Real HTTP, no key, no LLM, no spend. Writes
     reports/geo_<date>.md and records the score in the state."""
     from core.geo_audit import GeoAuditor
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     now = now or datetime.now(timezone.utc)
     state_path = state_path or default_state_path()
@@ -1356,7 +1356,7 @@ def main(argv=None) -> int:
         return 1 if summary["errors"] and not summary["drafted"] else 0
 
     if args.cmd in ("daily-plan", "daily-plan-done", "daily-plan-skip"):
-        from dashboard.reports import reports_dir
+        from ventoryn.reports import reports_dir
         from ecosystem import daily_plan
 
         now = _parse_plan_date(args.date)

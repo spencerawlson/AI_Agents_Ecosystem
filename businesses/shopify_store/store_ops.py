@@ -19,7 +19,7 @@ Every cycle (worker tick or `shopify_pipeline.py optimize`):
   5. Report           reports/store_report_<date>.md
 
 run_store_cycle() also publishes approved suppliers, fulfils paid orders
-through CJ (ecosystem/fulfillment.py), applies ad approvals and
+through CJ (businesses/shopify_store/fulfillment.py), applies ad approvals and
 auto-drafts paused campaigns for newly published products.
 """
 
@@ -33,11 +33,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.ads import AdCopyWriter, AdsAdapter
-from ecosystem.ads_pipeline import (BUDGET_ACTION, AdsPolicy, apply_approvals,
+from businesses.shopify_store.ads_pipeline import (BUDGET_ACTION, AdsPolicy, apply_approvals,
                                     draft_campaigns)
 from orchestrator.approvals import ApprovalGate
 
-log = logging.getLogger("ecosystem.store_ops")
+log = logging.getLogger("businesses.shopify_store.store_ops")
 
 SEO_TITLE_MAX = 70
 SEO_DESC_MIN, SEO_DESC_MAX = 50, 160
@@ -273,7 +273,7 @@ def draft_articles(state: dict, shopify, gateway, now: datetime,
 def write_store_report(path: Path, now: datetime, perf: dict, state: dict,
                        guard: list[dict], seo: list[dict], articles: list[dict],
                        other: list[str], spend_usd: float) -> None:
-    from ecosystem.fulfillment import fulfilment_overview
+    from businesses.shopify_store.fulfillment import fulfilment_overview
 
     def cell(x):
         return str(x).replace("|", "/").replace("\n", " ")
@@ -351,7 +351,7 @@ def run_store_cycle(gate: ApprovalGate, shopify, ads_adapters: dict[str, AdsAdap
                     optimize: bool = True, now: datetime | None = None,
                     cj_orders=None, fulfilment_policy=None) -> dict:
     """One full operations pass. Never raises on a single-step failure."""
-    from ecosystem.shopify_pipeline import load_state, publish_approved, save_state
+    from businesses.shopify_store.pipeline import load_state, publish_approved, save_state
 
     now = now or datetime.now(timezone.utc)
     policy = policy or AdsPolicy.from_env()
@@ -365,7 +365,7 @@ def run_store_cycle(gate: ApprovalGate, shopify, ads_adapters: dict[str, AdsAdap
 
     state = load_state(state_path)
     if shopify is not None:
-        from ecosystem.fulfillment import FulfilmentPolicy, process_orders
+        from businesses.shopify_store.fulfillment import FulfilmentPolicy, process_orders
         try:
             summary["fulfilment"] = process_orders(
                 state, shopify, cj_orders, gate,

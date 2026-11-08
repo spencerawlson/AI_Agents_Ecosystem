@@ -8,7 +8,7 @@ apply_approvals()  activates approved launches, applies approved budget
                    increases; rejected launches stay paused forever.
 
 The spend guard that pauses losing campaigns lives in
-ecosystem/store_ops.py and never needs approval (pausing stops spend).
+businesses/shopify_store/store_ops.py and never needs approval (pausing stops spend).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from core.ads import AdCopyWriter, AdsAdapter, CampaignPlan
 from orchestrator.approvals import ApprovalGate
 from orchestrator.models import ApprovalStatus
 
-log = logging.getLogger("ecosystem.ads_pipeline")
+log = logging.getLogger("businesses.shopify_store.ads_pipeline")
 
 LAUNCH_ACTION = "launch_ad_campaign"
 BUDGET_ACTION = "ad_budget_increase"

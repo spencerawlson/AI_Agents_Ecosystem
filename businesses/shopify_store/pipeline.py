@@ -24,12 +24,12 @@ data/shopify_state.json, so the dashboard, this script and the worker can
 run as separate processes.
 
 Usage:
-    python ecosystem/shopify_pipeline.py check
-    python ecosystem/shopify_pipeline.py discover --niche "home office" --llm --source
-    python ecosystem/shopify_pipeline.py source examples/shopify_brief.example.json [--llm]
-    python ecosystem/shopify_pipeline.py publish-approved
-    python ecosystem/shopify_pipeline.py ads-draft <product_id> [--daily 10 --days 7]
-    python ecosystem/shopify_pipeline.py cycle [--llm]
+    python businesses/shopify_store/pipeline.py check
+    python businesses/shopify_store/pipeline.py discover --niche "home office" --llm --source
+    python businesses/shopify_store/pipeline.py source businesses/shopify_store/shopify_brief.example.json [--llm]
+    python businesses/shopify_store/pipeline.py publish-approved
+    python businesses/shopify_store/pipeline.py ads-draft <product_id> [--daily 10 --days 7]
+    python businesses/shopify_store/pipeline.py cycle [--llm]
 """
 
 from __future__ import annotations
@@ -44,14 +44,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.sourcing import (ProductBrief, ScoredSupplier, rank_suppliers,
                            render_supplier_report)
 from orchestrator.approvals import ApprovalGate
 from orchestrator.models import ApprovalStatus
 
-log = logging.getLogger("ecosystem.shopify_pipeline")
+log = logging.getLogger("businesses.shopify_store.pipeline")
 
 APPROVAL_ACTION = "approve_supplier"
 SEO_TITLE_MAX = 70
@@ -62,7 +62,7 @@ def default_state_path() -> Path:
     env = os.environ.get("SHOPIFY_STATE_PATH")
     if env:
         return Path(env)
-    return Path(__file__).resolve().parent.parent / "data" / "shopify_state.json"
+    return Path(__file__).resolve().parents[2] / "data" / "shopify_state.json"
 
 
 STATE_SECTIONS = ("approvals", "briefs", "products", "campaigns", "articles",
@@ -358,7 +358,7 @@ def default_briefs_dir() -> Path:
     env = os.environ.get("BRIEFS_DIR")
     if env:
         return Path(env)
-    return Path(__file__).resolve().parent.parent / "data" / "briefs"
+    return Path(__file__).resolve().parents[2] / "data" / "briefs"
 
 
 def discover_briefs(idea_source, niches: list[str], briefs_dir: Path,
@@ -523,7 +523,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from core.ads import AdCopyWriter, configured_ads_adapters
     from core.supplier_search import CJDropshippingSource, default_supplier_source
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
     from ecosystem.runtime import default_approvals_path
 
     gate = ApprovalGate(persist_path=os.environ.get("APPROVALS_PATH")
@@ -591,7 +591,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if any(r.get("error") for r in results) else 0
 
     if args.cmd == "ads-draft":
-        from ecosystem.ads_pipeline import AdsPolicy, draft_campaigns
+        from businesses.shopify_store.ads_pipeline import AdsPolicy, draft_campaigns
 
         if not ads:
             print("no ad platform configured (META_* or GOOGLE_ADS_* env vars)",
@@ -613,7 +613,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if any(r["status"] == "failed" for r in results) else 0
 
     from core.cj_orders import CJOrders
-    from ecosystem.store_ops import run_store_cycle
+    from businesses.shopify_store.store_ops import run_store_cycle
 
     summary = run_store_cycle(
         gate, shopify, ads, default_state_path(), reports_dir(), gateway=gateway,

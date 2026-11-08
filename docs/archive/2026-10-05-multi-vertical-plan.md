@@ -48,7 +48,7 @@ and that vertical has ~88% margins that hide arithmetic errors.
 | Allocation over-allocates 2× the pool (`core/allocation.py:81`) | One business, no contention | Cross-vertical capital routing is the entire Phase 3 thesis |
 | `evaluate_all()` marks every experiment SHUT DOWN and frees the cap (`core/portfolio_experiments.py:50`) | Never called with >1 experiment | Parallel verticals = parallel experiments = this fires |
 | Cannot shut down from early states (`core/shutdown.py:45`) | Experiment 001 is past `APPROVED` | Dropshipping fails *early and often*; `DISCOVERED`→`TERMINATED` is the common path |
-| Stop-loss precedence bug (`ecosystem/etsy_monitor.py:211`) | One monitor, one bug | Every new vertical copy-pastes this monitor and inherits it |
+| Stop-loss precedence bug (`businesses/etsy_evergreen/monitor.py:211`) | One monitor, one bug | Every new vertical copy-pastes this monitor and inherits it |
 
 There is also one structural problem that is not a bug yet:
 
@@ -160,7 +160,7 @@ class Vertical(ABC):
 ### 3.2 Charter becomes data, not module constants
 
 Today the Experiment 001 charter lives as **module-level globals** in
-`ecosystem/etsy_monitor.py:34-42` (`LAUNCH_DATE`, `TARGET_REVENUE_USD`,
+`businesses/etsy_evergreen/monitor.py:34-42` (`LAUNCH_DATE`, `TARGET_REVENUE_USD`,
 `TOTAL_BUDGET_USD`, `BASELINE_SPEND_USD`). That is why there can only be one
 experiment, and why `test_fresh_launch_is_on_track` is a time bomb.
 
@@ -226,7 +226,7 @@ multi-vertical work or protects the live experiment.
 |---|-----|------|
 | A1 | Copy `handler.tokens_used` / `cost_usd` onto `AgentRun` in `dispatch()` | `orchestrator/engine.py:106-121` |
 | A2 | `"ai_spend"` → `"ai_inference"`; validate `kind` against `KIND_TO_FIELD` and raise on unknown | `ecosystem/worker.py:126`, `core/ledger.py:72` |
-| A3 | Fix day-30 stop-loss precedence (parenthesize) — **do this first, it guards live money** | `ecosystem/etsy_monitor.py:211` |
+| A3 | Fix day-30 stop-loss precedence (parenthesize) — **do this first, it guards live money** | `businesses/etsy_evergreen/monitor.py:211` |
 | A4 | Reject negative `budget_usd` / `budget_tokens` in `submit()` | `orchestrator/engine.py:65` |
 | A5 | Cap allocation at the pool; drop the floor when it would over-commit | `core/allocation.py:81` |
 | A6 | Route `shutdown()` through direct `TERMINATED` transition when `PAUSED` is unreachable | `core/shutdown.py:45` |
@@ -260,7 +260,7 @@ adding anything.
   score (see G2), never raw score.
 
 **Exit criterion:** `digital_downloads` is the only registered vertical, every
-existing test still passes unchanged, and `ecosystem/etsy_monitor.py` contains
+existing test still passes unchanged, and `businesses/etsy_evergreen/monitor.py` contains
 zero charter constants.
 
 ---
@@ -299,7 +299,7 @@ The intellectual core. See section 5 for per-vertical models.
   DOWN decision reads real per-order economics instead of aggregate
   `revenue − operating_cost`.
 - D4. Surface per-order economics on the business drill-down page — and while
-  there, **actually render the audit event rows** (`dashboard/app.py:104`
+  there, **actually render the audit event rows** (`ventoryn/app.py:104`
   currently prints the count and no rows).
 
 **Exit criterion:** For each vertical, a $0-revenue experiment and a
@@ -449,7 +449,7 @@ a network anyone else can reach.
 
 > **Illustrative structure, not researched figures.** Every number below must be
 > replaced with verified market data before any spend, per the charter rule:
-> *no charter, no spend.* `docs/experiments/001-etsy-digital-downloads.md` is the
+> *no charter, no spend.* `businesses/etsy_evergreen/experiment-001.md` is the
 > standard to match — it did this work properly.
 
 ### 5.1 Digital downloads (current, for reference)

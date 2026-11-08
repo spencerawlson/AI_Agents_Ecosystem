@@ -11,7 +11,7 @@ Customer pages (sign-in required; each account sees ONLY its own data):
   GET /approvals           the account's own approvals (approve before
                            anything ships — nothing publishes unapproved)
   GET /report              the account's own growth report
-  GET /account/...         the SaaS shell (see dashboard.saas_routes)
+  GET /account/...         the SaaS shell (see ventoryn.saas_routes)
 
 Operator tools (operator account only, by direct URL):
   GET /businesses, /businesses/{id}, /experiments, /experiment-001,
@@ -30,7 +30,7 @@ see docs/ventoryn-saas-shell.md):
                            approvals, and no approve-on-behalf)
 
 The operator account is the account whose email matches
-SAAS_OPERATOR_EMAIL (see core.saas.SaasConfig). Spencer signs up
+SAAS_OPERATOR_EMAIL (see ventoryn.saas.SaasConfig). Spencer signs up
 like any customer; his existing ecosystem businesses are attached
 to that account by that email — the mechanism takes the email from
 env config, it is never hardcoded.
@@ -49,19 +49,19 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.audit import AuditLog
-from core.qrcode import qr_svg
+from ventoryn.qrcode import qr_svg
 from core.countries import country_options
 from core.experiments import ExperimentEngine
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
 import urllib.parse
 
-from core.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
+from ventoryn.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
                        CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
-from core.totp import provisioning_uri
-from dashboard.nav import HEADER_CSS, header_html
-from dashboard import ui
-from dashboard.ui import money
+from ventoryn.totp import provisioning_uri
+from ventoryn.nav import HEADER_CSS, header_html
+from ventoryn import ui
+from ventoryn.ui import money
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 
@@ -71,7 +71,7 @@ def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-# Labels for the admin's recent-activity feed (core.saas kinds).
+# Labels for the admin's recent-activity feed (ventoryn.saas kinds).
 _ACTIVITY_KIND_LABELS = {
     "sign-in": "Signed in",
     "site-added": "Website added",
@@ -198,7 +198,7 @@ def agent_stats_from_audit(audit: AuditLog, agent_types: list) -> list[dict]:
 
 # Light, clean styling shared by the /reports and /approvals pages —
 # matches the /report page. Mobile-friendly, no dark ops-room styling.
-# Shared base styles for every server-rendered page (dashboard/ui.py).
+# Shared base styles for every server-rendered page (ventoryn/ui.py).
 _PAGE_CSS = ui.BASE_CSS
 
 
@@ -363,7 +363,7 @@ def create_app(
     # The SaaS store/config are resolved once here (not per route) so
     # every route below closes over the same store. Plain create_app()
     # stays hermetic: an in-memory store, config from env.
-    from core.saas import SaasConfig, SaasStore
+    from ventoryn.saas import SaasConfig, SaasStore
 
     _saas_store = saas_store or SaasStore(":memory:")
     _saas_config = saas_config or SaasConfig.from_env()
@@ -502,7 +502,7 @@ def create_app(
         }
 
     # -- navigation ---------------------------------------------------------
-    # Signed-in pages share ONE header (dashboard.nav): centered
+    # Signed-in pages share ONE header (ventoryn.nav): centered
     # Ventoryn brand + page title, and a hamburger menu holding every
     # section. The old pill row of links is gone. _CUSTOMER_NAV is
     # kept ONLY for the operator's agent & financial report, which
@@ -601,7 +601,7 @@ def create_app(
 /* Customer Acquisition & Attribution report: progress ring, status
    donut, flow steps, trend chart. All SVG is hand-built; every
    figure comes from real store data. Base cards/buttons/forms come
-   from dashboard/ui.py. */
+   from ventoryn/ui.py. */
 .v-report-grid { display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 16px; margin: 16px 0; }
 .v-report-grid .card { margin: 0; }
@@ -1834,7 +1834,7 @@ sum of recorded paying customers per site.</p>{hidden_note}
         _, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
-        from dashboard.reports import list_reports
+        from ventoryn.reports import list_reports
 
         items = list_reports()
         rows = "".join(
@@ -1861,7 +1861,7 @@ nothing in them was published.</p>
         _, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
-        from dashboard.reports import render_report
+        from ventoryn.reports import render_report
 
         result = render_report(name)
         if result is None:
@@ -1879,7 +1879,7 @@ nothing in them was published.</p>
         if redirect is not None:
             return redirect
         try:
-            from ecosystem.etsy_monitor import (
+            from businesses.etsy_evergreen.monitor import (
                 EtsyCredentialsError,
                 check_experiment_001,
             )
@@ -1960,7 +1960,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             text = text.replace("<!--VENTORYN_HEADER-->", header)
             # The platform tokens + app bar styles, so Live Ops wears
             # the same navy/violet as the landing page and every
-            # other page (one source: dashboard/ui.py + nav.py).
+            # other page (one source: ventoryn/ui.py + nav.py).
             text = text.replace(
                 "</head>",
                 f"<meta name='theme-color' content='#0b0e1e'>"
@@ -2139,7 +2139,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         """The Road to CISSP growth APIs expose that business's data:
         only the account that manages it may read them. Returns a
         JSONResponse to send back, or None when allowed."""
-        from ecosystem.road2cissp_growth import BUSINESS_NAME
+        from businesses.road2cissp.growth import BUSINESS_NAME
 
         account = _current_account(request)
         if account is None:
@@ -2165,7 +2165,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         if denied is not None:
             return denied
         from ecosystem import daily_plan
-        from ecosystem.road2cissp_growth import (
+        from businesses.road2cissp.growth import (
             CADENCE, RETRY_AFTER, default_state_path, load_state,
         )
 
@@ -2195,7 +2195,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         if denied is not None:
             return denied
         from core.attribution import build_attribution
-        from ecosystem.road2cissp_growth import (
+        from businesses.road2cissp.growth import (
             default_state_path, load_state,
         )
 
@@ -2211,12 +2211,12 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
     # report file (the same file the CLI writes) plus the on-page
     # summary. `app.state.analyze_runner` is None in production;
     # tests inject a fast fake runner.
-    from dashboard.analyze_jobs import get_job as _analyze_get_job
-    from dashboard.analyze_jobs import new_job_store as _analyze_new_store
-    from dashboard.analyze_jobs import start_job as _analyze_start_job
-    from dashboard.analyze_jobs import validate_country as _validate_country
-    from dashboard.analyze_jobs import validate_language as _validate_language
-    from dashboard.analyze_jobs import validate_url as _validate_analyze_url
+    from ventoryn.analyze_jobs import get_job as _analyze_get_job
+    from ventoryn.analyze_jobs import new_job_store as _analyze_new_store
+    from ventoryn.analyze_jobs import start_job as _analyze_start_job
+    from ventoryn.analyze_jobs import validate_country as _validate_country
+    from ventoryn.analyze_jobs import validate_language as _validate_language
+    from ventoryn.analyze_jobs import validate_url as _validate_analyze_url
 
     app.state.analyze_jobs = _analyze_new_store()
     app.state.analyze_runner = None
@@ -2250,7 +2250,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
 
     @app.get("/api/analyze/{job_id}/report")
     def api_analyze_report(job_id: str):
-        from dashboard.reports import reports_dir
+        from ventoryn.reports import reports_dir
 
         job = _analyze_get_job(app.state.analyze_jobs, job_id)
         if job is None or not job.get("report_name"):
@@ -2289,7 +2289,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             # and tagged with its source; the count toggle is
             # respected per site — a site with the count hidden
             # contributes nothing to the displayed counts.
-            from core.saas import plausible_visitors
+            from ventoryn.saas import plausible_visitors
 
             sites = _saas_store.list_sites(account["id"])
             site_ids = [s["id"] for s in sites]
@@ -3149,7 +3149,7 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
     # stays hermetic (tests, module import) and never creates a file.
     # The real dashboard passes a file-backed store via
     # create_dashboard_app().
-    from dashboard.saas_routes import register_saas_routes
+    from ventoryn.saas_routes import register_saas_routes
 
     register_saas_routes(app, _saas_store, _saas_config)
 
@@ -3215,7 +3215,7 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
 
 
 def __getattr__(name: str):
-    """`uvicorn dashboard.app:app` still works, but importing this module
+    """`uvicorn ventoryn.app:app` still works, but importing this module
     no longer builds a whole runtime as a side effect."""
     if name == "app":
         globals()["app"] = create_app()

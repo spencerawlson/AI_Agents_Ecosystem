@@ -20,9 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import core.saas as saas
-from core.saas import SaasConfig, SaasStore
-from core.totp import code_at
+import ventoryn.saas as saas
+from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.totp import code_at
 
 OPERATOR_EMAIL = "operator@example.com"
 
@@ -74,7 +74,7 @@ def fresh_totp_code(store, account_id):
     """A valid current TOTP code for the account's active secret —
     for tests that must pass a fresh code to a sensitive action
     (privacy toggle, disconnect, delete)."""
-    from core.totp import code_at
+    from ventoryn.totp import code_at
     account = store.get_account(account_id)
     secret = store._decrypt_secret(account["totp_secret"])
     return code_at(secret)

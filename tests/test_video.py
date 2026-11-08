@@ -22,8 +22,8 @@ from core.video_render import (
     SIZES, load_script, render_slides, render_video, validate_script,
     write_srt,
 )
-import ecosystem.road2cissp_growth as growth
-from ecosystem.road2cissp_growth import load_state, save_state
+import businesses.road2cissp.growth as growth
+from businesses.road2cissp.growth import load_state, save_state
 
 NOW = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
 FFMPEG = shutil.which("ffmpeg")

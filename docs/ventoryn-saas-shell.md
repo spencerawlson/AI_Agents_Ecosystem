@@ -285,7 +285,7 @@ like the rest of the runtime.
 
 ## How it is built
 
-- `core/saas.py` — config from env, `SaasStore` (SQLite tables in the
+- `ventoryn/saas.py` — config from env, `SaasStore` (SQLite tables in the
   shared state file), Google OAuth helpers, Stripe client + webhook
   signature verification (HMAC-SHA256, fail closed) with replay
   protection and idempotent counting (a payment reported twice counts
@@ -295,7 +295,7 @@ like the rest of the runtime.
   rate-limiting + audit, the admin and customer TOTP state, the
   activity tables (last-seen per account, activity events) that power
   the admin's "Live now" list, the connections store (tokens
-  encrypted at rest via `core/token_crypto.py`), the revenue-privacy
+  encrypted at rest via `ventoryn/token_crypto.py`), the revenue-privacy
   toggles, the Ventoryn signature records, and the posting gate
   (`check_posting_allowed`). Stdlib only for HTTP — no new
   dependencies. Webhooks: every payment notice is signature-verified
@@ -305,18 +305,18 @@ like the rest of the runtime.
 - `core/countries.py` — the full ISO 3166-1 alpha-2 list (249 codes),
   `country_options()` renders the selector everywhere the market
   country appears (landing box, /ops analyze panel, site-add).
-- `core/token_crypto.py` — stdlib-only authenticated encryption for
+- `ventoryn/token_crypto.py` — stdlib-only authenticated encryption for
   stored tokens (HMAC-SHA256 stream cipher + encrypt-then-MAC, key
   from `VENTORYN_TOKEN_KEY`, fail closed when unset).
-- `core/totp.py` — the shared TOTP (RFC 6238, SHA-1, 30s steps, ±1
+- `ventoryn/totp.py` — the shared TOTP (RFC 6238, SHA-1, 30s steps, ±1
   step window) + backup codes (salted SHA-256 hashes, one use each).
   One implementation for admin and customers.
-- `core/qrcode.py` — stdlib-only QR encoder (byte mode, ECC level L,
+- `ventoryn/qrcode.py` — stdlib-only QR encoder (byte mode, ECC level L,
   versions 1–10) rendering the 2FA setup QR as SVG.
-- `core/signature.py` — the Ventoryn signature: HMAC-signed
+- `ventoryn/signature.py` — the Ventoryn signature: HMAC-signed
   `vtn_<action_id>.<mac>` tags, `sign_url` (UTM + tag), recorded per
   site + agent action.
-- `dashboard/saas_routes.py` — the `/account/...` pages (server-rendered
+- `ventoryn/saas_routes.py` — the `/account/...` pages (server-rendered
   HTML, mobile-first). Sessions are HttpOnly cookies; only the SHA-256
   hash of the token is stored. Sign-in lives on the landing page;
   the Google callback sends everyone to `/ops`, carrying a typed
@@ -330,7 +330,7 @@ like the rest of the runtime.
   the sensitive-action re-verification (fresh 2FA code when 2FA is
   enabled) live here too. Deleting an account purges its tokens,
   revenue data, and sessions; the caller revokes at the provider first.
-- `dashboard/app.py` — the landing page (`/`, public), the scoped
+- `ventoryn/app.py` — the landing page (`/`, public), the scoped
   snapshot (`/api/snapshot`, `/api/report`), the customer's own
   `/portfolio` (colored stat + business cards, not a bare table),
   `/approvals` (scoped + ownership-enforced decide, redirects back
@@ -341,13 +341,13 @@ like the rest of the runtime.
   Two-factor column + per-account reset, agents, admin 2FA setup —
   password-gated, see above). The signed-in pages share one centered
   header with a hamburger menu at the far right
-  (`dashboard/nav.py`); the forced-2FA gate middleware redirects any
+  (`ventoryn/nav.py`); the forced-2FA gate middleware redirects any
   signed-in session without 2FA to the setup/verify pages. The
   `/admin` look blends the Kay Ayiti admin board (pale slate-blue,
   white radius-16 cards, red count accents) with the ShipItAyiti
   admin (navy/slate headers, ringed cards, uppercase table headers).
   Registers the SaaS routes on the same store/config.
-- `dashboard/static/game.html` — the Live Ops page: the shared
+- `ventoryn/static/game.html` — the Live Ops page: the shared
   header is injected server-side at the `<!--VENTORYN_HEADER-->`
   placeholder (the pill nav row is gone), the account-aware snapshot
   (operator controls hidden for customers, customer empty states,

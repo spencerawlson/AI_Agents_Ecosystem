@@ -5,15 +5,15 @@ and spent real research money on it. This program is its books: one
 business (the same name, so it lands on the business already in the
 registry), with owner-reported sales revenue and real-world costs.
 
-The product itself lives in products/notion-templates/ (the template
+The product itself lives in businesses/notion_templates/product/ (the template
 pack spec, setup guide and listing copy). Sales happen on Gumroad
 and/or Etsy — the owner's accounts, the owner's payouts. Revenue is
 booked by hand from the channel dashboard, source named in every
 entry, until an API sync exists.
 
-    python ecosystem/notion_templates_growth.py --pnl
-    python ecosystem/notion_templates_growth.py --record-revenue 29 --period 2026-10 --source Gumroad
-    python ecosystem/notion_templates_growth.py --record-cost 0.20 --label "Etsy listing fee"
+    python businesses/notion_templates/growth.py --pnl
+    python businesses/notion_templates/growth.py --record-revenue 29 --period 2026-10 --source Gumroad
+    python businesses/notion_templates/growth.py --record-cost 0.20 --label "Etsy listing fee"
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ecosystem.runtime import build_runtime
 

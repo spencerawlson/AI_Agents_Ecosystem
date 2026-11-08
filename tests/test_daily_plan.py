@@ -14,10 +14,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ecosystem import daily_plan
-from ecosystem.road2cissp_growth import (
+from businesses.road2cissp.growth import (
     CADENCE, RETRY_AFTER, load_state, save_state,
 )
-import ecosystem.road2cissp_growth as growth
+import businesses.road2cissp.growth as growth
 
 T0 = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
 
@@ -304,7 +304,7 @@ def test_cli_done_unknown_item_fails(tmp_path, monkeypatch, capsys):
 def test_dashboard_daily_plan_endpoint(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
 
     state = _ranked_state()
     path = tmp_path / "state.json"

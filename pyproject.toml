@@ -28,10 +28,10 @@ all = ["ai-agents-ecosystem[llm,market,video,postgres]"]
 dev = ["ai-agents-ecosystem[all]", "pytest>=8.0", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
-include = ["orchestrator*", "agents*", "core*", "dashboard*", "infra*", "ecosystem*"]
+include = ["orchestrator*", "agents*", "core*", "infra*", "ecosystem*", "ventoryn*", "businesses*"]
 
 [tool.setuptools.package-data]
-dashboard = ["static/*"]
+ventoryn = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

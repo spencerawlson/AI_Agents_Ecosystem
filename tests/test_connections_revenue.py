@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import (
+from ventoryn.saas import (
     CONNECTION_CONSENT,
     CONNECTION_SCOPES,
     SaasConfig,
@@ -34,8 +34,8 @@ from core.saas import (
     check_posting_allowed,
     handle_customer_sale_webhook,
 )
-from core.signature import sign_agent_link
-from dashboard.app import create_app
+from ventoryn.signature import sign_agent_link
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 from _signin import (

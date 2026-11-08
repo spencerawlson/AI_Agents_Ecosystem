@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _signin import OPERATOR_EMAIL, operator_store_and_config, sign_in
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from dashboard.app import create_app
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 

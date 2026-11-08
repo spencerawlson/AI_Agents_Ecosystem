@@ -16,7 +16,7 @@ unattributed revenue — never assigned to a post by guesswork.
 
 The tag is signed with HMAC-SHA256 under the same
 ``VENTORYN_TOKEN_KEY`` as the token encryption (see
-``core/token_crypto.py``), so a tag cannot be forged by editing a
+``ventoryn/token_crypto.py``), so a tag cannot be forged by editing a
 URL — the server can verify it. The tag itself carries no secret.
 """
 
@@ -28,7 +28,7 @@ import secrets
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from core.token_crypto import _derive_key
+from ventoryn.token_crypto import _derive_key
 
 UTM_SOURCE = "ventoryn"
 _TAG_PREFIX = "vtn"
@@ -115,7 +115,7 @@ def sign_agent_link(url: str, site_id: str, site_slug: str, agent: str,
     Returns (signed_url, tag). This is the one entry point every
     agent output uses — a link that was not created here has no
     record, so a payment carrying its tag can never be attributed.
-    `store` is a core.saas.SaasStore (duck-typed: record_signature)."""
+    `store` is a ventoryn.saas.SaasStore (duck-typed: record_signature)."""
     action_id = new_action_id()
     tag = make_tag(site_id, agent, action_id, key=key)
     signed = sign_url(url, site_slug, agent, tag)

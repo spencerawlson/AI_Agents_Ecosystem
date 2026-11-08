@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.app_store_audit import audit_app  # noqa: E402
-from dashboard.reports import reports_dir  # noqa: E402
+from ventoryn.reports import reports_dir  # noqa: E402
 
 # Spencer's apps, by their App Store Connect Apple ID. The IDs are
 # public store identifiers, not secrets.

@@ -18,8 +18,8 @@ from fastapi.testclient import TestClient
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import SaasConfig, SaasStore
-from dashboard.app import create_app
+from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 from _signin import (

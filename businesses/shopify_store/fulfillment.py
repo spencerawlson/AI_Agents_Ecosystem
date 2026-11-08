@@ -30,7 +30,7 @@ from core.cj_orders import TRACKING_URL
 from orchestrator.approvals import ApprovalGate
 from orchestrator.models import ApprovalStatus
 
-log = logging.getLogger("ecosystem.fulfillment")
+log = logging.getLogger("businesses.shopify_store.fulfillment")
 
 COST_ACTION = "supplier_order_over_cost"
 CJ_PLATFORM = "cjdropshipping"

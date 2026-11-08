@@ -49,9 +49,9 @@ Etsy PDF.
 When a sale lands, book it the same day so the GUI tells the truth:
 
 ```
-python3 ecosystem/notion_templates_growth.py --record-revenue 29 --period 2026-10 --source Gumroad
-python3 ecosystem/notion_templates_growth.py --record-cost 0.20 --label "Etsy listing fee"
-python3 ecosystem/notion_templates_growth.py --pnl
+python3 businesses/notion_templates/growth.py --record-revenue 29 --period 2026-10 --source Gumroad
+python3 businesses/notion_templates/growth.py --record-cost 0.20 --label "Etsy listing fee"
+python3 businesses/notion_templates/growth.py --pnl
 ```
 
 ## Optional launch lever (owner's call)

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from dashboard.app import create_app
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 from orchestrator.registry import AgentRegistry

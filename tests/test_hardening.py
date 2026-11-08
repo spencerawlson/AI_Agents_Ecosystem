@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from agents.base import BaseAgent
 from core.registry import BusinessRegistry
-from dashboard.app import create_app
+from ventoryn.app import create_app
 from orchestrator.engine import Orchestrator
 from orchestrator.models import Task, TaskStatus
 from orchestrator.registry import AgentRegistry

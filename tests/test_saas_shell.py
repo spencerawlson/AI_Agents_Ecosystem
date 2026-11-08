@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 
-import core.saas as saas
-import dashboard.saas_routes as saas_routes
-from core.saas import SaasConfig, SaasStore
-from dashboard.app import create_app
+import ventoryn.saas as saas
+import ventoryn.saas_routes as saas_routes
+from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.app import create_app
 
 
 @pytest.fixture()
@@ -56,7 +56,7 @@ def _login(client, store, account=None):
     account = account or _account(store)
     token = store.create_session(account["id"])
     # Two-factor is mandatory: the test session has passed it.
-    from core.totp import code_at
+    from ventoryn.totp import code_at
     if not store.totp_state(account["id"])["enabled"]:
         setup = store.begin_totp_setup(account["id"])
         store.confirm_totp_setup(account["id"], code_at(setup["secret"]))
@@ -186,7 +186,7 @@ def test_google_login_flow(client, store, config, monkeypatch):
     r = client.get("/account/two-factor/setup")
     assert r.status_code == 200
     assert "Two-factor authentication" in r.text
-    from core.totp import code_at
+    from ventoryn.totp import code_at
     secret = store.get_totp_pending_secret(account["id"])
     r = client.post("/account/two-factor/setup",
                     data={"code": code_at(secret), "next": "/ops"},

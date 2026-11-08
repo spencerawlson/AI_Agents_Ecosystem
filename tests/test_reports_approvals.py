@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dashboard.app import create_app
-from dashboard.reports import list_reports, render_markdown, render_report
+from ventoryn.app import create_app
+from ventoryn.reports import list_reports, render_markdown, render_report
 from ecosystem.runtime import build_runtime, create_dashboard_app
 from orchestrator.approvals import ApprovalGate
 from orchestrator.dispatcher import Dispatcher, DispatcherPolicy

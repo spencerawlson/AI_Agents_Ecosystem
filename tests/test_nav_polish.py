@@ -29,12 +29,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 
-import dashboard.nav as nav
+import ventoryn.nav as nav
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import SaasConfig, SaasStore
-from dashboard.app import create_app
+from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 from _signin import (

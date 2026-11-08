@@ -323,7 +323,7 @@ def sign_reply_draft(text: str, site_url: str, signer=None) -> tuple[str, str | 
     parameters + signed vtn_ tag). `signer` is a callable
     ``(url, agent) -> (signed_url, tag)`` supplied by the SaaS shell
     when the draft belongs to a Ventoryn site (see
-    core.signature.sign_agent_link). Without a signer the draft is
+    ventoryn.signature.sign_agent_link). Without a signer the draft is
     returned unchanged with tag None — and the caller must say so
     (unsigned), never pretend it is signed. Returns (text, tag)."""
     if signer is None:

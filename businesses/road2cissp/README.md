@@ -51,20 +51,20 @@ python launch.py worker            # growth program is the default focus
 By hand:
 
 ```bash
-python ecosystem/road2cissp_growth.py run                   # run whatever is due
-python ecosystem/road2cissp_growth.py run --force all       # rerun every job now
-python ecosystem/road2cissp_growth.py status                # experiments + last runs
-python ecosystem/road2cissp_growth.py daily-plan            # today's ordered moves (builds the plan, runs nothing)
-python ecosystem/road2cissp_growth.py daily-plan-done fix:prerender-routes
-python ecosystem/road2cissp_growth.py listen               # search Reddit, draft replies (drafts only, nothing posted)
-python ecosystem/road2cissp_growth.py attribution          # per-channel funnel attribution (see attribution.md)
-python ecosystem/road2cissp_growth.py video --script script.json   # render a video slideshow (see video.md)
-python ecosystem/road2cissp_growth.py geo                  # AI-search visibility audit (see geo.md)
-python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
-python ecosystem/road2cissp_growth.py outcome reddit-answers --worked "62 referral visits, 9 sign-ins"
+python businesses/road2cissp/growth.py run                   # run whatever is due
+python businesses/road2cissp/growth.py run --force all       # rerun every job now
+python businesses/road2cissp/growth.py status                # experiments + last runs
+python businesses/road2cissp/growth.py daily-plan            # today's ordered moves (builds the plan, runs nothing)
+python businesses/road2cissp/growth.py daily-plan-done fix:prerender-routes
+python businesses/road2cissp/growth.py listen               # search Reddit, draft replies (drafts only, nothing posted)
+python businesses/road2cissp/growth.py attribution          # per-channel funnel attribution (see attribution.md)
+python businesses/road2cissp/growth.py video --script script.json   # render a video slideshow (see video.md)
+python businesses/road2cissp/growth.py geo                  # AI-search visibility audit (see geo.md)
+python businesses/road2cissp/growth.py record-metrics --visitors 420 --signups 12
+python businesses/road2cissp/growth.py outcome reddit-answers --worked "62 referral visits, 9 sign-ins"
 ```
 
-The daily plan ([daily-plan.md](daily-plan.md)) is the weekly cycle
+The daily plan ([daily-plan.md](../../docs/daily-plan.md)) is the weekly cycle
 turned into a morning list: P0 fixes and critical audit findings
 first, then owner decisions (approve experiments, record outcomes),
 then jobs due today, drafts, this week's tasks, one gated SEO article,
@@ -103,4 +103,4 @@ Fix 1 and 2 first. Until then, organic growth and measurement are both capped.
 ## Other projects
 
 Opportunity discovery (`--discovery`) and the Shopify store (`--store`,
-[shopify-store.md](shopify-store.md)) still work but are off by default.
+[shopify-store.md](../shopify_store/README.md)) still work but are off by default.

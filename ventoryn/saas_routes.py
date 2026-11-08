@@ -1,6 +1,6 @@
 """Customer-facing SaaS routes for Ventoryn (/account/...).
 
-Registered by dashboard.app.create_app() — the shell lives on the same
+Registered by ventoryn.app.create_app() — the shell lives on the same
 dashboard process, so a customer signs in and manages their sites next
 to the live-ops view. Every page is server-rendered HTML, mobile-first
 (single column on phones, 44px+ tap targets), light styling.
@@ -41,7 +41,7 @@ sign-in and the URL box; after Google sign-in EVERYONE goes straight
 to Live Ops (/ops), scoped to their account. A website typed on the
 landing page rides along (?site_url=…) so /ops can offer the
 subscribe / add-site step for it. /admin is a separate URL for the
-operator only (see dashboard.app).
+operator only (see ventoryn.app).
 
 Nothing here publishes or posts anywhere. A job that costs more
 credits than the balance is refused with the balance shown.
@@ -59,8 +59,8 @@ from fastapi import Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
-from core.qrcode import qr_svg
-from core.saas import (
+from ventoryn.qrcode import qr_svg
+from ventoryn.saas import (
     APP_REGISTRATION_KINDS,
     CONNECTION_CONSENT,
     CONNECTION_REVOKE_NOTE,
@@ -88,8 +88,8 @@ from core.saas import (
     verify_webhook_signature,
     create_checkout_session,
 )
-from core.totp import provisioning_uri
-from dashboard.nav import HEADER_CSS, header_html
+from ventoryn.totp import provisioning_uri
+from ventoryn.nav import HEADER_CSS, header_html
 
 #: Where analyze reports are written (reports/analyze_<host>_<date>.md,
 #: same as the CLI). Tests override this with a temp dir.
@@ -104,7 +104,7 @@ REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 PENDING_SITE_COOKIE = "ventoryn_pending_site"
 PENDING_SITE_TTL_SECONDS = 30 * 60
 
-# Account pages share the platform shell (dashboard/ui.py); only the
+# Account pages share the platform shell (ventoryn/ui.py); only the
 # 2FA bits below are specific to them.
 _SAAS_CSS = """
 .qr { background: #fff; border: 1px solid var(--v-line); border-radius: 12px;
@@ -129,7 +129,7 @@ def _page(title: str, inner: str, account: dict | None = None,
     "for website owners" — those stay reachable by direct URL only.
     Unsigned error pages get no header — the menu belongs to
     signed-in pages only."""
-    from dashboard import ui
+    from ventoryn import ui
 
     if account is None:
         return ui.page(title, f"<h1>{esc(title)}</h1>{inner}",

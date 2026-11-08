@@ -12,7 +12,7 @@ Setup (owner does once):
                              (client-credentials grant; the adapter
                              fetches and refreshes short-lived tokens)
        SHOPIFY_API_VERSION   optional, defaults to DEFAULT_API_VERSION
-  3. Verify: python ecosystem/shopify_pipeline.py check
+  3. Verify: python businesses/shopify_store/pipeline.py check
 
 Scopes (least privilege for store management):
   read_products / write_products        products, variants, SEO, media

@@ -11,8 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ecosystem import etsy_monitor
-from ecosystem.etsy_monitor import EtsyMonitor
+from businesses.etsy_evergreen import monitor as etsy_monitor
+from businesses.etsy_evergreen.monitor import EtsyMonitor
 
 
 def _receipt(ts: int, cents: int) -> dict:

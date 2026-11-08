@@ -6,11 +6,11 @@ it already had — Plausible traffic snapshots, owner-recorded Stripe
 revenue — instead of inventing a tracking pixel it does not run.
 
 ```bash
-python ecosystem/road2cissp_growth.py record-conversion --amount 19 --touches "community:r/cissp"
-python ecosystem/road2cissp_growth.py record-revenue --amount 190 --channel community --source r/cissp
-python ecosystem/road2cissp_growth.py attribution            # last-touch, Plausible 30d when the key is set
-python ecosystem/road2cissp_growth.py attribution --model linear
-python ecosystem/road2cissp_growth.py attribution --no-plausible
+python businesses/road2cissp/growth.py record-conversion --amount 19 --touches "community:r/cissp"
+python businesses/road2cissp/growth.py record-revenue --amount 190 --channel community --source r/cissp
+python businesses/road2cissp/growth.py attribution            # last-touch, Plausible 30d when the key is set
+python businesses/road2cissp/growth.py attribution --model linear
+python businesses/road2cissp/growth.py attribution --no-plausible
 ```
 
 Or read it from the dashboard: `GET /api/attribution` (also linked
@@ -72,8 +72,8 @@ change the plan by themselves.
 - `core/attribution.py` — pure classification, models, aggregation,
   suggestions. No network, no LLM.
 - `core/site_metrics.py` — `PlausibleClient.source_breakdown()`.
-- `ecosystem/road2cissp_growth.py` — `record_conversion`,
+- `businesses/road2cissp/growth.py` — `record_conversion`,
   `run_attribution`, the `record-conversion` / `attribution` CLI.
-- `dashboard/app.py` — `GET /api/attribution`.
+- `ventoryn/app.py` — `GET /api/attribution`.
 - Reports at `reports/attribution_<yyyymmdd>.md`; the latest totals
   are kept in the growth state under `attribution_last`.

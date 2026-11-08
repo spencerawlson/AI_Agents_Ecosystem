@@ -19,8 +19,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ecosystem.analyze as analyze
-from dashboard.analyze_jobs import validate_country, validate_language, validate_url
-from dashboard.app import create_app
+from ventoryn.analyze_jobs import validate_country, validate_language, validate_url
+from ventoryn.app import create_app
 from fastapi.testclient import TestClient
 
 from core.ledger import Ledger
@@ -181,7 +181,7 @@ def test_analyze_unknown_job_is_404(client):
 # -- Endpoint: job lifecycle (fake runner, no network) ------------------------
 
 def test_analyze_job_lifecycle(client, tmp_path, monkeypatch):
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     report_name = "analyze_example-com_20261108.md"
 

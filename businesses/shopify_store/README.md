@@ -1,6 +1,6 @@
 # Shopify store pipeline
 
-> **Paused.** The agents now focus on road2cissp.com ([road2cissp-growth.md](road2cissp-growth.md)). This pipeline is off by default; run it with `python launch.py worker -- --store`.
+> **Paused.** The agents now focus on road2cissp.com ([road2cissp-growth.md](../road2cissp/README.md)). This pipeline is off by default; run it with `python launch.py worker -- --store`.
 
 Trends → product briefs → supplier report → **owner approves a supplier** →
 product live → paused ads → **owner approves the launch** → live ads →
@@ -15,10 +15,10 @@ SEO and content every cycle.
 | Margin pricing (60% after cost, shipping, payment fee) | `core/pricing.py` |
 | Shopify Admin GraphQL adapter | `core/shopify_adapter.py` |
 | Meta + Google Ads adapters, ad copy | `core/ads.py` |
-| Ad drafting + launch/budget approvals | `ecosystem/ads_pipeline.py` |
-| Order fulfilment (Shopify order → CJ order → tracking) | `ecosystem/fulfillment.py`, `core/cj_orders.py` |
-| Spend guard, profit, SEO, blog drafts, store report | `ecosystem/store_ops.py` |
-| CLI | `ecosystem/shopify_pipeline.py` |
+| Ad drafting + launch/budget approvals | `businesses/shopify_store/ads_pipeline.py` |
+| Order fulfilment (Shopify order → CJ order → tracking) | `businesses/shopify_store/fulfillment.py`, `core/cj_orders.py` |
+| Spend guard, profit, SEO, blog drafts, store report | `businesses/shopify_store/store_ops.py` |
+| CLI | `businesses/shopify_store/pipeline.py` |
 
 ## What needs your approval (and what doesn't)
 
@@ -40,7 +40,7 @@ SEO and content every cycle.
 ## Connect accounts (once)
 
 All credentials go in environment variables — never in the repo.
-`python ecosystem/shopify_pipeline.py check` makes one read-only call to every
+`python businesses/shopify_store/pipeline.py check` makes one read-only call to every
 configured service and prints OK / FAIL per integration (including missing
 Shopify scopes).
 
@@ -89,7 +89,7 @@ are used and discovery needs a `--seeds` file.
 
 ```
 # 1. Find products (LLM ideas or your own seed list), check demand, source suppliers
-python ecosystem/shopify_pipeline.py discover --niche "home office" --llm --source
+python businesses/shopify_store/pipeline.py discover --niche "home office" --llm --source
 #    or for one brief you wrote:  ... source my_brief.json --llm
 
 # 2. Read reports/supplier_report_*.md, contact suppliers, approve ONE in /approvals

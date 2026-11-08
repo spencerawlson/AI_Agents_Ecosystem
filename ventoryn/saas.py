@@ -30,15 +30,15 @@ Design rules (from the brief, do not weaken):
   No new database. SaasStore(":memory:") is the hermetic default used
   by create_app() when no store is passed, so importing the dashboard
   never creates a file and tests never touch disk.
-- TOKENS are stored ENCRYPTED at rest (core/token_crypto.py,
+- TOKENS are stored ENCRYPTED at rest (ventoryn/token_crypto.py,
   VENTORYN_TOKEN_KEY), never plaintext, never sent to the browser.
   Disconnect revokes at the provider where the provider allows it.
 - TWO-FACTOR is FORCED for every account from the first sign-in:
   a session whose account has not finished TOTP setup is limited to
-  the setup page. The same TOTP module (core/totp.py) serves the
+  the setup page. The same TOTP module (ventoryn/totp.py) serves the
   admin login and the customer sign-in — one implementation.
 - ATTRIBUTION: a sale is Ventoryn's only where the Ventoryn
-  signature (core/signature.py — UTM + signed vtn_ tag) reaches the
+  signature (ventoryn/signature.py — UTM + signed vtn_ tag) reaches the
   payment. Otherwise it is unattributed revenue, never guessed.
 - REVENUE PRIVACY: the per-site "show my revenue" toggle is
   respected everywhere, including admin totals (off = no dollar
@@ -67,9 +67,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from core.countries import normalize_country
-from core.signature import make_tag, parse_tag, tag_from_url
-from core.token_crypto import decrypt_token, encrypt_token, is_encrypted
-from core.totp import (
+from ventoryn.signature import make_tag, parse_tag, tag_from_url
+from ventoryn.token_crypto import decrypt_token, encrypt_token, is_encrypted
+from ventoryn.totp import (
     hash_backup_code,
     new_backup_codes,
     new_secret,
@@ -92,7 +92,7 @@ MONTHLY_CREDIT_ALLOWANCE_DEFAULT = 100
 
 #: What one run of each kind of agent work costs, in credits. This is
 #: the starting table Spencer can change. Only "analyze" is runnable
-#: through the shell today (see dashboard/saas_routes.py); the rest are
+#: through the shell today (see ventoryn/saas_routes.py); the rest are
 #: priced here so the plan page and the cost table stay honest about
 #: what each job will cost when it lands.
 CREDIT_COSTS: dict[str, int] = {
@@ -774,7 +774,7 @@ class SaasStore:
                 " WHERE token_hash = ?", (_hash_token(token),))
 
     # -- two-factor: customer accounts -------------------------------------
-    # One TOTP implementation (core/totp.py) shared with the admin
+    # One TOTP implementation (ventoryn/totp.py) shared with the admin
     # login. The secret is stored ENCRYPTED; backup codes are stored
     # only as salted hashes. Setup is a two-step flow: the secret is
     # generated into totp_pending_secret, and only moves to

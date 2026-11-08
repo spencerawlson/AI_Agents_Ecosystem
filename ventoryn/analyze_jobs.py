@@ -147,7 +147,7 @@ def _default_runner(url: str, country: str, language: str | None) -> dict:
     built from it would be a fake score. The panel shows
     "Unavailable — could not fetch" with the reason instead.
     """
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
     from ecosystem.analyze import render_report, run_analysis, slug_for_url
 
     now = datetime.now(timezone.utc)

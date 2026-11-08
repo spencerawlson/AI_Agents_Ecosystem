@@ -35,14 +35,14 @@ from fastapi.testclient import TestClient
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import (
+from ventoryn.saas import (
     CONNECTION_SCOPES,
     SaasConfig,
     SaasStore,
     check_posting_allowed,
     revoke_provider_token,
 )
-from dashboard.app import create_app
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 from _signin import (

@@ -180,11 +180,11 @@ def page(title: str, inner: str, *, header: str = "",
          head_extra: str = "") -> str:
     """A complete HTML document in the Ventoryn shell.
 
-    ``header`` is the app bar (dashboard.nav.header_html) or empty for
+    ``header`` is the app bar (ventoryn.nav.header_html) or empty for
     pages without navigation (unsigned error pages, the admin login).
     ``inner`` goes inside the centered <main>.
     """
-    from dashboard.nav import HEADER_CSS
+    from ventoryn.nav import HEADER_CSS
 
     cls = f" class='{esc(body_class)}'" if body_class else ""
     return (

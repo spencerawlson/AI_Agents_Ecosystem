@@ -40,7 +40,7 @@ export ECOSYSTEM_STATE_DB=~/Projects/AI_Agents_Ecosystem/data/ecosystem_state.db
 
 Either way, restart the dashboard (so it rebuilds its runtime on the
 shared store) and run missions as usual — e.g.
-`python3 ecosystem/farelune_growth.py` — and the business appears in
+`python3 businesses/farelune/growth.py` — and the business appears in
 the portfolio and the game view.
 
 Notes:

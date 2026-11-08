@@ -22,8 +22,8 @@ from core.community_listening import (
     search_reddit, validate_reply_draft,
 )
 from ecosystem import daily_plan
-from ecosystem.road2cissp_growth import CADENCE, RETRY_AFTER
-import ecosystem.road2cissp_growth as growth
+from businesses.road2cissp.growth import CADENCE, RETRY_AFTER
+import businesses.road2cissp.growth as growth
 
 SITE = "https://road2cissp.com"
 NOW = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)

@@ -1,32 +1,31 @@
-"""Farelune growth program: the ecosystem's first REAL own-site business.
+"""ProofFlow growth program: the ecosystem's first REAL own-site business.
 
-Spencer's call (2026-10-18): make the ecosystem real, own sites first —
-and Farelune is the site for now (ProofFlow's program stands ready for
-when that site goes live). Farelune is already a real business in the
-world: live at farelune.com, real visitors, a real Meta ad flight, and
-Travelpayouts affiliate partnerships (Aviasales, Kiwi.com, Klook).
+Spencer's call (2026-10-18): the ecosystem stops being a simulation —
+first real channel is his own sites, starting with ProofFlow
+(proofflow.me, free proof-of-delivery tool, AdSense-monetized).
 
 What "real" means here, concretely:
-  - One business record ("Farelune") in the real registry.
-  - Every agent step's actual cost is posted to its ledger as ai_spend.
-  - Money in and out of the real business is bookable with its source
-    named in the ledger entry: Travelpayouts payouts as revenue
-    (--record-revenue, owner-reported from the partner dashboard) and
-    Meta ad spend as a cost (--record-cost). Nothing estimated or
-    invented; an API sync can replace hand-recording later.
-  - The growth run itself is the SEO engine working the live site:
-    real sitemap inventory, live Trends keyword scoring (from a
-    residential IP — datacenter IPs get 429s), gate-checked article
-    drafts, real spend on the books.
+  - One business record ("ProofFlow") in the real registry — never a
+    duplicate per run.
+  - Every agent step's actual cost is posted to that business's ledger
+    as ai_spend (missions previously tracked spend only in reports;
+    the ledger is the P&L the game view reads).
+  - Revenue enters only as owner-reported AdSense earnings via
+    --record-revenue, with the source named in the ledger entry itself.
+    Nothing is estimated, modeled or invented. (An AdSense API sync can
+    replace the hand-recording later; the entry format already carries
+    its source.)
+  - The growth run refuses to operate on a site that is not live: it
+    crawls proofflow.me's sitemap first and stops with guidance when
+    the new site is not what's serving (as of 2026-10-18 the domain
+    still serves the old host's "unavailable" page).
 
 Usage (FedServ):
     export OPENAI_API_KEY=...
-    python3 ecosystem/farelune_growth.py                  # growth run
-    python3 ecosystem/farelune_growth.py --record-revenue 23.10 \
-        --period 2026-10                                  # Travelpayouts $
-    python3 ecosystem/farelune_growth.py --record-cost 36.90 \
-        --label "Meta campaign Oct 13-27 (USD equiv of $50 CAD flight)"
-    python3 ecosystem/farelune_growth.py --pnl            # show the books
+    python3 businesses/proofflow/growth.py                 # growth run
+    python3 businesses/proofflow/growth.py --record-revenue 18.42 \
+        --period 2026-10                                  # book AdSense $
+    python3 businesses/proofflow/growth.py --pnl           # show the books
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.models import BusinessStatus
 from core.seo_content import fetch_inventory, suggest_internal_links, \
@@ -45,88 +44,80 @@ from core.seo_content import fetch_inventory, suggest_internal_links, \
 from ecosystem.marketing_mission import _require_llm_ready, run_step
 from ecosystem.runtime import build_runtime
 
-SITE_URL = "https://farelune.com"
-BUSINESS_NAME = "Farelune"
-NICHE = "flight comparison and travel planning"
-SEEDS = ["cheap flights", "flights to paris", "flights to tokyo",
-         "cheap flights to cancun", "best time to visit rome",
-         "how to find cheap flights"]
+SITE_URL = "https://proofflow.me"
+BUSINESS_NAME = "ProofFlow"
+NICHE = "proof of delivery for couriers, contractors and delivery teams"
+SEEDS = ["proof of delivery", "proof of delivery template",
+         "proof of delivery app", "delivery confirmation",
+         "pod software", "last mile delivery tracking"]
 FACTS = [
-    "Farelune compares flights and shows flight times from the "
-    "visitor's own city (233 countries mapped, Montreal as fallback)",
-    "Farelune covers 12 destinations in English and French, each with "
-    "local food, culture and landmark guides",
-    "Farelune earns affiliate commissions through Travelpayouts "
-    "partners including Aviasales, Kiwi.com and Klook",
-    "Farelune features a rotating Country of the Week and an "
-    "interactive destinations globe",
+    "ProofFlow is a free proof-of-delivery web tool that runs entirely "
+    "in the browser — no account and no install",
+    "The free tool builds a structured delivery record: each step of the "
+    "job gets a photo, and the finished record is saved on the device",
+    "ProofFlow's site publishes practical guides on proof of delivery, "
+    "delivery confirmation and POD templates",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Business + ledger wiring
+# Business + ledger wiring (the "real" part)
 # ---------------------------------------------------------------------------
 
 
 def get_or_create_business(rt):
-    """The one Farelune business. Found by name, created once."""
+    """The one ProofFlow business. Found by name, created once."""
     for biz in rt.businesses.list():
         if biz.name == BUSINESS_NAME and \
                 biz.status != BusinessStatus.TERMINATED:
             return biz
     biz = rt.businesses.create(name=BUSINESS_NAME,
                                business_type="web_product",
-                               domain="farelune.com")
+                               domain="proofflow.me")
     rt.businesses.transition(biz.id, BusinessStatus.RESEARCHING)
     return biz
 
 
 def post_step_cost(rt, business_id: str, run, label: str) -> None:
+    """Post a task run's real cost to the business ledger as ai_spend."""
     cost = float(getattr(run, "cost_usd", 0.0) or 0.0)
     if cost <= 0:
         return
     rt.ledger.record(business_id=business_id, kind="ai_spend",
                      amount_usd=-cost,
-                     description=f"farelune_growth: {label}")
+                     description=f"proofflow_growth: {label}")
 
 
-def record_revenue(rt, business_id: str, amount_usd: float, period: str,
-                   source: str = "Travelpayouts dashboard"):
-    """Book owner-reported affiliate earnings as real revenue; the entry
-    names its source so the books never pretend to be an API sync."""
+def record_adsense_revenue(rt, business_id: str, amount_usd: float,
+                           period: str, source: str = "AdSense dashboard"):
+    """Book owner-reported AdSense earnings as real revenue.
+
+    The entry names its source in its own description — until an AdSense
+    API sync exists, the figure is exactly what the owner read off the
+    AdSense dashboard for that period, and the books say so."""
     if amount_usd <= 0:
         raise ValueError("revenue amount must be positive")
     if not period:
         raise ValueError("a period (e.g. 2026-10) is required")
     return rt.ledger.record(
         business_id=business_id, kind="revenue", amount_usd=amount_usd,
-        description=f"Affiliate earnings {period} — owner-reported "
+        description=f"AdSense earnings {period} — owner-reported "
                     f"({source})")
 
 
-def record_external_cost(rt, business_id: str, amount_usd: float,
-                         label: str):
-    """Book a real-world cost (e.g. Meta ad spend) against the business."""
-    if amount_usd <= 0:
-        raise ValueError("cost amount must be positive")
-    if not label:
-        raise ValueError("a label naming the cost is required")
-    return rt.ledger.record(
-        business_id=business_id, kind="external_cost",
-        amount_usd=-amount_usd, description=label)
-
-
 def site_is_live(site_url: str = SITE_URL) -> bool:
+    """The new site is live iff its sitemap crawls. No sitemap, no run —
+    the engine never writes content against a site that isn't up."""
     try:
         fetch_inventory(site_url)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - any failure means not usable yet
         return False
 
 
 def _print_pnl(rt, biz) -> None:
     pnl = rt.ledger.pnl(biz.id)
-    print(f"Farelune P&L — revenue ${pnl.revenue:.2f} · "
+    print(f"ProofFlow P&L — revenue ${pnl.revenue:.2f} · "
           f"costs ${pnl.total_costs:.2f} · net ${pnl.net_profit:.2f}",
           flush=True)
 
@@ -138,18 +129,14 @@ def _print_pnl(rt, biz) -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Farelune growth program (real own-site business)")
+        description="ProofFlow growth program (real own-site business)")
     parser.add_argument("--record-revenue", type=float, default=None,
-                        help="book affiliate earnings (USD) and exit")
+                        help="book AdSense earnings (USD) and exit")
     parser.add_argument("--period", default="",
                         help="period for --record-revenue, e.g. 2026-10")
-    parser.add_argument("--record-cost", type=float, default=None,
-                        help="book a real-world cost (USD) and exit")
-    parser.add_argument("--label", default="",
-                        help="label for --record-cost (names the spend)")
     parser.add_argument("--pnl", action="store_true",
-                        help="print the Farelune P&L and exit")
-    parser.add_argument("--count", type=int, default=3,
+                        help="print the ProofFlow P&L and exit")
+    parser.add_argument("--count", type=int, default=2,
                         help="articles per growth run")
     parser.add_argument("--word-target", type=int, default=1500)
     parser.add_argument("--llm", dest="llm", action="store_true",
@@ -166,15 +153,9 @@ def main(argv=None) -> int:
         _print_pnl(rt, biz)
         return 0
     if args.record_revenue is not None:
-        entry = record_revenue(rt, biz.id, args.record_revenue, args.period)
+        entry = record_adsense_revenue(rt, biz.id, args.record_revenue,
+                                       args.period)
         print(f"booked revenue ${entry.amount_usd:.2f}: "
-              f"{entry.description}", flush=True)
-        _print_pnl(rt, biz)
-        return 0
-    if args.record_cost is not None:
-        entry = record_external_cost(rt, biz.id, args.record_cost,
-                                      args.label)
-        print(f"booked cost ${-entry.amount_usd:.2f}: "
               f"{entry.description}", flush=True)
         _print_pnl(rt, biz)
         return 0
@@ -183,8 +164,10 @@ def main(argv=None) -> int:
         _require_llm_ready()
 
     if not site_is_live():
-        print("STOPPED: farelune.com sitemap did not crawl — check the "
-              "site before running growth against it.", flush=True)
+        print("STOPPED: proofflow.me is not serving the new site yet "
+              "(no crawlable sitemap). Deploy the site and move DNS "
+              "first — the growth run starts the day the site is live.",
+              flush=True)
         return 2
 
     inventory = fetch_inventory(SITE_URL)
@@ -201,13 +184,14 @@ def main(argv=None) -> int:
     if not ok:
         print(f"STOPPED: {result}", flush=True)
         return 1
+    keywords = result["keywords"]
     scored = sorted(
-        result["keywords"],
+        keywords,
         key=lambda k: (k.get("avg_12mo") is None, -(k.get("avg_12mo") or 0)))
     chosen = scored[: max(1, args.count)]
 
     from core.seo_publish import FileExportPublisher, PublisherError
-    export_dir = Path("reports") / "seo" / "farelune_com"
+    export_dir = Path("reports") / "seo" / "proofflow_me"
     produced = 0
     for entry_kw in chosen:
         keyword = entry_kw["keyword"]
@@ -239,7 +223,7 @@ def main(argv=None) -> int:
         if not quality["errors"]:
             try:
                 out = FileExportPublisher(export_dir).publish(
-                    pkg, SITE_URL, author="Farelune")
+                    pkg, SITE_URL, author="ProofFlow")
                 status = f"exported draft: {out['markdown']}"
                 produced += 1
             except PublisherError as exc:
@@ -249,11 +233,11 @@ def main(argv=None) -> int:
         print(f"ok: {keyword} — {status}", flush=True)
 
     report_path = Path("reports") / (
-        f"farelune_growth_{datetime.now(timezone.utc):%Y%m%d}.md")
+        f"proofflow_growth_{datetime.now(timezone.utc):%Y%m%d}.md")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     pnl = rt.ledger.pnl(biz.id)
     report_path.write_text(
-        f"# Farelune Growth Run — {SITE_URL}\n\n"
+        f"# ProofFlow Growth Run — {SITE_URL}\n\n"
         f"> **DRAFT ARTICLES EXPORTED** to {export_dir} — nothing went "
         f"live.\n\n"
         f"Articles produced: {produced}\n\n" + "\n".join(lines) + "\n\n"
@@ -262,13 +246,13 @@ def main(argv=None) -> int:
         f"net ${pnl.net_profit:.2f}\n", encoding="utf-8")
     approval = rt.approvals.request(
         action="mission_report_approval",
-        details={"mission": "farelune_growth", "business_name": biz.name,
+        details={"mission": "proofflow_growth", "business_name": biz.name,
                  "site_url": SITE_URL, "report_path": str(report_path),
                  "report_name": report_path.name,
                  "articles_produced": produced,
                  "ledger_net_usd": round(pnl.net_profit, 4)},
         amount_usd=round(pnl.total_costs, 4), business_id=biz.id,
-        requested_by="farelune_growth")
+        requested_by="proofflow_growth")
     print(f"report: {report_path}", flush=True)
     print(f"approval requested: {approval.id}", flush=True)
     _print_pnl(rt, biz)

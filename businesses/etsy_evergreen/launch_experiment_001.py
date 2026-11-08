@@ -9,7 +9,7 @@ Week 1 pipeline:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from agents.creative.agent import CreativeAgent
 from agents.marketing.agent import MarketingAgent

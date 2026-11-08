@@ -64,7 +64,7 @@ from core.community_listening import reddit_fetch as _reddit_fetch  # noqa: E402
 from core.countries import normalize_country  # noqa: E402
 from core.geo_audit import GeoAuditor, score_findings  # noqa: E402
 from core.site_audit import SiteAuditor, http_fetch  # noqa: E402
-from dashboard.reports import reports_dir  # noqa: E402
+from ventoryn.reports import reports_dir  # noqa: E402
 
 
 def slug_for_url(url: str) -> str:

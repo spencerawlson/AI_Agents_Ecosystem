@@ -19,8 +19,8 @@ from core.attribution import (
     aggregate, build_attribution, classify_source, classify_touch,
     parse_touches, parse_utm, sessions_from_snapshot, suggest,
 )
-import ecosystem.road2cissp_growth as growth
-from ecosystem.road2cissp_growth import load_state, save_state
+import businesses.road2cissp.growth as growth
+from businesses.road2cissp.growth import load_state, save_state
 
 NOW = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
 SITE = "https://road2cissp.com"
@@ -280,7 +280,7 @@ def test_api_attribution(tmp_path, monkeypatch):
 
     from core.ledger import Ledger
     from core.registry import BusinessRegistry
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
     from orchestrator.approvals import ApprovalGate
     from orchestrator.engine import Orchestrator
     from orchestrator.registry import AgentRegistry
