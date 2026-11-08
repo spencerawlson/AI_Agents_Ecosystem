@@ -1,12 +1,15 @@
 """Dashboard smoke test."""
 
+import re
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 
+from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
 from dashboard.app import create_app
@@ -32,6 +35,8 @@ def test_dashboard():
     assert r.status_code == 200
     assert "Test Store" in r.text
     assert "$800.00" in r.text  # net profit
+    assert "/ops" in r.text  # Live Ops link, not the old "game" tag
+    assert "Live Ops" in r.text
 
     r = client.get(f"/businesses/{biz.id}")
     assert r.status_code == 200
@@ -118,7 +123,87 @@ def test_report_page():
     assert "Agent performance" in r.text
     assert "Business P" in r.text
     assert "$500.00" in r.text
-    assert "/game" in r.text  # back-link to the live view
+    assert "/ops" in r.text  # link to the Live Ops view
+    assert "Live Ops" in r.text
+
+
+def test_game_view_is_live_ops():
+    """/game serves the Ecosystem Tycoon — Live Ops page with a vector
+    cast (one inline SVG per character, no emoji in the roster) and the
+    live ops window; /ops is an alias for the same page."""
+    app = create_app(registry=BusinessRegistry(), ledger=Ledger())
+    client = TestClient(app)
+    for path in ("/game", "/ops"):
+        r = client.get(path)
+        assert r.status_code == 200
+        assert "Ecosystem Tycoon — Live Ops" in r.text
+        assert "Live game view" not in r.text
+        assert "What the team is doing" in r.text
+        assert 'id="ops-feed"' in r.text
+        assert 'id="ops-bars"' in r.text
+        assert 'id="ops-activity"' in r.text
+        assert 'id="ops-status"' in r.text
+        assert "setInterval" in r.text and "5000" in r.text
+        # One well-formed inline SVG vector icon per character.
+        attrs = re.search(r"const SVG_ATTRS = '(.*?)';", r.text).group(1)
+        roster = r.text.split("const ROSTER = [", 1)[1].split("];", 1)[0]
+        icons = re.findall(r"'<svg ' \+ SVG_ATTRS \+ '(.*?)</svg>'",
+                           roster, re.S)
+        assert len(icons) == 8
+        for body in icons:
+            svg = "<svg " + attrs + body + "</svg>"
+            root = ET.fromstring(svg)
+            assert root.get("viewBox") == "0 0 64 64"
+            assert root.get("data-icon") in {
+                "scout", "analyst", "builder", "studio",
+                "growth", "care", "ops", "ledger"}
+        # No emoji left in the cast.
+        for old in ("🔭", "🔬", "🛠️", "🎨", "📣", "💬", "⚙️", "📒"):
+            assert old not in roster
+        assert "char-emoji" not in r.text
+
+
+def test_api_snapshot_feeds_live_ops():
+    """GET /api/snapshot carries everything the ops window shows:
+    per-agent last_task, and audit events with time / actor / event /
+    business / task / result."""
+    registry = BusinessRegistry()
+    ledger = Ledger()
+    audit = AuditLog()
+    biz = registry.create("Ops Store", "ecommerce")
+    audit.record("discovery", "tick_completed", task_id="task_1",
+                 business_id=biz.id,
+                 result={"winner": "Ops Store", "score": 87})
+    agent_registry = AgentRegistry()
+    agent_registry.register("discovery", capabilities=["search"],
+                            description="d")
+    agent_registry.register("research", capabilities=["analyze"],
+                            description="r")
+    orchestrator = Orchestrator(registry=agent_registry)
+    app = create_app(orchestrator=orchestrator, registry=registry,
+                     ledger=ledger, audit=audit)
+    app.state.game["tick"] = 3
+    app.state.game["agent_stats"] = {
+        "discovery": {"tasks": 2, "tokens": 120, "cost": 0.01,
+                      "last_task": "ranked opportunities"},
+    }
+    client = TestClient(app)
+    data = client.get("/api/snapshot").json()
+    assert data["tick"] == 3
+    by_type = {a["type"]: a for a in data["agents"]}
+    assert by_type["discovery"]["tasks_completed"] == 2
+    assert by_type["discovery"]["last_task"] == "ranked opportunities"
+    assert by_type["research"]["tasks_completed"] == 0
+    assert by_type["research"]["last_task"] == ""
+    assert len(data["events"]) == 1
+    evt = data["events"][0]
+    assert set(evt) >= {"ts", "actor", "event", "business_id", "task_id",
+                        "result"}
+    assert evt["actor"] == "discovery"
+    assert evt["event"] == "tick_completed"
+    assert evt["business_id"] == biz.id
+    assert evt["task_id"] == "task_1"
+    assert evt["result"]["winner"] == "Ops Store"
 
 
 if __name__ == "__main__":
@@ -126,4 +211,6 @@ if __name__ == "__main__":
     test_api_report()
     test_api_report_experiment_shape()
     test_report_page()
+    test_game_view_is_live_ops()
+    test_api_snapshot_feeds_live_ops()
     print("Report tests passed.")

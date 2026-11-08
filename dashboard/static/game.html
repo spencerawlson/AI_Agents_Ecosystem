@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🌱 Ecosystem Tycoon — Live</title>
+<title>Ecosystem Tycoon — Live Ops</title>
 <style>
   :root {
     --bg: #fdf6ea;
@@ -140,8 +140,9 @@
     0%,100% { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,.10), 0 0 0 0 var(--c1); }
     50% { transform: scale(1.07); box-shadow: 0 4px 12px rgba(0,0,0,.10), 0 0 0 10px transparent; }
   }
-  .char-emoji { display: inline-block; }
-  .char-card.working .char-emoji { animation: bounce .7s infinite; }
+  .char-svg { display: inline-block; line-height: 0; }
+  .char-svg svg { width: 44px; height: 44px; display: block; }
+  .char-card.working .char-svg { animation: bounce .7s infinite; }
   @keyframes bounce { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-6px) rotate(4deg); } }
   .char-name { font-size: 17px; font-weight: 800; margin-top: 10px; }
   .char-role {
@@ -192,6 +193,30 @@
   .event-row .e-voice { font-weight: 600; }
   .event-row .e-meta { font-size: 11px; color: var(--dim); font-weight: 600; margin-top: 2px; }
   .event-row.fresh { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* ---------- live ops window ---------- */
+  #ops-panel { margin-top: 14px; }
+  #ops-panel h2 { display: flex; align-items: center; gap: 8px; }
+  .ops-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); display: inline-block; flex: none; }
+  .ops-sub { font-size: 12px; color: var(--dim); font-weight: 600; margin-bottom: 12px; }
+  #ops-graphs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+  @media (max-width: 900px) { #ops-graphs { grid-template-columns: 1fr; } }
+  .ops-graph { background: var(--bg); border: 2px solid var(--border); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+  .ops-graph h3 { font-size: 13px; font-weight: 800; margin-bottom: 8px; }
+  .ops-graph svg { width: 100%; height: auto; display: block; }
+  .ops-legend { display: flex; gap: 16px; font-size: 11px; font-weight: 700; color: var(--dim); margin-bottom: 6px; }
+  .ops-legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 4px; vertical-align: -1px; }
+  .ops-feed-title { font-size: 13px; font-weight: 800; margin: 4px 0 8px; }
+  #ops-feed { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .ops-row { background: var(--bg); border: 2px solid var(--border); border-radius: 12px; padding: 8px 12px; font-size: 13px; line-height: 1.45; }
+  .ops-row .ops-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ops-time { font-weight: 800; font-variant-numeric: tabular-nums; color: var(--dim); }
+  .ops-actor { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+    color: #fff; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+  .ops-event { font-weight: 800; }
+  .ops-ids { font-size: 11px; color: var(--dim); font-weight: 600; word-break: break-all; }
+  .ops-result { font-size: 12px; margin-top: 2px; word-break: break-word; }
 
   /* ---------- experiment 001 ---------- */
   #exp001 { margin-top: 14px; }
@@ -262,7 +287,8 @@
     #spark-wrap { display: none; }
     #verdict-chip { margin-left: 0; font-size: 12px; padding: 6px 12px; }
     .panel-title { font-size: 15px; margin: 14px 0 8px; }
-    .avatar { width: 62px; height: 62px; font-size: 32px; }
+    .avatar { width: 62px; height: 62px; }
+    .char-svg svg { width: 36px; height: 36px; }
     .char-card { padding: 14px 8px 10px; }
     .char-name { font-size: 14px; }
     .char-stats { gap: 8px; }
@@ -277,7 +303,7 @@
     #controls .hint { flex-basis: 100%; text-align: center; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .blob, .floater, .char-card.working .avatar, .char-card.working .char-emoji { animation: none !important; }
+    .blob, .floater, .char-card.working .avatar, .char-card.working .char-svg { animation: none !important; }
   }
 </style>
 </head>
@@ -291,7 +317,7 @@
 </div>
 <canvas id="confetti"></canvas>
 <header id="hud">
-  <div class="title">🌱 Ecosystem Tycoon</div>
+  <div class="title">Ecosystem Tycoon — Live Ops</div>
   <div id="tick-badge">TICK –</div>
   <div class="hud-stat"><span class="label">Revenue</span><span class="value" id="hud-revenue">–</span></div>
   <div class="hud-stat"><span class="label">Costs</span><span class="value" id="hud-costs">–</span></div>
@@ -313,6 +339,23 @@
       <h2>📣 What Just Happened</h2>
       <div id="events-feed"></div>
     </div>
+  </div>
+  <div class="panel" id="ops-panel">
+    <h2><span class="ops-dot" aria-hidden="true"></span> What the team is doing</h2>
+    <p class="ops-sub" id="ops-status">Waiting for the first snapshot…</p>
+    <div id="ops-graphs">
+      <div class="ops-graph">
+        <h3>Tasks &amp; spend per agent</h3>
+        <div class="ops-legend"><span><span class="swatch" style="background:#3a7bd5"></span>Tasks</span><span><span class="swatch" style="background:#e8833a"></span>Spend (USD)</span></div>
+        <div id="ops-bars"></div>
+      </div>
+      <div class="ops-graph">
+        <h3>Activity over time</h3>
+        <div id="ops-activity"></div>
+      </div>
+    </div>
+    <h3 class="ops-feed-title">Live activity feed</h3>
+    <div id="ops-feed"></div>
   </div>
   <div class="panel" id="exp001">
     <h2>🧪 Experiment 001 — Evergreen Planners</h2>
@@ -347,7 +390,7 @@
   <button id="btn-reset" class="danger">↺ Reset</button>
   <a class="pill" href="/report">📊 Report</a>
   <span class="spacer"></span>
-  <span class="hint">Step = one real orchestrator tick · Auto runs ticks on the speed interval</span>
+  <span class="hint">Step = one real orchestrator tick · Auto runs ticks on the speed interval · Live Ops refreshes every 5s</span>
 </footer>
 <script>
 "use strict";
@@ -374,15 +417,19 @@ const fmtTime = (ts) => {
 };
 
 /* ---------------- the crew (fixed roster) ---------------- */
+/* Vector cast: one inline SVG icon per character, drawn in the
+   character's own palette colour (currentColor). No emoji, no
+   raster images, no external files. */
+const SVG_ATTRS = 'viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 const ROSTER = [
-  { name: "Scout",   emoji: "🔭", role: "Discovery",   agentType: "discovery",  c1: "#e0edfb", ink: "#3a7bd5" },
-  { name: "Analyst", emoji: "🔬", role: "Research",    agentType: "research",   c1: "#ece2f8", ink: "#8a5fc0" },
-  { name: "Builder", emoji: "🛠️", role: "Product",     agentType: null,         c1: "#fdebd3", ink: "#e8833a" },
-  { name: "Studio",  emoji: "🎨", role: "Creative",    agentType: "creative",   c1: "#fbe4ef", ink: "#d64f8b" },
-  { name: "Growth",  emoji: "📣", role: "Marketing",   agentType: "marketing",  c1: "#ddf3e5", ink: "#2e9e5b" },
-  { name: "Care",    emoji: "💬", role: "Support",     agentType: "support",    c1: "#dcf3ee", ink: "#1e9e8a" },
-  { name: "Ops",     emoji: "⚙️", role: "Operations",  agentType: "operations", c1: "#e6ebf1", ink: "#5b6b7f" },
-  { name: "Ledger",  emoji: "📒", role: "Finance",     agentType: null,         c1: "#faf0d2", ink: "#b8860b" },
+  { name: "Scout",   icon: '<svg ' + SVG_ATTRS + ' data-icon="scout"><path d="M15 49 L43 21" stroke-width="9"/><circle cx="46" cy="18" r="5"/><path d="M12 52 L8 56"/><path d="M28 38 L20 58"/><path d="M28 38 L36 58"/><path d="M28 38 L28 58"/></svg>', role: "Discovery",   agentType: "discovery",  c1: "#e0edfb", ink: "#3a7bd5" },
+  { name: "Analyst", icon: '<svg ' + SVG_ATTRS + ' data-icon="analyst"><path d="M30 6 h8"/><path d="M31 6 V18"/><path d="M37 6 V18"/><path d="M34 18 L48 32"/><path d="M48 32 l5 5"/><path d="M46 34 C40 42 36 44 28 46"/><path d="M14 48 h32"/><path d="M30 48 V58"/><path d="M14 58 h36"/></svg>', role: "Research",    agentType: "research",   c1: "#ece2f8", ink: "#8a5fc0" },
+  { name: "Builder", icon: '<svg ' + SVG_ATTRS + ' data-icon="builder"><g transform="rotate(-45 40 18)"><rect x="28" y="12" width="24" height="10" rx="2"/></g><path d="M40 22 L22 46" stroke-width="5"/><path d="M44 50 L54 36" stroke-width="5"/><path d="M52 26 a8 8 0 1 0 8 8"/></svg>', role: "Product",     agentType: null,         c1: "#fdebd3", ink: "#e8833a" },
+  { name: "Studio",  icon: '<svg ' + SVG_ATTRS + ' data-icon="studio"><ellipse cx="32" cy="34" rx="22" ry="17"/><circle cx="22" cy="28" r="2.5" fill="currentColor" stroke="none"/><circle cx="32" cy="24" r="2.5" fill="currentColor" stroke="none"/><circle cx="42" cy="28" r="2.5" fill="currentColor" stroke="none"/><circle cx="42" cy="38" r="2.5" fill="currentColor" stroke="none"/><circle cx="24" cy="42" r="4"/></svg>', role: "Creative",    agentType: "creative",   c1: "#fbe4ef", ink: "#d64f8b" },
+  { name: "Growth",  icon: '<svg ' + SVG_ATTRS + ' data-icon="growth"><path d="M12 28 h8 l22 -12 v32 l-22 -12 h-8 z"/><path d="M16 38 v8 a4 4 0 0 0 8 0 v-8"/><path d="M50 22 l5 -4"/><path d="M50 32 h6"/><path d="M50 42 l5 4"/></svg>', role: "Marketing",   agentType: "marketing",  c1: "#ddf3e5", ink: "#2e9e5b" },
+  { name: "Care",    icon: '<svg ' + SVG_ATTRS + ' data-icon="care"><rect x="10" y="12" width="44" height="30" rx="9"/><path d="M22 42 L18 54 L30 42"/><circle cx="24" cy="27" r="2.5" fill="currentColor" stroke="none"/><circle cx="32" cy="27" r="2.5" fill="currentColor" stroke="none"/><circle cx="40" cy="27" r="2.5" fill="currentColor" stroke="none"/></svg>', role: "Support",     agentType: "support",    c1: "#dcf3ee", ink: "#1e9e8a" },
+  { name: "Ops",     icon: '<svg ' + SVG_ATTRS + ' data-icon="ops"><circle cx="32" cy="32" r="15"/><path d="M32 13 V18 M32 46 V51 M13 32 H18 M46 32 H51 M18.8 18.8 L22.3 22.3 M41.7 41.7 L45.2 45.2 M45.2 18.8 L41.7 22.3 M22.3 41.7 L18.8 45.2"/><circle cx="32" cy="32" r="7"/></svg>', role: "Operations",  agentType: "operations", c1: "#e6ebf1", ink: "#5b6b7f" },
+  { name: "Ledger",  icon: '<svg ' + SVG_ATTRS + ' data-icon="ledger"><path d="M32 16 C26 10 16 10 10 14 V52 C16 48 26 48 32 54 C38 48 48 48 54 52 V14 C48 10 38 10 32 16 Z"/><path d="M32 16 V54"/><path d="M16 24 h9 M16 32 h9 M39 24 h9 M39 32 h9"/></svg>', role: "Finance",     agentType: null,         c1: "#faf0d2", ink: "#b8860b" },
 ];
 // Agent types that actually execute work during a tick (see ecosystem/worker.py run_tick)
 const TICK_WORKERS = ["discovery", "research"];
@@ -402,6 +449,8 @@ const state = {
   autoTimer: null,
   tickInFlight: false,
   profitHistory: [],   // {tick, profit} for the sparkline
+  opsHistory: [],      // {tick, tasks, spend} per poll, last 30, for the activity chart
+  refreshInFlight: false,
 };
 
 /* ---------------- api ---------------- */
@@ -515,10 +564,16 @@ function render(snapshot) {
   const bizCount = (snapshot.businesses || []).length;
   if (state.prevBizCount != null && bizCount > state.prevBizCount) burstConfetti();
   state.prevBizCount = bizCount;
+  // Rolling history for the ops activity chart: one point per poll.
+  const totalTasks = (snapshot.agents || []).reduce((n, a) => n + (Number(a.tasks_completed) || 0), 0);
+  const totalSpend = (snapshot.agents || []).reduce((n, a) => n + (Number(a.cost_usd) || 0), 0);
+  state.opsHistory.push({ tick: snapshot.tick, tasks: totalTasks, spend: totalSpend });
+  if (state.opsHistory.length > 30) state.opsHistory.shift();
   renderHUD(snapshot);
   renderStations(snapshot);
   renderBusinesses(snapshot.businesses || []);
   renderEvents(snapshot.events || []);
+  renderOps(snapshot);
   renderExperiment(snapshot.experiment_001);
   drawSpark();
   pulseLive();
@@ -555,7 +610,7 @@ function renderStations(s) {
     card.className = "char-card";
     card.style.setProperty("--c1", c.c1);
     card.style.setProperty("--c-ink", c.ink);
-    let inner = '<div class="avatar"><span class="char-emoji">' + c.emoji + "</span></div>" +
+    let inner = '<div class="avatar"><span class="char-svg" style="color:' + c.ink + '">' + c.icon + "</span></div>" +
       '<div class="char-name">' + esc(c.name) + "</div><br>" +
       '<div class="char-role">' + esc(c.role) + "</div>";
 
@@ -569,10 +624,10 @@ function renderStations(s) {
       const working = state.tickInFlight && TICK_WORKERS.indexOf(c.agentType) !== -1;
       if (working) card.classList.add("working");
       if (increased) card.classList.add("flash");
-      const statusText = working ? "Working…" : (a.last_task ? a.last_task : "Standing by");
+      const statusText = working ? "Working…" : (a.last_task ? "Last did: " + a.last_task : "Standing by");
       inner += '<div class="char-status"' +
         ((a.last_task && !working) ? ' title="' + esc(a.last_task) + '"' : "") + ">" +
-        (working ? "⚡ " : "▸ ") + esc(statusText) + "</div>";
+        (working ? "» " : "▸ ") + esc(statusText) + "</div>";
       inner += '<div class="char-stats">' +
         '<div class="s"><span class="s-label">Tasks ✓</span><span class="s-value">' + fmtInt(tasks) + "</span></div>" +
         '<div class="s"><span class="s-label">Tokens</span><span class="s-value">' + fmtInt(a.tokens_used) + "</span></div>" +
@@ -659,6 +714,122 @@ function renderEvents(events) {
   feed.scrollTop = 0;
 }
 
+/* ---------------- live ops window ---------------- */
+/* Everything here is real data from GET /api/snapshot. The bar
+   chart reads snapshot.agents; the activity line reads a rolling
+   in-page history of polled snapshots (last 30 polls, ~5s each) —
+   it resets on reload, and says so when there is nothing to show. */
+function eventResult(e) {
+  const r = e.result;
+  if (r == null) return "";
+  if (typeof r === "string") return r;
+  if (typeof r === "object") {
+    if (r.winner != null) return "winner: '" + r.winner + "' (score " + r.score + ")";
+    const s = JSON.stringify(r);
+    return s.length > 140 ? s.slice(0, 140) + "…" : s;
+  }
+  return String(r);
+}
+
+function renderOps(s) {
+  const now = new Date().toLocaleTimeString("en-US", { hour12: false });
+  const events = s.events || [];
+  const agents = s.agents || [];
+  $("ops-status").textContent = "Tick " + (s.tick != null ? s.tick : "–") +
+    " · updated " + now + " · " + events.length + " event" + (events.length === 1 ? "" : "s") +
+    " · " + agents.length + " agent" + (agents.length === 1 ? "" : "s") +
+    " · history: last " + state.opsHistory.length + " polls (resets on reload)";
+  renderOpsBars(agents);
+  renderOpsActivity();
+  renderOpsFeed(events);
+}
+
+function renderOpsBars(agents) {
+  const wrap = $("ops-bars");
+  if (!agents.length) {
+    wrap.innerHTML = '<div class="empty-note">No agents registered yet.</div>';
+    return;
+  }
+  const rows = agents.slice().sort((a, b) => (Number(b.tasks_completed) || 0) - (Number(a.tasks_completed) || 0));
+  const maxTasks = Math.max.apply(null, rows.map((a) => Number(a.tasks_completed) || 0).concat([1]));
+  const maxSpend = Math.max.apply(null, rows.map((a) => Number(a.cost_usd) || 0).concat([0.0001]));
+  const W = 560, LABEL_W = 96, BAR_W = 340, ROW_H = 40, TOP = 6;
+  const H = TOP + rows.length * ROW_H + 4;
+  let svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Tasks and spend per agent">';
+  rows.forEach((a, i) => {
+    const y = TOP + i * ROW_H;
+    const tasks = Number(a.tasks_completed) || 0;
+    const spend = Number(a.cost_usd) || 0;
+    const tw = Math.max(tasks > 0 ? 3 : 0, (tasks / maxTasks) * BAR_W);
+    const sw = Math.max(spend > 0 ? 3 : 0, (spend / maxSpend) * BAR_W);
+    svg += '<text x="0" y="' + (y + 15) + '" font-size="12" font-weight="700" fill="#3d3225">' + esc(a.type || "?") + "</text>";
+    svg += '<rect x="' + LABEL_W + '" y="' + (y + 2) + '" width="' + tw.toFixed(1) + '" height="10" rx="5" fill="#3a7bd5"/>';
+    svg += '<text x="' + (LABEL_W + tw + 6) + '" y="' + (y + 11) + '" font-size="11" font-weight="700" fill="#3a7bd5">' + fmtInt(tasks) + "</text>";
+    svg += '<rect x="' + LABEL_W + '" y="' + (y + 16) + '" width="' + sw.toFixed(1) + '" height="10" rx="5" fill="#e8833a"/>';
+    svg += '<text x="' + (LABEL_W + sw + 6) + '" y="' + (y + 25) + '" font-size="11" font-weight="700" fill="#e8833a">' + fmtUSD(spend) + "</text>";
+  });
+  svg += "</svg>";
+  const totalTasks = rows.reduce((n, a) => n + (Number(a.tasks_completed) || 0), 0);
+  const note = totalTasks === 0
+    ? '<div class="empty-note">No work recorded yet — press Step and the bars will fill in.</div>' : "";
+  wrap.innerHTML = svg + note;
+}
+
+function renderOpsActivity() {
+  const wrap = $("ops-activity");
+  const h = state.opsHistory;
+  if (h.length < 2) {
+    wrap.innerHTML = '<div class="empty-note">Collecting activity… run a tick and the line will grow here (one point per poll, last 30).</div>';
+    return;
+  }
+  const vals = h.map((p) => p.tasks);
+  const max = Math.max.apply(null, vals.concat([1]));
+  const W = 560, H = 170, PL = 38, PR = 10, PT = 10, PB = 22;
+  const X = (i) => PL + (i / (h.length - 1)) * (W - PL - PR);
+  const Y = (v) => PT + (1 - v / max) * (H - PT - PB);
+  let svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Total tasks completed over the last polls">';
+  svg += '<line x1="' + PL + '" y1="' + Y(0) + '" x2="' + (W - PR) + '" y2="' + Y(0) + '" stroke="#d8cbb6" stroke-width="2"/>';
+  svg += '<text x="4" y="' + (Y(max) + 4) + '" font-size="11" font-weight="700" fill="#8a7a66">' + fmtInt(max) + "</text>";
+  svg += '<text x="4" y="' + (Y(0) + 4) + '" font-size="11" font-weight="700" fill="#8a7a66">0</text>';
+  svg += '<text x="' + PL + '" y="' + (H - 6) + '" font-size="11" font-weight="700" fill="#8a7a66">poll 1</text>';
+  svg += '<text x="' + (W - PR) + '" y="' + (H - 6) + '" font-size="11" font-weight="700" fill="#8a7a66" text-anchor="end">poll ' + h.length + "</text>";
+  svg += '<path d="M' + X(0) + " " + Y(vals[0]) + vals.map((v, i) => " L" + X(i) + " " + Y(v)).join("") +
+    " L" + X(vals.length - 1) + " " + Y(0) + " L" + X(0) + " " + Y(0) + ' Z" fill="#3a7bd522"/>';
+  svg += '<polyline points="' + vals.map((v, i) => X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ") +
+    '" fill="none" stroke="#3a7bd5" stroke-width="3" stroke-linejoin="round"/>';
+  const lx = X(vals.length - 1), ly = Y(vals[vals.length - 1]);
+  svg += '<circle cx="' + lx + '" cy="' + ly + '" r="5" fill="#3a7bd5" stroke="#fff" stroke-width="2"/>';
+  svg += "</svg>";
+  const note = vals[vals.length - 1] === 0
+    ? '<div class="empty-note">No tasks completed yet — press Step.</div>' : "";
+  wrap.innerHTML = svg + note;
+}
+
+function renderOpsFeed(events) {
+  const feed = $("ops-feed");
+  feed.innerHTML = "";
+  let shown = 0;
+  for (const e of events) {
+    if (shown >= 30) break;
+    const row = document.createElement("div");
+    row.className = "ops-row";
+    const color = ACTOR_COLORS[e.actor] || ACTOR_COLORS.system;
+    const ids = [e.business_id, e.task_id].filter(Boolean).join(" · ");
+    const result = eventResult(e);
+    row.innerHTML = '<div class="ops-top">' +
+      '<span class="ops-time">' + esc(fmtTime(e.ts)) + "</span>" +
+      '<span class="ops-actor" style="background:' + esc(color) + '">' + esc(e.actor || "system") + "</span>" +
+      '<span class="ops-event">' + esc(e.event || "") + "</span>" +
+      (ids ? '<span class="ops-ids">' + esc(ids) + "</span>" : "") +
+      "</div>" +
+      (result ? '<div class="ops-result">' + esc(result) + "</div>" : "");
+    feed.appendChild(row);
+    shown++;
+  }
+  if (!shown) feed.innerHTML = '<div class="empty-note">Nothing yet — run a tick and the team\u2019s work will show up here.</div>';
+  feed.scrollTop = 0;
+}
+
 function renderExperiment(e) {
   const panel = $("exp001");
   if (!e) { panel.classList.add("hidden"); return; }
@@ -699,12 +870,16 @@ function renderExperiment(e) {
 
 /* ---------------- actions ---------------- */
 async function refresh() {
+  if (state.refreshInFlight) return;
+  state.refreshInFlight = true;
   try {
     const s = await api("/api/snapshot");
     hideError();
     render(s);
   } catch (err) {
     showError(err.message);
+  } finally {
+    state.refreshInFlight = false;
   }
 }
 
@@ -735,6 +910,7 @@ async function doReset() {
     state.prevTasks = {};
     state.prevBizCount = null;
     state.profitHistory = [];
+    state.opsHistory = [];
     render(res.snapshot || res);
   } catch (err) {
     showError(err.message);
@@ -780,6 +956,10 @@ addEventListener("resize", () => { if (confettiPieces.length) { $("confetti").wi
 
 updateButtons();
 refresh();
+// Live Ops polling: the ops window re-reads /api/snapshot every 5s
+// so the feed and graphs move while ticks run elsewhere (Auto, the
+// worker, another tab). Skipped while the tab is hidden.
+setInterval(() => { if (!document.hidden) refresh(); }, 5000);
 </script>
 </body>
 </html>

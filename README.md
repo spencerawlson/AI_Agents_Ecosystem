@@ -137,11 +137,12 @@ python launch.py worker                   # headless agent loop (road2cissp grow
 python launch.py all                      # dashboard + worker together
 ```
 
-Open **http://0.0.0.0:8000/game** for the live game view: agent stations,
-event feed, portfolio HUD, speed controls (1×/2×/4×), pause, and reset —
-every tick runs the real orchestrator, agents, ledger, and state machine
-via the dashboard's JSON API (`/api/snapshot`, `/api/tick`, `/api/reset`).
-No simulation, no mocks.
+Open **http://0.0.0.0:8000/ops** for the Ecosystem Tycoon — Live Ops view
+(`/game` still works — same page under its old address): the vector crew,
+the live activity feed and graphs, event feed, portfolio HUD, speed
+controls (1×/2×/4×), pause, and reset — every tick runs the real
+orchestrator, agents, ledger, and state machine via the dashboard's JSON
+API (`/api/snapshot`, `/api/tick`, `/api/reset`). No simulation, no mocks.
 
 `launch.py` commands: `dashboard` (default), `worker`, `all`, `initdb`.
 Worker flags go after `--`: `python launch.py worker -- --ticks 5 --interval 30`.

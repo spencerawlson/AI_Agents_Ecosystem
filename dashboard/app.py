@@ -224,7 +224,7 @@ def create_app(
 <h1>Portfolio</h1>
 <p>Businesses: {len(businesses)} | Revenue: ${total_revenue:,.2f} | Net profit: ${total_profit:,.2f}</p>
 <table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/api/attribution">📊 Attribution</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/api/attribution">📊 Attribution</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/ops">Ecosystem Tycoon — Live Ops</a></p>
 </body></html>"""
 
     @app.get("/businesses", response_class=HTMLResponse)
@@ -416,7 +416,7 @@ nothing in them was published.</p>
 <p>{", ".join(f"${w:,.2f}" for w in snapshot["weekly_revenue_usd"])}</p>
 <p><a href="/">Back</a></p></body></html>"""
 
-    # -- Game API (powers the /game live view) -------------------------------
+    # -- Live Ops API (powers the /ops live view; /game is the old address) ---
     # All state transitions go through the real runtime components; these
     # endpoints only serialize what the orchestrator/ledger/audit produced.
     from fastapi.responses import JSONResponse, FileResponse
@@ -428,13 +428,14 @@ nothing in them was published.</p>
                   name="static")
 
     @app.get("/game", response_class=HTMLResponse)
+    @app.get("/ops", response_class=HTMLResponse)
     def game_view():
-        """Game-style live view of the local runtime."""
+        """Ecosystem Tycoon live-ops view of the local runtime."""
         page = static_dir / "game.html"
         if page.exists():
             return FileResponse(str(page), media_type="text/html")
         return HTMLResponse(
-            "<html><body><h1>Game view not built yet</h1>"
+            "<html><body><h1>Live Ops view not built yet</h1>"
             "<p><a href='/'>Back</a></p></body></html>", status_code=503)
 
     game = {
@@ -659,7 +660,7 @@ th {{ background: #f0f0f0; }}
 <tr><th>Name</th><th>Type</th><th>Status</th><th>Revenue</th><th>Costs</th>
 <th>Net profit</th></tr>{biz_rows}</table></div>
 {exp_block}
-<p><a href="/">Back to portfolio</a> | <a href="/reports">📄 Reports</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/">Back to portfolio</a> | <a href="/reports">📄 Reports</a> | <a href="/ops">Ecosystem Tycoon — Live Ops</a></p>
 </body></html>"""
 
     @app.post("/api/tick")
