@@ -29,6 +29,7 @@ CLI:
     python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
     python ecosystem/road2cissp_growth.py outcome <slug> --worked "r/cissp answers drove 60 visits"
     python ecosystem/road2cissp_growth.py seo [--count 2]
+    python ecosystem/road2cissp_growth.py listen [--limit 5]
     python ecosystem/road2cissp_growth.py record-revenue --amount 190 --note "10 subs, Oct"
     python ecosystem/road2cissp_growth.py record-cost --amount 12 --label "Domain renewal"
     python ecosystem/road2cissp_growth.py pnl
@@ -111,7 +112,20 @@ BUDGETS = {  # (usd, tokens) hard caps per agent task
     "content": (2.0, 20000),
     "seo_keywords": (1.0, 4000),
     "seo_article": (3.0, 24000),
+    "community": (2.0, 20000),
 }
+
+# Keywords the listener searches for, in priority order. The query
+# budget (10 calls per run) interleaves subreddits and keywords, so a
+# run covers every subreddit for the first two keywords; widening the
+# set is a one-line change here.
+LISTEN_KEYWORDS = [
+    "cissp study plan",
+    "how to pass cissp",
+    "cissp practice questions",
+    "security+ study guide",
+    "free cybersecurity labs",
+]
 
 # Article seeds for the seo subcommand, Security+ first (the wedge
 # track), then the CISSP capstone terms.
@@ -622,6 +636,149 @@ def run_seo(rt, state_path: Path | None = None, reports_root: Path | None = None
     return summary
 
 
+# -- community listening -----------------------------------------------------
+
+def _render_community_draft(thread: dict, reply: dict) -> str:
+    return (
+        f"<!-- DRAFT REPLY — not posted. Thread: {thread.get('url', '')} -->\n"
+        f"---\n"
+        f"thread: {thread.get('url', '')}\n"
+        f"venue: {thread.get('venue', '')}\n"
+        f"title: {thread.get('title', '')}\n"
+        f"intent: {thread.get('intent_score', '')}/100 "
+        f"({thread.get('intent', '')})\n"
+        f"reasons: {'; '.join(thread.get('reasons', []))}\n"
+        f"---\n\n{reply.get('text', '')}\n"
+    )
+
+
+def run_listen(rt, state_path: Path | None = None,
+               reports_root: Path | None = None,
+               now: datetime | None = None, limit: int = 5,
+               llm_enabled: bool | None = None) -> dict:
+    """One community-listening run: search Reddit for live threads about
+    the business's keywords, score them, draft replies to the best
+    ones. Drafts only — nothing is posted, ever. The search itself
+    needs no LLM; drafting does. Returns a summary dict; never raises
+    for a source failure (an unavailable source is reported, not
+    papered over)."""
+    from core.community_listening import REPLY_THRESHOLD, listen_reddit
+    from core.llm import LLMGateway
+    from dashboard.reports import reports_dir
+
+    now = now or datetime.now(timezone.utc)
+    state_path = state_path or default_state_path()
+    reports_root = reports_root or reports_dir()
+    state = load_state(state_path)
+    biz_id = _business_id(rt)
+    llm_on = LLMGateway.enabled() if llm_enabled is None else llm_enabled
+    summary: dict = {"ran": [], "errors": [], "spend_usd": 0.0,
+                     "drafted": [], "dropped": [], "sources": {},
+                     "report": None}
+    subreddits = [c for c in SITE_PROFILE["communities"]
+                  if c.startswith("r/")]
+    result = listen_reddit(subreddits, LISTEN_KEYWORDS, now=now)
+    summary["sources"] = result["sources"]
+    reddit = result["sources"]["reddit"]
+    if reddit["status"] != "ok":
+        summary["errors"].append(f"reddit: {reddit['reason']}")
+    summary["ran"].append(
+        f"reddit: {reddit.get('queries', 0)} searches, "
+        f"{reddit.get('raw_found', 0)} threads found, "
+        f"{len(result['threads'])} kept after filtering")
+    for source in ("x", "threads"):
+        summary["ran"].append(
+            f"{source}: unavailable — {result['sources'][source]['reason']}")
+
+    store = state.setdefault("community_threads", {})
+    for thread in result["threads"]:
+        store.setdefault(thread["id"], {**thread, "status": "found"})
+    candidates = [t for t in result["threads"]
+                  if t["intent_score"] >= REPLY_THRESHOLD
+                  and store[t["id"]]["status"] == "found"][: max(1, limit)]
+    summary["ran"].append(
+        f"{len(candidates)} threads worth a reply "
+        f"(intent >= {REPLY_THRESHOLD})")
+
+    if candidates and not llm_on:
+        summary["ran"].append(
+            "drafting skipped: needs LLM mode (set an API key); "
+            "threads are recorded as found")
+    elif candidates:
+        facts = [SITE_PROFILE["what"], SITE_PROFILE["pricing"],
+                 *SITE_PROFILE["features"]]
+        run = _dispatch(
+            rt, biz_id, "creative", "community_replies",
+            {"threads": candidates, "profile": SITE_PROFILE,
+             "site_url": SITE_URL, "facts": facts},
+            "community",
+            ["reply drafts stored as creative assets",
+             "nothing posted"])
+        if run.cost_usd:
+            summary["spend_usd"] += run.cost_usd
+            rt.ledger.record(business_id=biz_id, kind="ai_spend",
+                             amount_usd=-run.cost_usd,
+                             description="road2cissp community listening")
+        if run.status != TaskStatus.COMPLETED:
+            summary["errors"].append(f"drafting: {run.error}")
+        else:
+            drafts_root = reports_root / "community_drafts"
+            for reply in run.output.get("replies", []):
+                thread = store[reply["thread_id"]]
+                folder = drafts_root
+                folder.mkdir(parents=True, exist_ok=True)
+                path = folder / f"{reply['thread_id']}.md"
+                path.write_text(
+                    _render_community_draft(thread, reply), encoding="utf-8")
+                thread["status"] = "drafted"
+                thread["draft_path"] = str(path)
+                thread["drafted_at"] = now.isoformat()
+                summary["drafted"].append(reply["thread_id"])
+            for drop in run.output.get("dropped", []):
+                thread = store[drop["thread_id"]]
+                thread["status"] = "dropped"
+                thread["drop_errors"] = drop["errors"]
+                summary["dropped"].append(
+                    f"{drop['thread_id']}: {'; '.join(drop['errors'])}")
+            summary["ran"].append(
+                f"drafted {len(summary['drafted'])} replies, "
+                f"dropped {len(summary['dropped'])} by the 90/10 gate")
+
+    state["community_last_listen"] = {
+        "at": now.isoformat(), "sources": summary["sources"],
+        "found": len(result["threads"]), "drafted": len(summary["drafted"])}
+    state["spend_usd"] = round(
+        state["spend_usd"] + summary["spend_usd"], 6)
+    save_state(state_path, state)
+
+    path = reports_root / f"community_{now:%Y%m%d}.md"
+    lines = [f"# Road to CISSP — community listening ({now:%Y-%m-%d})", "",
+             "> **NOTHING WAS POSTED.** Every reply below is a draft "
+             "waiting for the owner's review — post it by hand, then "
+             "mark it done.", "",
+             "## Sources", ""]
+    for name, info in summary["sources"].items():
+        lines.append(f"- **{name}**: {info['status']}"
+                     + (f" — {info['reason']}" if info.get("reason") else ""))
+    lines += ["", "## Found", ""]
+    for thread in result["threads"][:10]:
+        lines.append(f"- [{thread['intent_score']}/100 {thread['intent']}] "
+                     f"{thread['venue']}: {thread['title']} "
+                     f"({thread['url']}) — {'; '.join(thread['reasons'])}")
+    if not result["threads"]:
+        lines.append("- No threads kept after filtering.")
+    lines += ["", "## Drafts", ""]
+    lines += [f"- {tid}" for tid in summary["drafted"]] or ["- None."]
+    if summary["dropped"]:
+        lines += ["", "## Dropped by the 90/10 gate", ""]
+        lines += [f"- {d}" for d in summary["dropped"]]
+    lines += ["", f"Real AI spend this run: ${summary['spend_usd']:.4f}"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    summary["report"] = str(path)
+    return summary
+
+
 def _cell(v) -> str:
     return str(v if v is not None else "—").replace("|", "/").replace("\n", " ")
 
@@ -761,6 +918,13 @@ def main(argv=None) -> int:
     p_s.add_argument("--word-target", type=int, default=1500)
     p_s.add_argument("--llm", dest="llm", action="store_true", default=None)
     p_s.add_argument("--no-llm", dest="llm", action="store_false")
+    p_l = sub.add_parser("listen",
+                         help="search Reddit for live threads and draft "
+                              "replies (drafts only, nothing posted)")
+    p_l.add_argument("--limit", type=int, default=5,
+                     help="max replies to draft this run")
+    p_l.add_argument("--llm", dest="llm", action="store_true", default=None)
+    p_l.add_argument("--no-llm", dest="llm", action="store_false")
     p_r = sub.add_parser("record-revenue",
                          help="book Stripe subscription revenue (owner-reported)")
     p_r.add_argument("--amount", type=float, required=True)
@@ -806,6 +970,22 @@ def main(argv=None) -> int:
             print(f"report: {summary['report']}")
         return 1 if summary["errors"] and not summary["articles"] else 0
 
+    if args.cmd == "listen":
+        from ecosystem.runtime import build_runtime
+
+        rt = build_runtime(use_llm=args.llm, approvals_persist=True)
+        summary = run_listen(rt, limit=args.limit, llm_enabled=args.llm)
+        for line in summary["ran"]:
+            print(f"ran: {line}")
+        for line in summary["errors"]:
+            print(f"error: {line}")
+        for tid in summary["drafted"]:
+            print(f"drafted: {tid}")
+        print(f"spend: ${summary['spend_usd']:.4f}")
+        if summary["report"]:
+            print(f"report: {summary['report']}")
+        return 1 if summary["errors"] and not summary["drafted"] else 0
+
     if args.cmd in ("daily-plan", "daily-plan-done", "daily-plan-skip"):
         from dashboard.reports import reports_dir
         from ecosystem import daily_plan
@@ -838,6 +1018,13 @@ def main(argv=None) -> int:
         except ValueError as exc:
             print(str(exc))
             return 1
+        if status == "done" and args.item_id.startswith("reply:"):
+            # The owner posted that reply by hand: the thread leaves
+            # the "drafted" pool so the daily plan never lists it again.
+            thread = (state.get("community_threads") or {}).get(
+                args.item_id[len("reply:"):])
+            if thread is not None:
+                thread["status"] = "done"
         save_state(path, state)
         print(f"{args.item_id}: {status} on {date}")
         return 0
@@ -864,6 +1051,14 @@ def main(argv=None) -> int:
         for job in ("audit", "keywords", "metrics", "strategy"):
             print(f"{job:9} last run {state['last_run'].get(job, 'never')}")
         print(f"seo articles drafted: {len(state.get('seo_articles', {}))}")
+        community = state.get("community_threads", {})
+        if community:
+            by_status: dict[str, int] = {}
+            for t in community.values():
+                by_status[t.get("status", "found")] = \
+                    by_status.get(t.get("status", "found"), 0) + 1
+            print("community threads: " + ", ".join(
+                f"{n} {s}" for s, n in sorted(by_status.items())))
         for slug, e in state["experiments"].items():
             print(f"- [{e['status']}] {slug}: {e['name']}"
                   + (f" (ends {e['ends_at'][:10]})" if e.get("ends_at") else ""))

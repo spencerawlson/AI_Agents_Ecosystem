@@ -197,6 +197,8 @@ class CreativeAgent(BaseAgent):
             }
         if action == "content_pieces":
             return self._content_pieces(task)
+        if action == "community_replies":
+            return self._community_replies(task)
         if action == "seo_article":
             return self._seo_article(task)
         raise ValueError(f"unknown action: {action}")
@@ -302,6 +304,103 @@ class CreativeAgent(BaseAgent):
                 f"{len(quality['warnings'])} warnings; stored as creative "
                 f"asset {asset.id}; nothing published"),
         }
+
+    def _community_replies(self, task: Task) -> dict:
+        """Draft replies to real threads the listener found. Drafts only —
+        each valid reply is stored as a creative asset; nothing is
+        posted. Every draft must pass the deterministic 90/10 gate in
+        core.community_listening (help first, site mentioned once at
+        the end, disclosed as the author's own); failures are dropped
+        and reported, never posted."""
+        from agents.marketing.agent import _compact, clean_llm_text
+        from core.community_listening import validate_reply_draft
+        from core.llm import LLMGateway
+
+        if not LLMGateway.enabled():
+            raise RuntimeError(
+                "community_replies requires LLM mode (--llm with an API key)")
+        threads = [t for t in task.inputs.get("threads", [])
+                   if isinstance(t, dict) and t.get("id") and t.get("text") is not None]
+        if not threads:
+            raise ValueError("community_replies needs at least one thread")
+        profile = task.inputs.get("profile", {})
+        site_url = str(task.inputs.get("site_url", "")).rstrip("/")
+        facts = [str(f) for f in task.inputs.get("facts", []) if f]
+        fact_list = "\n".join(f"- {f}" for f in facts) or "(no facts provided)"
+        thread_list = "\n\n".join(
+            f"{n}. [{t.get('venue', '')}] {t.get('title', '')}\n"
+            f"   intent {t.get('intent_score', '')}/100 — "
+            f"{'; '.join(t.get('reasons', []))}\n"
+            f"   {str(t.get('text', ''))[:800]}"
+            for n, t in enumerate(threads, 1))
+        prompt = (
+            "You answer real questions in online communities for this "
+            "website. Answer each thread below with a genuinely helpful "
+            "reply.\n\n"
+            f"SITE PROFILE (facts — never invent features, prices or stats):\n"
+            f"{_compact(profile, 2000)}\n\n"
+            f"SITE FACTS:\n{fact_list}\n\n"
+            f"THREADS TO ANSWER:\n{thread_list}\n\n"
+            "Rules, all hard: answer the actual question first, in your "
+            "own expert voice — at least 200 characters of real help "
+            "before any mention of the site. Mention the site AT MOST "
+            "once, only in the final sentence, only if it genuinely "
+            "helps this person, and disclose it as something you built "
+            "(\"I built\"). At most one link (the site URL). No hype, no "
+            "fake testimonials, no promo language (no discount, buy now, "
+            "guaranteed, 100% pass). Each reply 400–1200 characters.\n\n"
+            "Return ONLY a JSON object {\"replies\": [...]} with one entry "
+            "per thread, in the same order: {\"thread_id\", \"text\"}."
+        )
+        rework = task.inputs.get("_rework_feedback")
+        if rework:
+            prompt += f"\n\nYour previous attempt was rejected by review: {rework}"
+        result = LLMGateway().complete(
+            prompt, tier="cheap",
+            system="You are a precise, helpful community member. JSON only.",
+            json_mode=True)
+        self.record_usage(task, tokens=result["input_tokens"] + result["output_tokens"],
+                          cost_usd=result["cost_usd"])
+        payload = clean_llm_text(result["json"] or {})
+        raw = payload.get("replies", []) if isinstance(payload, dict) else payload
+        by_id = {t["id"]: t for t in threads}
+        business_id = task.business_id or "unknown"
+        replies, dropped = [], []
+        for entry in raw if isinstance(raw, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            thread = by_id.get(str(entry.get("thread_id", "")))
+            if thread is None or not entry.get("text"):
+                continue
+            errors = validate_reply_draft(str(entry["text"]), site_url)
+            if errors:
+                dropped.append({"thread_id": thread["id"],
+                                "errors": errors})
+                continue
+            asset = self.create(
+                business_id, "community",
+                f"[{thread.get('venue', '')}] {thread.get('title', '')}"[:80],
+                str(entry["text"]))
+            replies.append({"thread_id": thread["id"],
+                            "venue": thread.get("venue", ""),
+                            "url": thread.get("url", ""),
+                            "title": thread.get("title", ""),
+                            "text": str(entry["text"]),
+                            "asset_id": asset.id})
+        if not replies:
+            raise ValueError("LLM returned no usable reply drafts")
+        out: dict = {
+            "replies": replies,
+            "evidence": (f"{len(replies)} reply drafts stored as creative "
+                         f"assets; {len(dropped)} dropped by the 90/10 gate; "
+                         f"nothing posted"),
+        }
+        # An empty top-level field fails the orchestrator's peer review
+        # ("empty or placeholder"), so "dropped" is only present when
+        # something was actually dropped.
+        if dropped:
+            out["dropped"] = dropped
+        return out
 
     # What each content type must contain, for the prompt and validation.
     CONTENT_SPECS = {

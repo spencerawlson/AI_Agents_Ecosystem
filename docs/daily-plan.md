@@ -20,13 +20,16 @@ from the portfolio page).
    measurement cap everything else.
 2. **Owner decisions waiting** — approve/reject proposed experiments,
    record outcomes for finished ones.
-3. **Jobs due today** — audit, keywords, metrics, strategy, in run
+3. **Drafted community replies** — a thread goes stale in days, so a
+   reply that is already drafted outranks jobs that can run any day.
+   Marking one done means you posted it by hand.
+4. **Jobs due today** — audit, keywords, metrics, strategy, in run
    order, only when their cadence says they are due (with the same
    6-hour back-off after a failed attempt as the weekly cycle).
-4. **Drafts for active experiments** that still need content.
-5. **This week's strategy tasks**, then P1 site fixes.
-6. **Next gated SEO article** — one, quality-gated, draft only.
-7. **Measurement gap** — if no traffic numbers exist at all.
+5. **Drafts for active experiments** that still need content.
+6. **This week's strategy tasks**, then P1 site fixes.
+7. **Next gated SEO article** — one, quality-gated, draft only.
+8. **Measurement gap** — if no traffic numbers exist at all.
 
 At most 10 items. Anything beyond the cap stays in the weekly report;
 the count is shown as "…and N more".
@@ -49,9 +52,12 @@ the count is shown as "…and N more".
   again, because marking a job done without running it would be a
   lie — run it, and its `last_run` moves.
 - **Item ids are stable for the day** (`approve:<slug>`,
-  `outcome:<slug>`, `job:audit`, `fix:<slug>`, `draft:<slug>`,
-  `task:<n>`, `seo:next-article`, `metrics:record-first`), so you can
-  mark one done from the CLI without re-reading the list.
+  `outcome:<slug>`, `reply:<thread-id>`, `job:audit`, `fix:<slug>`,
+  `draft:<slug>`, `task:<n>`, `seo:next-article`,
+  `metrics:record-first`), so you can mark one done from the CLI
+  without re-reading the list. Marking a `reply:<thread-id>` done
+  also flips that thread to "done" in the listening state, so the
+  plan never lists it again.
 - **Deterministic.** The builder (`ecosystem/daily_plan.py`) reads
   only the growth state dict and the clock: no LLM, no network. The
   same state + date always builds the same plan.
