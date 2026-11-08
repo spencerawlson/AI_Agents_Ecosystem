@@ -54,9 +54,20 @@ By hand:
 python ecosystem/road2cissp_growth.py run                   # run whatever is due
 python ecosystem/road2cissp_growth.py run --force all       # rerun every job now
 python ecosystem/road2cissp_growth.py status                # experiments + last runs
+python ecosystem/road2cissp_growth.py daily-plan            # today's ordered moves (builds the plan, runs nothing)
+python ecosystem/road2cissp_growth.py daily-plan-done fix:prerender-routes
 python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
 python ecosystem/road2cissp_growth.py outcome reddit-answers --worked "62 referral visits, 9 sign-ins"
 ```
+
+The daily plan ([daily-plan.md](daily-plan.md)) is the weekly cycle
+turned into a morning list: P0 fixes and critical audit findings
+first, then owner decisions (approve experiments, record outcomes),
+then jobs due today, drafts, this week's tasks, one gated SEO article,
+and the measurement gap if there is one. At most 10 items; unfinished
+items carry over to tomorrow. Building it dispatches nothing, spends
+nothing, publishes nothing — each item names the command that does
+the work. Also served by the dashboard at `GET /api/daily-plan`.
 
 Outputs:
 - `reports/road2cissp_growth_<date>.md`: the weekly report, also shown on the

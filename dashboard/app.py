@@ -224,7 +224,7 @@ def create_app(
 <h1>Portfolio</h1>
 <p>Businesses: {len(businesses)} | Revenue: ${total_revenue:,.2f} | Net profit: ${total_profit:,.2f}</p>
 <table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
 </body></html>"""
 
     @app.get("/businesses", response_class=HTMLResponse)
@@ -534,6 +534,33 @@ nothing in them was published.</p>
                 "pace_pct": exp["pace_pct"],
             } if exp else None,
         })
+
+    @app.get("/api/daily-plan")
+    def api_daily_plan():
+        """Today's ordered marketing moves for Road to CISSP, as JSON.
+
+        Pure read + build from the growth state file — no agent is
+        dispatched, no money is spent, nothing is published. The state
+        file is the default growth state unless DAILY_PLAN_STATE_PATH
+        points elsewhere (tests use that to point at a tmp file).
+        Building the plan here does not persist it; the CLI
+        (``daily-plan``) records it so tomorrow can carry items over.
+        """
+        from ecosystem import daily_plan
+        from ecosystem.road2cissp_growth import (
+            CADENCE, RETRY_AFTER, default_state_path, load_state,
+        )
+
+        state_path = os.environ.get("DAILY_PLAN_STATE_PATH")
+        state = load_state(Path(state_path) if state_path
+                           else default_state_path())
+        from datetime import datetime, timezone
+
+        plan = daily_plan.build_daily_plan(
+            business_name="Road to CISSP", site_url="https://road2cissp.com",
+            state=state, now=datetime.now(timezone.utc),
+            cadence=CADENCE, retry_after=RETRY_AFTER)
+        return JSONResponse(plan)
 
     @app.get("/report", response_class=HTMLResponse)
     def report_page():

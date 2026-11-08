@@ -23,6 +23,9 @@ reports/road2cissp_drafts/; the weekly report is reports/road2cissp_growth_<date
 CLI:
     python ecosystem/road2cissp_growth.py run [--force all|audit,strategy,...]
     python ecosystem/road2cissp_growth.py status
+    python ecosystem/road2cissp_growth.py daily-plan [--date YYYY-MM-DD]
+    python ecosystem/road2cissp_growth.py daily-plan-done <item-id>
+    python ecosystem/road2cissp_growth.py daily-plan-skip <item-id>
     python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
     python ecosystem/road2cissp_growth.py outcome <slug> --worked "r/cissp answers drove 60 visits"
     python ecosystem/road2cissp_growth.py seo [--count 2]
@@ -388,6 +391,32 @@ def render_draft(p: dict, exp: dict) -> str:
             f"({exp.get('slug')}) -->\n---\n{head}\n---\n\n{body}\n")
 
 
+def build_today_plan(state_path: Path | None = None,
+                     now: datetime | None = None) -> tuple[dict, dict]:
+    """Build today's daily plan from the growth state. Pure read + build:
+    no agent is dispatched, no money is spent, nothing is published.
+    Returns (plan, state). Callers persist with daily_plan.record_plan."""
+    from ecosystem import daily_plan
+
+    now = now or datetime.now(timezone.utc)
+    state_path = state_path or default_state_path()
+    state = load_state(state_path)
+    plan = daily_plan.build_daily_plan(
+        business_name=BUSINESS_NAME, site_url=SITE_URL, state=state,
+        now=now, cadence=CADENCE, retry_after=RETRY_AFTER)
+    return plan, state
+
+
+def _parse_plan_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        day = datetime.fromisoformat(value).date()
+    except ValueError:
+        raise SystemExit(f"bad --date {value!r}: use YYYY-MM-DD")
+    return datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
+
+
 # -- cycle -----------------------------------------------------------------
 
 def report_name(now: datetime) -> str:
@@ -702,6 +731,21 @@ def main(argv=None) -> int:
     p_run.add_argument("--llm", dest="llm", action="store_true", default=None)
     p_run.add_argument("--no-llm", dest="llm", action="store_false")
     sub.add_parser("status", help="show experiments and last runs")
+    p_dp = sub.add_parser("daily-plan",
+                          help="today's ordered moves (builds the plan, "
+                               "runs nothing)")
+    p_dp.add_argument("--date", default=None,
+                      help="plan date YYYY-MM-DD (default: today, UTC)")
+    p_dpd = sub.add_parser("daily-plan-done",
+                           help="mark one item on a daily plan done")
+    p_dpd.add_argument("item_id")
+    p_dpd.add_argument("--date", default=None,
+                       help="plan date YYYY-MM-DD (default: today, UTC)")
+    p_dps = sub.add_parser("daily-plan-skip",
+                           help="mark one item on a daily plan skipped")
+    p_dps.add_argument("item_id")
+    p_dps.add_argument("--date", default=None,
+                       help="plan date YYYY-MM-DD (default: today, UTC)")
     p_m = sub.add_parser("record-metrics", help="record numbers by hand")
     p_m.add_argument("--visitors", type=int)
     p_m.add_argument("--pageviews", type=int)
@@ -761,6 +805,42 @@ def main(argv=None) -> int:
         if summary["report"]:
             print(f"report: {summary['report']}")
         return 1 if summary["errors"] and not summary["articles"] else 0
+
+    if args.cmd in ("daily-plan", "daily-plan-done", "daily-plan-skip"):
+        from dashboard.reports import reports_dir
+        from ecosystem import daily_plan
+
+        now = _parse_plan_date(args.date)
+        date = (now or datetime.now(timezone.utc)).date().isoformat()
+        if args.cmd == "daily-plan":
+            plan, state = build_today_plan(now=now)
+            daily_plan.record_plan(state, plan)
+            save_state(path, state)
+            report_path = reports_dir() / daily_plan.report_name(plan["date"])
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(daily_plan.render_markdown(plan),
+                                   encoding="utf-8")
+            print(daily_plan.render_text(plan), end="")
+            print(f"report: {report_path}")
+            return 0
+        state = load_state(path)
+        try:
+            status = "done" if args.cmd == "daily-plan-done" else "skipped"
+            # The item's source_key (from the plan for that date) is
+            # what makes "done" sticky until its source changes.
+            plan_for_date, _ = build_today_plan(now=now)
+            source_key = next(
+                (i.get("source_key") for i in plan_for_date["items"]
+                 if i["id"] == args.item_id),
+                None)
+            daily_plan.mark_item(state, date, args.item_id, status,
+                                 source_key=source_key)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        save_state(path, state)
+        print(f"{args.item_id}: {status} on {date}")
+        return 0
 
     if args.cmd in ("record-revenue", "record-cost", "pnl"):
         from ecosystem.runtime import build_runtime
