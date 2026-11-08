@@ -35,6 +35,7 @@ CLI:
     python ecosystem/road2cissp_growth.py attribution [--model linear]
     python ecosystem/road2cissp_growth.py video --script script.json [--audio voiceover.mp3]
     python ecosystem/road2cissp_growth.py video --from-experiment reddit-answers
+    python ecosystem/road2cissp_growth.py geo
     python ecosystem/road2cissp_growth.py record-cost --amount 12 --label "Domain renewal"
     python ecosystem/road2cissp_growth.py pnl
 
@@ -1055,6 +1056,52 @@ def run_video(rt, state_path: Path | None = None,
     return summary
 
 
+# -- GEO audit -------------------------------------------------------------
+
+def run_geo(state_path: Path | None = None,
+            reports_root: Path | None = None,
+            now: datetime | None = None) -> dict:
+    """One GEO audit of road2cissp.com: AI-crawler access, llms.txt,
+    answer-ready pages. Real HTTP, no key, no LLM, no spend. Writes
+    reports/geo_<date>.md and records the score in the state."""
+    from core.geo_audit import GeoAuditor
+    from dashboard.reports import reports_dir
+
+    now = now or datetime.now(timezone.utc)
+    state_path = state_path or default_state_path()
+    reports_root = reports_root or reports_dir()
+    state = load_state(state_path)
+    result = GeoAuditor().audit(SITE_URL)
+    state["geo"] = {"at": now.isoformat(), "score": result["score"],
+                    "findings": len(result["findings"]),
+                    "pages_checked": result["pages_checked"],
+                    "has_llms_txt": result["has_llms_txt"]}
+    save_state(state_path, state)
+    lines = [f"# Road to CISSP — GEO audit ({now:%Y-%m-%d})", "",
+             f"GEO readiness score: **{result['score']}/100** "
+             f"({result['pages_checked']} pages checked, "
+             f"{len(result['findings'])} findings)", "",
+             "AI crawlers: " + ", ".join(
+                 f"{bot}={status}"
+                 for bot, status in result["robots"].items()) if result["robots"]
+             else "AI crawlers: robots.txt unreadable", "",
+             "## Findings", ""]
+    for f in result["findings"]:
+        pages = (f" ({', '.join(f['pages'][:3])})"
+                 if f.get("pages") else "")
+        lines.append(f"- **[{f['severity']}] {f['area']}** — {f['issue']}"
+                     f"{pages} — Fix: {f['fix']}")
+    if not result["findings"]:
+        lines.append("- None. The site is ready for AI search.")
+    lines += ["", result["note"]]
+    path = reports_root / f"geo_{now:%Y%m%d}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"ran": [f"GEO score {result['score']}/100, "
+                    f"{len(result['findings'])} findings"],
+            "errors": [], "report": str(path), "geo": result}
+
+
 def _cell(v) -> str:
     return str(v if v is not None else "—").replace("|", "/").replace("\n", " ")
 
@@ -1248,6 +1295,9 @@ def main(argv=None) -> int:
                           "wide 1920x1080 (YouTube)")
     p_v.add_argument("--llm", dest="llm", action="store_true", default=None)
     p_v.add_argument("--no-llm", dest="llm", action="store_false")
+    sub.add_parser("geo",
+                   help="audit road2cissp.com for AI-search visibility "
+                        "(GEO: crawler access, llms.txt, answer-ready pages)")
     p_c = sub.add_parser("record-cost", help="book a real-world cost")
     p_c.add_argument("--amount", type=float, required=True)
     p_c.add_argument("--label", required=True)
@@ -1433,6 +1483,16 @@ def main(argv=None) -> int:
             print(f"report: {summary['report']}")
         return 1 if summary["errors"] and not summary["video"] else 0
 
+    if args.cmd == "geo":
+        summary = run_geo()
+        for line in summary["ran"]:
+            print(f"ran: {line}")
+        for line in summary["errors"]:
+            print(f"error: {line}")
+        if summary["report"]:
+            print(f"report: {summary['report']}")
+        return 0
+
     state = load_state(path)
     if args.cmd == "status":
         for job in ("audit", "keywords", "metrics", "strategy"):
@@ -1456,6 +1516,11 @@ def main(argv=None) -> int:
             for slug, v in videos.items():
                 print(f"- {slug}: {v.get('duration_s')}s, "
                       f"{v.get('status')}, {v.get('video_path')}")
+        geo = state.get("geo") or {}
+        if geo:
+            print(f"GEO score: {geo.get('score')}/100 "
+                  f"({geo.get('findings', 0)} findings, "
+                  f"{geo.get('at', '')[:10]})")
         community = state.get("community_threads", {})
         if community:
             by_status: dict[str, int] = {}
