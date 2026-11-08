@@ -138,13 +138,27 @@ def test_market_fit_wrong_language():
     assert any("hreflang" not in f["issue"] for f in result["findings"])
 
 
-def test_market_fit_no_hreflang():
+def test_market_fit_no_hreflang_is_not_a_finding():
+    # A single-language site serving its market in that language has
+    # nothing to alternate between — no hreflang is correct, not a
+    # defect. (This was a false positive: it cost road2cissp.com a
+    # low finding for being English-only.)
     page = GOOD_PAGE.replace(
         '<link rel="alternate" hreflang="en" href="https://example.com/">\n', "")
     page = page.replace(
         '<link rel="alternate" hreflang="fr" href="https://example.com/fr/">\n', "")
     result = check_market_fit(SITE, "en", fetch=_fetch(_site_mapping(page)))
-    assert any("no hreflang alternates" in f["issue"]
+    assert result["findings"] == []
+    assert result["hreflangs"] == []
+
+
+def test_market_fit_hreflang_missing_market_language():
+    # Alternates exist but none matches the market language — that
+    # IS a finding (the site has other versions, just not this one).
+    page = GOOD_PAGE.replace(
+        '<link rel="alternate" hreflang="fr" href="https://example.com/fr/">\n', "")
+    result = check_market_fit(SITE, "fr", fetch=_fetch(_site_mapping(page)))
+    assert any("hreflang alternates exist but none matches" in f["issue"]
                for f in result["findings"])
 
 

@@ -22,8 +22,9 @@ What runs (all real HTTP, no key, no LLM, no spend):
 - **GEO audit** (``core.geo_audit.GeoAuditor``) — AI-crawler access in
   robots.txt, llms.txt, answer-ready pages.
 - **Market fit** — the homepage's ``<html lang>`` against
-  ``--language``, and whether ``hreflang`` alternates exist when a
-  language is given. A mismatch is a finding, not a silent pass.
+  ``--language``, and ``hreflang`` alternates when they exist: a
+  mismatch is a finding, not a silent pass. A single-language site
+  with no alternates is not penalised for having none.
 - **Community listening** (``core.community_listening.listen_reddit``)
   — only when ``--community`` AND ``--keywords`` are both given. A
   community without keywords is recorded as the target audience and
@@ -150,20 +151,18 @@ def check_market_fit(url: str, language: str | None,
                 "fix": "Serve a version of the site in the market's "
                        "language, or pick the language the site "
                        "actually uses."})
-        if not parser.hreflangs:
-            findings.append({
-                "severity": "low", "area": "market-fit",
-                "issue": "no hreflang alternates — search engines cannot "
-                         "serve the right language version per market",
-                "fix": "Add <link rel=\"alternate\" hreflang=\"...\"> for "
-                       "each language version."})
-        elif not any(_primary_lang(h) == want for h in parser.hreflangs):
+        if parser.hreflangs and not any(
+                _primary_lang(h) == want for h in parser.hreflangs):
             findings.append({
                 "severity": "low", "area": "market-fit",
                 "issue": "hreflang alternates exist but none matches the "
                          f"market language ({language})",
                 "fix": "Add an hreflang alternate for the market's "
                        "language."})
+        # No hreflang alternates at all is NOT a finding: a
+        # single-language site serving its market in that language has
+        # nothing to alternate between. Only a site that already has
+        # alternates — and misses the market's — is flagged above.
     return {"lang": parser.lang, "hreflangs": parser.hreflangs,
             "fetched": True, "findings": findings}
 

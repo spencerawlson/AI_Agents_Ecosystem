@@ -27,8 +27,10 @@ optional — press Enter to skip). Reports land in
   on the report.
 - `--language` — the market language (`en`, `fr`, `ht`, ...). The
   homepage's `<html lang>` is checked against it, and the report
-  flags a missing or mismatched language and missing `hreflang`
-  alternates.
+  flags a missing or mismatched language. `hreflang` is only
+  flagged when alternates exist but none matches the market
+  language — a single-language site with no alternates is not
+  penalised for having none.
 - `--community` — a target subreddit (`r/cissp` or `cissp`). Recorded
   as the target audience. Listening only runs when `--keywords` is
   also given — keywords are the market's own words, never invented.
@@ -42,7 +44,8 @@ optional — press Enter to skip). Reports land in
   descriptions, thin pages, the SPA-shell finding.
 - **GEO audit** (`core/geo_audit.py`): AI-crawler access, llms.txt,
   answer-ready pages.
-- **Market fit**: homepage language + hreflang, as above.
+- **Market fit**: homepage language + hreflang (flagged only when
+  alternates exist but miss the market language).
 - **Community listening** (`core/community_listening.py`): Reddit
   search for the keywords in the community, scored 0–100, threads
   worth a reply (score ≥ 50) listed. Read-only: nothing is posted,
