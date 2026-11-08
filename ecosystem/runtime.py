@@ -248,9 +248,15 @@ def build_runtime(use_postgres: bool = False,
 
 def create_dashboard_app(rt: Runtime | None = None):
     """Build the FastAPI dashboard bound to a runtime."""
+    from core.saas import SaasConfig, SaasStore, default_saas_db_path
     from dashboard.app import create_app
 
     rt = rt or build_runtime(use_postgres=bool(os.environ.get("DATABASE_URL")))
+    # SaaS shell state lives in the shared state file when one is
+    # configured (same file as businesses/ledger/audit); without one
+    # the shell is in-memory, exactly like the rest of the runtime,
+    # so starting the dashboard never writes a file into the tree.
+    saas_db = default_saas_db_path()
     app = create_app(
         orchestrator=rt.orchestrator,
         registry=rt.businesses,
@@ -258,6 +264,8 @@ def create_dashboard_app(rt: Runtime | None = None):
         experiments=rt.experiments,
         approvals=rt.approvals,
         audit=rt.audit,
+        saas_store=SaasStore(saas_db) if saas_db else SaasStore(":memory:"),
+        saas_config=SaasConfig.from_env(),
     )
     app.state.runtime_holder = {"rt": rt}
     return app

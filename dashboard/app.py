@@ -295,6 +295,8 @@ def create_app(
     experiments: ExperimentEngine | None = None,
     approvals: ApprovalGate | None = None,
     audit: AuditLog | None = None,
+    saas_store=None,
+    saas_config=None,
 ) -> FastAPI:
     app = FastAPI(title="AI Business Ecosystem")
     state = {
@@ -324,7 +326,7 @@ def create_app(
 <h1>Portfolio</h1>
 <p>Businesses: {len(businesses)} | Revenue: ${total_revenue:,.2f} | Net profit: ${total_profit:,.2f}</p>
 <table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/api/attribution">📊 Attribution</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/ops">Ventoryn — Live Ops</a></p>
+<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/api/attribution">📊 Attribution</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/ops">Ventoryn — Live Ops</a> | <a href="/account">Ventoryn — for website owners</a></p>
 </body></html>"""
 
     @app.get("/businesses", response_class=HTMLResponse)
@@ -868,6 +870,19 @@ th {{ background: #f0f0f0; }}
 
     def _rt():
         return app.state.runtime_holder["rt"]
+
+    # -- Ventoryn SaaS shell (customer accounts, billing, credits) --------
+    # saas_store=None means an in-memory store: plain create_app() stays
+    # hermetic (tests, module import) and never creates a file. The real
+    # dashboard passes a file-backed store via create_dashboard_app().
+    from core.saas import SaasConfig, SaasStore
+    from dashboard.saas_routes import register_saas_routes
+
+    register_saas_routes(
+        app,
+        saas_store or SaasStore(":memory:"),
+        saas_config or SaasConfig.from_env(),
+    )
 
     return app
 
