@@ -99,9 +99,18 @@ def test_validate_url_accepts_https():
     assert validate_url("  http://example.com/page  ") == "http://example.com/page"
 
 
+def test_validate_url_accepts_bare_domain():
+    """A bare domain works — https:// is added when no scheme is
+    present, after trimming whitespace."""
+    assert validate_url("example.com") == "https://example.com"
+    assert validate_url("  example.com/page  ") == "https://example.com/page"
+    assert validate_url("example.com:8000") == "https://example.com:8000"
+
+
 @pytest.mark.parametrize("bad,reason", [
     ("", "empty"),
-    ("example.com", "no scheme"),
+    ("not a url", "not a domain"),
+    ("example", "single label, no dot"),
     ("ftp://example.com", "not http/https"),
     ("http://localhost:8000/ops", "localhost"),
     ("http://localhost/", "localhost"),
@@ -129,11 +138,30 @@ def test_validate_country_and_language():
 # -- Endpoint: bad input ------------------------------------------------------
 
 def test_analyze_rejects_bad_url(client):
-    for bad in ("", "example.com", "ftp://example.com",
+    for bad in ("", "not a url", "example", "ftp://example.com",
                 "http://localhost:8000/ops", "http://127.0.0.1/"):
         r = client.post("/api/analyze", json={"url": bad, "country": "ca"})
         assert r.status_code == 400, bad
         assert r.json()["detail"]
+
+
+def test_analyze_accepts_bare_domain(client):
+    """The landing box and the /ops panel both post here — a bare
+    domain starts a job, and the stored URL carries https://."""
+    client.app.state.analyze_runner = lambda url, country, language: {
+        "site_score": 90, "geo_score": 80, "fetchable": True,
+        "unavailable_reason": None,
+        "finding_counts": {"critical": 0, "high": 0, "medium": 0,
+                           "low": 0},
+        "findings": [], "report_name": "analyze_example-com_20261108.md",
+    }
+    r = client.post("/api/analyze", json={"url": "example.com",
+                                          "country": "ca"})
+    assert r.status_code == 202
+    assert r.json()["url"] == "https://example.com"
+    job = _poll_until_done(client, r.json()["job_id"])
+    assert job["status"] == "done"
+    assert job["url"] == "https://example.com"
 
 
 def test_analyze_rejects_bad_country_and_language(client):

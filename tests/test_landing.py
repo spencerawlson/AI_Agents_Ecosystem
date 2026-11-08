@@ -88,9 +88,19 @@ def test_landing_page_public():
     assert "How it works" in r.text
     # The preview reuses the analyze pipeline in-process.
     assert 'fetch("/api/analyze"' in r.text
-    # The first site is named as the proof case — with no results.
-    assert "Road to CISSP" in r.text
-    assert "No results are claimed here yet" in r.text
+    # No site is named as a proof case — the page stands on the
+    # promise alone.
+    assert "Road to CISSP" not in r.text
+    assert "road2cissp" not in r.text.lower()
+    # Visual design: gradient hero, styled URL card, feature strip,
+    # how-it-works grid, pricing card.
+    assert "class='hero'" in r.text
+    assert "class='card url-card'" in r.text
+    assert "class='features'" in r.text
+    assert "class='card price-card'" in r.text
+    # A bare domain is enough — the box says so.
+    assert "yourwebsite.com" in r.text
+    assert "no https:// needed" in r.text
     # No invented traction.
     assert "testimonial" not in r.text.lower()
     assert "trusted by" not in r.text.lower()
@@ -569,6 +579,21 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
             client.get("/api/snapshot").json()["businesses"]] == \
         ["ada.example.com"]
     assert "ada.example.com" in client.get("/portfolio").text
+
+
+def test_bare_domain_carried_through_to_site_add():
+    """A visitor who types a bare domain gets the same funnel: the
+    site is added with https://, never retyped."""
+    app, store = _app_with()
+    client, account = _customer_client(app, store, CUSTOMER_A)
+    store.set_subscription(account["id"], "active", "sub_ada")
+    r = client.post("/account/sites",
+                    data={"url": "ada.example.com",
+                          "country": "ca", "language": "en"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert store.list_sites(account["id"])[0]["url"] == \
+        "https://ada.example.com"
 
 
 # ---------------------------------------------------------------------------

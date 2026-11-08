@@ -409,7 +409,7 @@
       <div class="analyze-row">
         <label class="analyze-field analyze-url">
           <span class="analyze-label">Website URL</span>
-          <input id="analyze-url" type="url" inputmode="url" placeholder="https://example.com" autocomplete="off" required>
+          <input id="analyze-url" type="text" inputmode="url" placeholder="yourwebsite.com" autocomplete="off" required>
         </label>
         <label class="analyze-field analyze-country">
           <span class="analyze-label">Market country</span>
@@ -1257,7 +1257,10 @@ async function pollAnalyzeJob() {
 }
 async function submitAnalyze(ev) {
   ev.preventDefault();
-  const url = $("analyze-url").value.trim();
+  let url = $("analyze-url").value.trim();
+  // A bare domain works — the server adds https://, and so do we,
+  // so the URL shown is the canonical one.
+  if (url && url.indexOf("://") === -1) url = "https://" + url;
   const country = $("analyze-country").value.trim().toLowerCase();
   const language = $("analyze-language").value.trim().toLowerCase();
   $("analyze-result").hidden = true;

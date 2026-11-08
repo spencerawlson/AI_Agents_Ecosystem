@@ -40,6 +40,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -185,8 +186,18 @@ def default_saas_db_path() -> Path | None:
 # ---------------------------------------------------------------------------
 # Site URL validation — same rule as analyze (http/https only), plus the
 # localhost / private-address rejection the shell needs for customer
-# sites. A URL that fails here is never fetched and never stored.
+# sites. A bare domain works: https:// is added when no scheme is
+# present. A URL that fails here is never fetched and never stored.
 # ---------------------------------------------------------------------------
+
+def _normalize_scheme(raw: str) -> str:
+    """A bare domain works: prepend https:// when no scheme is
+    present, after trimming whitespace."""
+    url = raw.strip()
+    if "://" not in url:
+        url = "https://" + url
+    return url
+
 
 def validate_site_url(value: str) -> str:
     """Normalize a customer website URL or raise ValueError with a
@@ -194,12 +205,12 @@ def validate_site_url(value: str) -> str:
     schemes, and localhost / private / link-local hosts."""
     raw = (value or "").strip()
     if not raw:
-        raise ValueError("Enter a website URL, e.g. https://example.com")
+        raise ValueError("Enter a website URL, e.g. example.com")
+    raw = _normalize_scheme(raw)
     parsed = urlparse(raw)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError(
-            "That is not a website URL — use a full address starting "
-            "with https://, e.g. https://example.com")
+            "That is not a website URL — try a domain like example.com")
     host = (parsed.hostname or "").lower()
     if host in ("localhost", ""):
         raise ValueError("Local addresses are not websites — use a public URL")
@@ -207,6 +218,16 @@ def validate_site_url(value: str) -> str:
         ip = ipaddress.ip_address(host)
     except ValueError:
         ip = None
+    if ip is None:
+        # A domain name: letters, digits, hyphens and dots, with at
+        # least one dot — so "not a url" is rejected instead of
+        # being stored as a site.
+        if ("." not in host
+                or not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?",
+                                    host)
+                or ".." in host):
+            raise ValueError(
+                "That is not a website URL — try a domain like example.com")
     if ip is not None and (ip.is_private or ip.is_loopback
                            or ip.is_link_local or ip.is_reserved
                            or ip.is_multicast):

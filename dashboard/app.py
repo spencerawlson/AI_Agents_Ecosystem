@@ -477,26 +477,32 @@ def create_app(
     # a visitor who is not signed in. A signed-in visitor gets a
     # "Continue to Live Ops" button — /ops is their home.
     _LANDING_CSS = """
-body { font-family: sans-serif; margin: 0 auto; max-width: 720px;
-  padding: 16px; color: #222; background: #fff; }
-.hero { text-align: center; padding: 24px 8px 8px; }
-.hero h1 { font-size: 30px; margin: 8px 0; line-height: 1.2; }
-.hero p { font-size: 18px; color: #444; margin: 8px 0; }
-.tag { display: inline-block; background: #c4b5fd; color: #111;
-  border-radius: 999px; padding: 4px 14px; font-weight: bold;
-  font-size: 14px; }
-.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
-  margin: 16px 0; background: #fff; }
-.card h2 { margin-top: 0; font-size: 20px; }
-.steps { list-style: none; padding: 0; margin: 0; }
-.steps li { display: flex; gap: 12px; margin: 12px 0; align-items: flex-start; }
-.step-num { flex: 0 0 32px; height: 32px; border-radius: 50%;
-  background: #c4b5fd; color: #111; font-weight: bold; text-align: center;
-  line-height: 32px; }
+/* Ventoryn landing page: light, playful, colorful — the Live Ops
+   visual language. Violet #C4B5FD is the action color, deep violet
+   #6D28D9 the accent; soft lavender surfaces, white cards. */
+body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+  sans-serif; margin: 0; color: #1a1a2e; background: #f6f4ff; }
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 16px 40px; }
+.hero { background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 55%,
+  #c4b5fd 100%); text-align: center; padding: 48px 20px 40px; }
+.hero-inner { max-width: 720px; margin: 0 auto; }
+.tag { display: inline-block; background: #fff; color: #6d28d9;
+  border-radius: 999px; padding: 6px 16px; font-weight: bold;
+  font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+.hero h1 { font-size: 42px; line-height: 1.12; margin: 16px 0 12px;
+  color: #1a1a2e; }
+.hero p { font-size: 19px; line-height: 1.5; color: #3f3f56;
+  margin: 0 auto; max-width: 600px; }
+.card { border: 1px solid #e5e0f5; border-radius: 16px; padding: 20px;
+  margin: 20px 0; background: #fff;
+  box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
+.card h2 { margin-top: 0; font-size: 22px; color: #1a1a2e; }
+.url-card { border: 2px solid #c4b5fd; background: #faf8ff; }
+.url-card h2 { font-size: 24px; }
 .muted { color: #666; font-size: 14px; }
-.big { font-size: 28px; font-weight: bold; }
+.big { font-size: 36px; font-weight: bold; color: #6d28d9; }
 .btn { display: inline-block; min-height: 44px; line-height: 44px;
-  padding: 0 20px; margin: 4px 4px 4px 0; border-radius: 8px;
+  padding: 0 20px; margin: 4px 4px 4px 0; border-radius: 10px;
   border: 1px solid #ccc; background: #fff; color: #222; font-size: 16px;
   cursor: pointer; text-decoration: none; text-align: center;
   box-sizing: border-box; }
@@ -504,9 +510,31 @@ body { font-family: sans-serif; margin: 0 auto; max-width: 720px;
   font-weight: bold; }
 .btn-google { background: #fff; border-color: #888; }
 label { display: block; margin: 12px 0 4px; font-weight: bold; }
-input[type=url], input[type=text] { width: 100%; min-height: 44px;
-  padding: 8px 10px; font-size: 16px; border: 1px solid #ccc;
-  border-radius: 8px; box-sizing: border-box; }
+input[type=text] { width: 100%; min-height: 52px;
+  padding: 8px 14px; font-size: 18px; border: 2px solid #c4b5fd;
+  border-radius: 10px; box-sizing: border-box; background: #fff; }
+input[type=text]:focus { outline: none; border-color: #6d28d9; }
+.steps { list-style: none; padding: 0; margin: 0; display: grid;
+  grid-template-columns: 1fr 1fr; gap: 16px; }
+.steps li { display: flex; gap: 12px; align-items: flex-start;
+  background: #faf8ff; border: 1px solid #e5e0f5; border-radius: 12px;
+  padding: 14px; }
+.step-num { flex: 0 0 32px; height: 32px; border-radius: 50%;
+  background: #c4b5fd; color: #111; font-weight: bold; text-align: center;
+  line-height: 32px; }
+.features { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; }
+.feature { border: 1px solid #e5e0f5; border-radius: 12px; padding: 16px;
+  background: #fff; box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
+.feature h3 { margin: 0 0 8px; font-size: 17px; color: #1a1a2e; }
+.feature p { margin: 0; color: #444; font-size: 15px; line-height: 1.45; }
+.price-card { background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  border: 2px solid #c4b5fd; text-align: center; }
+.price-card ul { list-style: none; padding: 0; margin: 16px auto;
+  max-width: 420px; text-align: left; }
+.price-card li { margin: 8px 0; font-size: 16px; }
+.price-card li::before { content: "\2713  "; color: #6d28d9;
+  font-weight: bold; }
 .score-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
 .score { flex: 1 1 140px; border: 1px solid #ddd; border-radius: 8px;
   padding: 12px; background: #fafafa; text-align: center; }
@@ -514,9 +542,18 @@ input[type=url], input[type=text] { width: 100%; min-height: 44px;
 .score .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
 .findings { margin: 8px 0; padding-left: 20px; }
 .findings li { margin: 6px 0; }
+.footer { text-align: center; color: #888; font-size: 13px;
+  margin: 24px 0 0; }
 @media (max-width: 560px) {
-  body { padding: 12px; } .hero h1 { font-size: 24px; }
+  body { background: #fff; }
+  .wrap { padding: 0 12px 32px; }
+  .hero { padding: 32px 16px 28px; }
+  .hero h1 { font-size: 28px; }
+  .hero p { font-size: 17px; }
   .btn { width: 100%; margin: 4px 0; }
+  .steps { grid-template-columns: 1fr; }
+  .features { grid-template-columns: 1fr; }
+  input[type=text] { font-size: 16px; }
 }
 """
 
@@ -555,21 +592,25 @@ input[type=url], input[type=text] { width: 100%; min-height: 44px;
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <style>{_LANDING_CSS}</style></head><body>
 <div class='hero'>
+<div class='hero-inner'>
 <span class='tag'>Ventoryn</span>
 <h1>Get your website its first 100 paying customers</h1>
 <p>Type in your website URL. Ventoryn analyzes it, then a crew of AI
 agents works on it every day — bringing it traffic and sales — until
 it has 100 paying customers. Then 200.</p>
 </div>
-<div class='card'>
+</div>
+<div class='wrap'>
+<div class='card url-card'>
 <h2>🔍 Analyze your site — free preview</h2>
 <p class='muted'>The same analysis Ventoryn runs before it starts work:
 your site score, your answer-engine (GEO) score, and the top things
 to fix. Nothing is published.</p>
 <form id='landing-analyze-form'>
 <label for='landing-url'>Your website URL</label>
-<input id='landing-url' type='url' inputmode='url'
- placeholder='https://example.com' autocomplete='off' required>
+<input id='landing-url' type='text' inputmode='url'
+ placeholder='yourwebsite.com' autocomplete='off' required>
+<p class='muted'>Just your domain works — type example.com, no https:// needed.</p>
 <label for='landing-country'>Market country</label>
 <input id='landing-country' type='text' value='ca' maxlength='2'
  autocomplete='off' required>
@@ -581,6 +622,16 @@ to fix. Nothing is published.</p>
 <div id='landing-cta' hidden></div>
 </div>
 {signin_block}
+<div class='features'>
+<div class='feature'><h3>🛠️ A crew that works daily</h3>
+<p>Eight AI agents — research, SEO, community, video and reports —
+working on your site every day.</p></div>
+<div class='feature'><h3>✅ You decide</h3>
+<p>Nothing is published or posted without your approval. You pay
+for it, you decide.</p></div>
+<div class='feature'><h3>🎯 Real sales, not just traffic</h3>
+<p>The goal is paying customers — your first 100 — not page views.</p></div>
+</div>
 <div class='card'>
 <h2>How it works</h2>
 <ol class='steps'>
@@ -598,20 +649,18 @@ to fix. Nothing is published.</p>
  for it, you decide.</span></li>
 </ol>
 </div>
-<div class='card'>
+<div class='card price-card'>
 <h2>$20/month</h2>
 <p><span class='big'>$20</span> / month</p>
-<p>100 credits every month, your websites on Ventoryn, a growth
-report per site — and the agents working daily toward your first
-100 paying customers.</p>
+<ul>
+<li>Your websites on Ventoryn</li>
+<li>100 credits every month</li>
+<li>A growth report per site</li>
+<li>Agents working daily toward your first 100 paying customers</li>
+</ul>
 <p><a class='btn btn-primary' href='/account/subscribe'>Subscribe — $20/month</a></p>
 </div>
-<div class='card'>
-<h2>The first site on the platform</h2>
-<p>Road to CISSP (road2cissp.com) is the first website on Ventoryn —
-the proof case the crew is working on now.</p>
-<p class='muted'>No results are claimed here yet. When the first 100
-paying customers arrive, the numbers will be the real ones.</p>
+<p class='footer'>Ventoryn — get your website its first 100 paying customers.</p>
 </div>
 <script>
 "use strict";
@@ -688,7 +737,10 @@ async function pollJob() {{
 }}
 $("landing-analyze-form").addEventListener("submit", async (e) => {{
   e.preventDefault();
-  const url = $("landing-url").value.trim();
+  let url = $("landing-url").value.trim();
+  // A bare domain works — the server adds https://, and so do we,
+  // so the URL shown and carried on is the canonical one.
+  if (url && url.indexOf("://") === -1) url = "https://" + url;
   const country = $("landing-country").value.trim().toLowerCase();
   $("landing-preview").hidden = true;
   $("landing-preview").innerHTML = "";

@@ -61,21 +61,32 @@ def _is_private_address(value: str) -> bool:
     )
 
 
+def _normalize_scheme(raw: str) -> str:
+    """A bare domain works: prepend https:// when no scheme is
+    present, after trimming whitespace."""
+    url = raw.strip()
+    if "://" not in url:
+        url = "https://" + url
+    return url
+
+
 def validate_url(raw: object) -> str:
     """Normalize a website URL, or raise ValueError with the reason.
 
-    http/https only; rejects empty input, non-URLs, and localhost /
-    private addresses (literal IPs and hostnames that resolve only
-    to private addresses). A hostname that does not resolve is
-    allowed through — the analysis fetch reports that honestly.
+    A bare domain works — https:// is added when no scheme is
+    present. http/https only; rejects empty input, non-URLs, and
+    localhost / private addresses (literal IPs and hostnames that
+    resolve only to private addresses). A hostname that does not
+    resolve is allowed through — the analysis fetch reports that
+    honestly.
     """
     if not isinstance(raw, str) or not raw.strip():
-        raise ValueError("enter a website URL, e.g. https://example.com")
-    url = raw.strip()
+        raise ValueError("enter a website URL, e.g. example.com")
+    url = _normalize_scheme(raw)
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError(
-            f"{url!r} is not a website URL — use https://example.com")
+            f"{url!r} is not a website URL — try a domain like example.com")
     host = (parsed.hostname or "").lower()
     if not host or host == "localhost" or host.endswith(".localhost"):
         raise ValueError("localhost is not a website to analyze")
@@ -84,6 +95,16 @@ def validate_url(raw: object) -> str:
         is_literal_ip = True
     except ValueError:
         is_literal_ip = False
+    if not is_literal_ip:
+        # A domain name: letters, digits, hyphens and dots, with at
+        # least one dot — so "not a url" and "example" are rejected
+        # instead of sailing through to the fetch.
+        if ("." not in host
+                or not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?",
+                                    host)
+                or ".." in host):
+            raise ValueError(
+                f"{url!r} is not a website URL — try a domain like example.com")
     if is_literal_ip:
         if _is_private_address(host):
             raise ValueError("private addresses are not websites to analyze")

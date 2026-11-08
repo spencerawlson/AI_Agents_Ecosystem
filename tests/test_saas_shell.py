@@ -68,7 +68,10 @@ def test_validate_site_url():
         "https://road2cissp.com"
     assert saas.validate_site_url("http://example.com/page/") == \
         "http://example.com/page"
-    for bad in ("", "not a url", "example.com", "ftp://example.com",
+    assert saas.validate_site_url("example.com") == "https://example.com"
+    assert saas.validate_site_url("  example.com/page  ") == \
+        "https://example.com/page"
+    for bad in ("", "not a url", "example", "ftp://example.com",
                 "https://localhost:8000", "http://127.0.0.1",
                 "https://10.0.0.5", "https://192.168.1.1",
                 "https://myhost.local", "https://[::1]/"):
