@@ -31,6 +31,104 @@ def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
+# Events that describe one agent run — as opposed to summaries like
+# tick_completed, which carry no cost and say nothing about a run.
+_RUN_EVENTS = frozenset({
+    "run_completed", "run_failed", "task_verified", "task_rework_requested",
+})
+# When one run produced several events for it, take its cost/tokens
+# from the first of these that carries any — run_completed first,
+# since the worker records the run's own figures there.
+_COST_PREFERENCE = (
+    "run_completed", "task_verified", "run_failed", "task_rework_requested",
+)
+
+
+def _is_completion(event) -> bool:
+    """A run completed only if it has a completion event: run_completed,
+    or a task_verified that actually passed. A failed verification or a
+    rework is work done, not a task completed."""
+    if event.event == "run_completed":
+        return True
+    if event.event == "task_verified":
+        return bool((event.result or {}).get("passed"))
+    return False
+
+
+def agent_stats_from_audit(audit: AuditLog, agent_types: list) -> list[dict]:
+    """Per-agent totals derived from the audit log — the same source the
+    feed reads, so the bars, the feed and the ledger can never disagree.
+
+    One agent run can produce several events for the same run (a
+    run_completed from the worker AND a task_verified from the
+    orchestrator, plus a rework on the way); they are deduped by run_id
+    (task_id when run_id is absent) so each run counts as one task and
+    its cost/tokens are counted once. A failed or reworked run with no
+    completion counts its spend but not a completed task. Summary events
+    (tick_completed) are not run events and never touch the bars.
+
+    Returns the same shape the ops page already renders (type,
+    tasks_completed, tokens_used, cost_usd, last_task), one row per
+    registered agent type — zeros only when the log truly has nothing
+    for that agent.
+    """
+    groups: dict[str, list] = {}
+    order: list[str] = []
+    events = audit.all_events()
+    for e in events:
+        if e.event not in _RUN_EVENTS:
+            continue
+        key = e.run_id or e.task_id
+        if not key:
+            continue
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(e)
+
+    stats = {t: {"tasks": 0, "tokens": 0, "cost": 0.0, "last_task": ""}
+             for t in agent_types}
+    for key in order:
+        group_events = groups[key]
+        agent = group_events[0].agent_type
+        if agent not in stats:
+            continue
+        chosen = None
+        for pref in _COST_PREFERENCE:
+            for ev in group_events:
+                if ev.event == pref and (ev.cost_usd or ev.tokens_used):
+                    chosen = ev
+                    break
+            if chosen is not None:
+                break
+        if chosen is None:
+            chosen = group_events[0]
+        s = stats[agent]
+        if any(_is_completion(ev) for ev in group_events):
+            s["tasks"] += 1
+        s["tokens"] += chosen.tokens_used
+        s["cost"] += chosen.cost_usd
+    # last_task: the agent's latest run event, in log order. Same
+    # filter as the grouping above: a run event with no run/task id
+    # belongs to no run, so it says nothing about what an agent did.
+    for e in events:
+        if e.event not in _RUN_EVENTS or e.agent_type not in stats:
+            continue
+        if not (e.run_id or e.task_id):
+            continue
+        label = e.event
+        if e.tokens_used:
+            label += f" · {e.tokens_used:,} tokens"
+        stats[e.agent_type]["last_task"] = label
+    return [{
+        "type": t,
+        "tasks_completed": stats[t]["tasks"],
+        "tokens_used": stats[t]["tokens"],
+        "cost_usd": round(stats[t]["cost"], 4),
+        "last_task": stats[t]["last_task"],
+    } for t in agent_types]
+
+
 # Light, clean styling shared by the /reports and /approvals pages —
 # matches the /report page. Mobile-friendly, no dark ops-room styling.
 _PAGE_CSS = """
@@ -440,25 +538,19 @@ nothing in them was published.</p>
 
     game = {
         "tick": 0,
-        "agent_stats": {},  # agent_type -> {tasks, tokens, cost_usd, last_task}
         "experiment_001": None,
     }
     app.state.game = game
 
     def _agent_snapshot() -> list[dict]:
+        # Derived from the audit log — the same source as the feed — not
+        # from a second in-memory tally: the old game["agent_stats"]
+        # only ever moved for discovery/research on a successful tick,
+        # reset on every restart, and never saw the other five agents
+        # or work done by other processes.
         orch = state["orchestrator"]
-        stats = game["agent_stats"]
-        out = []
-        for agent_type in orch.registry.agent_types():
-            s = stats.get(agent_type, {})
-            out.append({
-                "type": agent_type,
-                "tasks_completed": s.get("tasks", 0),
-                "tokens_used": s.get("tokens", 0),
-                "cost_usd": round(s.get("cost", 0.0), 4),
-                "last_task": s.get("last_task", ""),
-            })
-        return out
+        aud: AuditLog = state["audit"]
+        return agent_stats_from_audit(aud, orch.registry.agent_types())
 
     def _snapshot() -> dict:
         reg: BusinessRegistry = state["registry"]
@@ -677,12 +769,6 @@ th {{ background: #f0f0f0; }}
             return JSONResponse({"ok": False, "error": str(exc),
                                  "snapshot": _snapshot()})
         if result.get("ok"):
-            for run in result.get("runs", []):
-                s = game["agent_stats"].setdefault(run["agent_type"], {})
-                s["tasks"] = s.get("tasks", 0) + 1
-                s["tokens"] = s.get("tokens", 0) + run["tokens_used"]
-                s["cost"] = s.get("cost", 0.0) + run["cost_usd"]
-                s["last_task"] = f"tick {tick}: {result.get('winner')}"
             state["audit"].record(
                 agent_type="game", event="tick_completed",
                 result={"tick": tick, "winner": result.get("winner"),
@@ -708,7 +794,6 @@ th {{ background: #f0f0f0; }}
         state["approvals"] = rt.approvals
         state["audit"] = rt.audit
         game["tick"] = 0
-        game["agent_stats"] = {}
         game["experiment_001"] = None
         return JSONResponse({"ok": True, "snapshot": _snapshot()})
 

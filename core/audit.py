@@ -59,6 +59,14 @@ class AuditLog:
         """Most recent events, newest first."""
         return list(reversed(self._events[-n:]))
 
+    def all_events(self) -> list[AuditEvent]:
+        """Every event, oldest first — the full record, not a window.
+
+        The live-ops bars aggregate from this, so they see the same
+        history as the feed instead of a second, in-memory tally.
+        """
+        return list(self._events)
+
     def total_ai_cost(self, business_id: str | None = None) -> float:
         events = self._events if business_id is None else self.for_business(business_id)
         return sum(e.cost_usd for e in events)

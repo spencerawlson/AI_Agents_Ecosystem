@@ -41,6 +41,8 @@ def test_shared_audit_semantics_match_memory(tmp_path):
     assert len(shared) == len(memory) == 3
     assert [e.event for e in shared.latest(10)] == \
         [e.event for e in memory.latest(10)]
+    assert [e.event for e in shared.all_events()] == \
+        [e.event for e in memory.all_events()]
     assert [e.event for e in shared.for_business("biz_1")] == \
         [e.event for e in memory.for_business("biz_1")]
     assert [e.agent_type for e in shared.for_business("biz_1")] == \

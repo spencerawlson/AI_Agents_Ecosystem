@@ -326,6 +326,9 @@ class Orchestrator:
                         business_id=task.business_id, event="task_verified",
                         result={"passed": False, "failures": report.failures},
                         error=run.error,
+                        # The run spent this even though it failed: without
+                        # it, the bars could never count failed spend.
+                        tokens_used=run.tokens_used, cost_usd=run.cost_usd,
                     )
                     log.warning("task_failed id=%s run=%s error=%s",
                                 task.id, run.id, run.error)
@@ -345,6 +348,9 @@ class Orchestrator:
                     business_id=task.business_id, event="task_rework_requested",
                     result={"attempt": task.rework_count,
                             "failures": report.failures},
+                    # The reworked attempt spent this; the next attempt is
+                    # a new run, so this cost is never counted twice.
+                    tokens_used=run.tokens_used, cost_usd=run.cost_usd,
                 )
                 log.info("task_rework id=%s attempt=%d failures=%d",
                          task.id, task.rework_count, len(report.failures))

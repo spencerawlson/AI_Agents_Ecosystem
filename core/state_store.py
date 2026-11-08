@@ -253,6 +253,11 @@ class SharedAuditLog(AuditLog):
             rows = cur.fetchall()
         return [AuditEvent.model_validate_json(r[0]) for r in rows]
 
+    def all_events(self) -> list[AuditEvent]:
+        """Every event, oldest first — read from the database, so a
+        worker process's events are visible to the dashboard too."""
+        return self._load_all()
+
     def total_ai_cost(self, business_id: str | None = None) -> float:
         events = self._load_all()
         if business_id is not None:

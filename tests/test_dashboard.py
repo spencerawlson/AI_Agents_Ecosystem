@@ -168,12 +168,21 @@ def test_game_view_is_live_ops():
 
 def test_api_snapshot_feeds_live_ops():
     """GET /api/snapshot carries everything the ops window shows:
-    per-agent last_task, and audit events with time / actor / event /
-    business / task / result."""
+    per-agent stats DERIVED FROM the audit log (so the bars move with
+    the feed), and audit events with time / actor / event / business /
+    task / result / cost / tokens."""
     registry = BusinessRegistry()
     ledger = Ledger()
     audit = AuditLog()
     biz = registry.create("Ops Store", "ecommerce")
+    audit.record("discovery", "run_completed", task_id="task_1",
+                 run_id="run_1", business_id=biz.id,
+                 tokens_used=120, cost_usd=0.01,
+                 result={"tick": 1, "opportunities": 5})
+    audit.record("discovery", "task_verified", task_id="task_1",
+                 run_id="run_1", business_id=biz.id,
+                 tokens_used=120, cost_usd=0.01,
+                 result={"passed": True, "rework_count": 0})
     audit.record("discovery", "tick_completed", task_id="task_1",
                  business_id=biz.id,
                  result={"winner": "Ops Store", "score": 87})
@@ -186,19 +195,19 @@ def test_api_snapshot_feeds_live_ops():
     app = create_app(orchestrator=orchestrator, registry=registry,
                      ledger=ledger, audit=audit)
     app.state.game["tick"] = 3
-    app.state.game["agent_stats"] = {
-        "discovery": {"tasks": 2, "tokens": 120, "cost": 0.01,
-                      "last_task": "ranked opportunities"},
-    }
     client = TestClient(app)
     data = client.get("/api/snapshot").json()
     assert data["tick"] == 3
     by_type = {a["type"]: a for a in data["agents"]}
-    assert by_type["discovery"]["tasks_completed"] == 2
-    assert by_type["discovery"]["last_task"] == "ranked opportunities"
+    # One run, two events for it: counted once, cost once.
+    assert by_type["discovery"]["tasks_completed"] == 1
+    assert by_type["discovery"]["tokens_used"] == 120
+    assert by_type["discovery"]["cost_usd"] == 0.01
+    assert by_type["discovery"]["last_task"] == "task_verified · 120 tokens"
     assert by_type["research"]["tasks_completed"] == 0
     assert by_type["research"]["last_task"] == ""
-    assert len(data["events"]) == 1
+    # The tick summary is still in the feed — it just never moves the bars.
+    assert len(data["events"]) == 3
     evt = data["events"][0]
     assert set(evt) >= {"ts", "actor", "event", "business_id", "task_id",
                         "result", "cost_usd", "tokens_used"}

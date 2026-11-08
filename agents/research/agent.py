@@ -8,6 +8,7 @@ differentiation. Produces a standardized opportunity report.
 
 from __future__ import annotations
 
+import zlib
 from typing import Protocol
 
 from agents.base import BaseAgent
@@ -49,8 +50,11 @@ class HeuristicResearchSource:
     def research(self, opportunity: dict) -> dict:
         niche = opportunity.get("niche", "")
         btype = opportunity.get("business_type", "")
-        # Deterministic pseudo-analysis keyed on niche hash.
-        h = abs(hash(niche)) % 100
+        # Deterministic pseudo-analysis keyed on niche hash. crc32, not
+        # Python's hash(): hash() is randomized per process, so the
+        # verdicts — and whether a tick has a winner at all — used to
+        # vary run to run, which made the tick test flaky.
+        h = zlib.crc32(niche.encode()) % 100
         return {
             "opportunity_id": opportunity.get("id", ""),
             "niche": niche,

@@ -779,7 +779,12 @@ function renderOpsBars(agents) {
   });
   svg += "</svg>";
   const totalTasks = rows.reduce((n, a) => n + (Number(a.tasks_completed) || 0), 0);
-  const note = totalTasks === 0
+  const totalSpend = rows.reduce((n, a) => n + (Number(a.cost_usd) || 0), 0);
+  const totalTokens = rows.reduce((n, a) => n + (Number(a.tokens_used) || 0), 0);
+  // "No work recorded" means no run events at all — a tick that only
+  // failed still spent money, and that spend shows in the bars, so the
+  // note must not claim nothing was recorded.
+  const note = (totalTasks === 0 && totalSpend === 0 && totalTokens === 0)
     ? '<div class="empty-note">No work recorded yet — press Step and the bars will fill in.</div>' : "";
   wrap.innerHTML = svg + note;
 }

@@ -19,7 +19,10 @@ under its old address).
     what the agents are actually doing in the background, not a
     paraphrase.
   - *Tasks & spend per agent*: a hand-built inline SVG bar chart
-    (blue = tasks, orange = spend), one row per agent.
+    (blue = tasks, orange = spend), one row per agent. The bars are
+    computed from the audit log — the same source as the feed — so
+    they move whenever the feed does, for every agent, and survive
+    a restart with the shared state on.
   - *Activity over time*: a hand-built inline SVG line chart of
     total tasks completed, one point per poll.
 - **Businesses, What Just Happened, Experiment 001, HUD totals** —
@@ -50,6 +53,13 @@ same SQLite file as the businesses and the ledger
   reports written) plus the `tick_completed` summary, so the feed
   can say what each agent did and what it spent. Failed runs are
   recorded as `run_failed`, with the error.
+- *Tasks & spend per agent* is computed from that same log, not from
+  a second tally: one run counts as one task and its cost/tokens are
+  counted once, even when the run produced both a `run_completed`
+  and a `task_verified` event for it. A failed or reworked run
+  counts its spend but not a completed task. Summary events
+  (`tick_completed`) never move the bars. So the bars, the feed and
+  the header costs now agree — they all read the same record.
 - The feed shows the cost next to an event when the run spent
   anything (e.g. "$0.02 · 1,240 tokens"); older cost-less events
   and $0 heuristic runs show nothing.
@@ -68,6 +78,11 @@ same SQLite file as the businesses and the ledger
 - When nothing has happened yet, the panels say so ("Nothing yet
   — run a tick", "No work recorded yet") instead of inventing
   activity. An empty feed is a quiet crew, not a broken page.
+  "No work recorded yet" means the log holds no run events at all —
+  a tick that only failed still shows its spend in the bars.
+- Mission scripts (the road2cissp / Farelune growth programs) don't
+  go through the shared runtime, so their spend still doesn't appear
+  in the bars or the feed — only dashboard and worker ticks do.
 - The "Last did" line shows the agent's last recorded task, which
   may be from an earlier tick — it is a record, not a live camera.
 
