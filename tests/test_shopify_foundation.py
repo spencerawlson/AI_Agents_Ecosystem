@@ -20,7 +20,7 @@ from businesses.shopify_store.pipeline import (APPROVAL_ACTION, ListingWriter,
                                         publish_approved, source)
 from orchestrator.approvals import ApprovalGate
 
-EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "shopify_brief.example.json"
+EXAMPLE = Path(__file__).resolve().parent.parent / "businesses" / "shopify_store" / "shopify_brief.example.json"
 
 
 # -- pricing -------------------------------------------------------------------

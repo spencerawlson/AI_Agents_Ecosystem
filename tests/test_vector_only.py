@@ -99,10 +99,10 @@ def test_no_bitmap_reference_in_page_templates():
     # og:image are not page templates and are out of scope.)
     here = Path(__file__).resolve().parent.parent
     sources = [
-        here / "dashboard" / "app.py",
-        here / "dashboard" / "nav.py",
-        here / "dashboard" / "saas_routes.py",
-        here / "dashboard" / "static" / "game.html",
+        here / "ventoryn" / "app.py",
+        here / "ventoryn" / "nav.py",
+        here / "ventoryn" / "saas_routes.py",
+        here / "ventoryn" / "static" / "game.html",
     ]
     for path in sources:
         text = path.read_text(encoding="utf-8")

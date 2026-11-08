@@ -469,7 +469,7 @@ def test_full_cycle_from_supplier_approval_to_guarded_ads(tmp_path, gate):
     from businesses.shopify_store.pipeline import ListingWriter, source
 
     brief = ProductBrief.model_validate_json(
-        (Path(__file__).resolve().parent.parent / "examples" / "shopify_brief.example.json").read_text(encoding="utf-8"))
+        (Path(__file__).resolve().parent.parent / "businesses" / "shopify_store" / "shopify_brief.example.json").read_text(encoding="utf-8"))
     brief.suppliers[0].image_urls = ["https://img.example/a.jpg"]
     source(brief, gate, tmp_path / "reports", ListingWriter(), now=NOW)
     top = next(a for a in gate.pending() if a.details["rank"] == 1)
