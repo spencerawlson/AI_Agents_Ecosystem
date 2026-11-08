@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import html
 import os
+import re
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException
@@ -677,6 +679,64 @@ nothing in them was published.</p>
         state = load_state(Path(state_path) if state_path
                            else default_state_path())
         return JSONResponse(build_attribution(state))
+
+    # -- Site analysis jobs (powers the /ops "Analyze a site" panel) ---
+    # The same pipeline as the `analyze` CLI, run in a background
+    # thread: POST starts the job, the page polls GET for the result.
+    # Nothing is published or posted — the only output is the local
+    # report file (the same file the CLI writes) plus the on-page
+    # summary. `app.state.analyze_runner` is None in production;
+    # tests inject a fast fake runner.
+    from dashboard.analyze_jobs import get_job as _analyze_get_job
+    from dashboard.analyze_jobs import new_job_store as _analyze_new_store
+    from dashboard.analyze_jobs import start_job as _analyze_start_job
+    from dashboard.analyze_jobs import validate_country as _validate_country
+    from dashboard.analyze_jobs import validate_language as _validate_language
+    from dashboard.analyze_jobs import validate_url as _validate_analyze_url
+
+    app.state.analyze_jobs = _analyze_new_store()
+    app.state.analyze_runner = None
+
+    @app.post("/api/analyze")
+    def api_analyze_start(payload: dict):
+        payload = payload or {}
+        try:
+            url = _validate_analyze_url(payload.get("url", ""))
+            country = _validate_country(payload.get("country", ""))
+            language = _validate_language(payload.get("language", ""))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        job = _analyze_start_job(
+            app.state.analyze_jobs, url, country, language,
+            runner=app.state.analyze_runner)
+        return JSONResponse(
+            {"job_id": job["job_id"], "status": job["status"],
+             "url": job["url"], "country": job["country"],
+             "language": job["language"]}, status_code=202)
+
+    @app.get("/api/analyze/{job_id}")
+    def api_analyze_status(job_id: str):
+        job = _analyze_get_job(app.state.analyze_jobs, job_id)
+        if job is None:
+            raise HTTPException(404, "analysis job not found")
+        out = dict(job)
+        if out.get("report_name"):
+            out["report_url"] = f"/api/analyze/{job_id}/report"
+        return JSONResponse(out)
+
+    @app.get("/api/analyze/{job_id}/report")
+    def api_analyze_report(job_id: str):
+        from dashboard.reports import reports_dir
+
+        job = _analyze_get_job(app.state.analyze_jobs, job_id)
+        if job is None or not job.get("report_name"):
+            raise HTTPException(404, "report not ready")
+        base = reports_dir()
+        path = (base / job["report_name"]).resolve()
+        if path.parent != base.resolve() or not path.is_file():
+            raise HTTPException(404, "report not ready")
+        return FileResponse(str(path), media_type="text/markdown",
+                            filename=job["report_name"])
 
     @app.get("/report", response_class=HTMLResponse)
     def report_page():

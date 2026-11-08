@@ -69,6 +69,41 @@ same SQLite file as the businesses and the ledger
 - Reset (`/api/reset`) rebuilds the runtime but does not wipe the
   audit log: the history is a record, not session state.
 
+## Analyze a site
+
+Below the ops window, the **Analyze a site** panel runs the same
+analysis as the `analyze` CLI from the page: website URL + market
+country (default `ca`) + optional language. Submitting starts a
+background job — `POST /api/analyze` returns a job id (202) and the
+page polls `GET /api/analyze/{job_id}` on the same 5s rhythm until
+it is done or failed, because a live crawl takes tens of seconds.
+The result shows the site score, the GEO score and the top findings,
+plus a link to the saved report
+(`GET /api/analyze/{job_id}/report`). The report is written to
+`reports/analyze_<host>_<date>.md` exactly like the CLI writes it.
+Nothing is published or posted anywhere; the feature spends nothing.
+
+The URL is validated server-side (http/https only; empty, non-URL,
+localhost and private addresses are rejected with a 400). A site
+that cannot be fetched at all gets **no scores** on the page — it
+shows "Unavailable — could not fetch" with the reason instead of a
+number built from fetch failures. (The saved report file still
+carries the CLI's own computed numbers next to the critical
+"could not be fetched" finding, exactly as the CLI writes it.)
+
+## Phones: crew carousel
+
+On phones (≤560px) the crew section is a one-card-at-a-time
+carousel instead of a stacked list: a horizontally scrollable strip
+with `scroll-snap-type: x mandatory`, one card per view, scrollbar
+hidden, native touch swiping (works on iOS Safari), prev/next arrow
+buttons (44px+ tap targets) and dots plus "n of 8" text that track
+the position on scroll. The 5s re-render of the cards saves and
+restores the scroll position, so swiping to an agent doesn't snap
+back. Desktop keeps the 4-column grid, untouched. Each card still
+shows what that agent is doing (tasks, spend, last task) — the
+carousel only changes how you move between cards on a phone.
+
 ## Honest limits
 
 - The activity line is a **rolling in-page history** (last 30

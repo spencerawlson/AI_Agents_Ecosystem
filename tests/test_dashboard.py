@@ -278,18 +278,33 @@ if __name__ == "__main__":
 
 def test_live_ops_is_collegium_and_mobile_friendly():
     """The live-ops page is Collegium now (not Ecosystem Tycoon), and its
-    phone layout is single-column with readable charts: crew cards stack
-    at <=560px, the ops charts size their SVG viewBox to the panel on
-    screen (so labels don't shrink to ~6px on a phone), and the footer
-    controls keep 44px+ tap targets."""
+    phone layout is thumb-friendly: the crew section becomes a
+    one-card-at-a-time scroll-snap carousel at <=560px (native swipe,
+    prev/next buttons, dots + "n of 8"), the ops charts size their SVG
+    viewBox to the panel on screen (so labels don't shrink to ~6px on
+    a phone), and the footer controls keep 44px+ tap targets. The
+    desktop crew grid is untouched."""
     app = create_app(registry=BusinessRegistry(), ledger=Ledger())
     client = TestClient(app)
     r = client.get("/ops")
     assert r.status_code == 200
     assert "Collegium — Live Ops" in r.text
     assert "Ecosystem Tycoon" not in r.text
-    # Crew cards go single-column on phones.
-    assert "#stations { grid-template-columns: 1fr; }" in r.text
+    # Desktop crew grid untouched; the old single-column rule is gone,
+    # replaced by the phone carousel strip.
+    assert "#stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }" in r.text
+    assert "#stations { grid-template-columns: 1fr; }" not in r.text
+    # Carousel: scroll-snap strip, one card per view, buttons, dots,
+    # position indicator, and the JS that drives them.
+    assert "scroll-snap-type: x mandatory" in r.text
+    assert "scroll-snap-align: start" in r.text
+    assert 'id="crew-prev"' in r.text
+    assert 'id="crew-next"' in r.text
+    assert 'id="crew-dots"' in r.text
+    assert 'id="crew-pos"' in r.text
+    assert "1 of 8" in r.text
+    assert "buildCrewNav" in r.text
+    assert "crewScrollTo" in r.text
     # Ops charts measure the panel instead of a fixed 560-unit viewBox.
     assert "wrap.clientWidth" in r.text
     # Footer controls stay thumb-friendly.
