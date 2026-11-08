@@ -25,6 +25,16 @@ Pages:
   POST /account/sites/{site_id}/jobs    run a job (analyze today)
   POST /account/sites/{site_id}/conversions
                                          owner-recorded sale (fallback)
+  GET  /account/two-factor/setup        forced TOTP setup (QR + code)
+  POST /account/two-factor/setup        confirm setup, backup codes shown
+  GET  /account/two-factor/verify       code at every sign-in
+  POST /account/two-factor/verify       code or backup code -> session
+  GET  /account/security                2FA status, pause posting, delete
+  POST /account/security/pause          pause / resume all posting
+  POST /account/delete                  revoke tokens, delete everything
+  POST /account/sites/{site_id}/privacy revenue/count/details toggles
+  POST /account/sites/{site_id}/connections/{kind}/disconnect
+                                         revoke at provider, then delete
 
 Sign-in flow (the ShipItAyiti flow): the landing page carries the
 sign-in and the URL box; after Google sign-in EVERYONE goes straight
@@ -48,7 +58,13 @@ from pathlib import Path
 from fastapi import Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from core.countries import country_options
+from core.qrcode import qr_svg
 from core.saas import (
+    APP_REGISTRATION_KINDS,
+    CONNECTION_CONSENT,
+    CONNECTION_REVOKE_NOTE,
+    CONNECTION_SCOPES,
     CREDIT_COSTS,
     PLAN_NAME,
     PLAN_PRICE_LABEL,
@@ -59,17 +75,21 @@ from core.saas import (
     SaasConfig,
     SaasError,
     SaasStore,
+    check_posting_allowed,
     exchange_google_code,
     google_auth_url,
     google_userinfo,
     handle_customer_sale_webhook,
     handle_platform_webhook,
     plausible_visitors,
+    revoke_provider_token,
     slug_for_url,
     validate_site_url,
     verify_webhook_signature,
     create_checkout_session,
 )
+from core.totp import provisioning_uri
+from dashboard.nav import HEADER_CSS, header_html
 
 #: Where analyze reports are written (reports/analyze_<host>_<date>.md,
 #: same as the CLI). Tests override this with a temp dir.
@@ -120,6 +140,11 @@ th { background: #f0f0f0; }
   th, td { font-size: 13px; padding: 6px; }
   .btn { width: 100%; margin: 4px 0; }
 }
+.qr { background: #fff; border: 1px solid #ddd; border-radius: 12px;
+      padding: 12px; display: inline-block; margin: 12px 0; }
+.codes { font-family: monospace; font-size: 17px; line-height: 1.9;
+         background: #fafafa; border: 1px solid #ddd; border-radius: 8px;
+         padding: 12px 16px; }
 """
 
 
@@ -127,33 +152,23 @@ def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _page(title: str, inner: str, account: dict | None = None) -> str:
-    # The customer nav — their own pages only: Live Ops, My
-    # Portfolio, Approvals, Report, My account, Subscribe, Sign out.
-    # Never an operator tool, never another account's data.
-    nav = ("<nav class='customer-nav' aria-label='Ventoryn'>"
-           "<a href='/ops'>Live Ops</a>"
-           "<a href='/portfolio'>My Portfolio</a>"
-           "<a href='/approvals'>Approvals</a>"
-           "<a href='/report'>Report</a>"
-           "<a href='/account/dashboard'>My account</a>"
-           "<a href='/account/subscribe'>Subscribe</a>"
-           "<a href='/account/logout'>Sign out</a></nav>")
+def _page(title: str, inner: str, account: dict | None = None,
+          current: str | None = None, is_operator: bool = False) -> str:
+    """Shell for the shell's own pages: the shared centered header
+    (brand + page title + hamburger menu) + content, mobile-first,
+    the same light styling as the Live Ops page. The menu never
+    links Experiments, Experiment 001, Daily plan, Attribution, or
+    "for website owners" — those stay reachable by direct URL only.
+    Unsigned error pages get no header — the menu belongs to
+    signed-in pages only."""
+    if account is None:
+        header = f"<h1>{esc(title)}</h1>"
+    else:
+        header = header_html(current, is_operator, title)
     return (f"<html><head><title>{esc(title)} — Ventoryn</title>"
             f"<meta name='viewport' content='width=device-width,"
-            f" initial-scale=1'><style>{_SAAS_CSS}{_NAV_CSS}</style></head>"
-            f"<body>{nav}<p><a href='/'>Ventoryn</a></p>"
-            f"<h1>{esc(title)}</h1>{inner}</body></html>")
-
-
-_NAV_CSS = """
-.customer-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
-.customer-nav a { display: inline-block; min-height: 44px; line-height: 44px;
-  padding: 0 14px; border-radius: 8px; background: #f3efff;
-  border: 1px solid #c4b5fd; color: #111; text-decoration: none;
-  font-size: 15px; }
-.customer-nav a:hover { background: #e9e2ff; }
-"""
+            f" initial-scale=1'><style>{_SAAS_CSS}{HEADER_CSS}</style>"
+            f"</head><body>{header}{inner}</body></html>")
 
 
 def _credit_table() -> str:
@@ -168,8 +183,11 @@ def _credit_table() -> str:
 
 def _funnel_rows(store: SaasStore, site: dict,
                  plausible_key: str | None) -> str:
-    """Visitors / signups / paying customers — each from a real source
-    or the word 'unavailable'. Nothing here is invented."""
+    """Visitors / signups / paying customers / revenue — each from a
+    real source or the word 'unavailable'. The revenue and count
+    display settings are respected separately (revenue_for_site):
+    OFF hides the figure — it never shows a number the customer
+    chose to hide. Nothing here is invented."""
     if plausible_key:
         detail = store.get_connection(site["id"], "plausible") or {}
         raw = detail.get("_detail_raw") or {}
@@ -181,19 +199,36 @@ def _funnel_rows(store: SaasStore, site: dict,
     else:
         visitors_html = ("<span class='unavailable'>unavailable — "
                          "connect Plausible below</span>")
-    paying = store.paying_customer_count(site["id"])
     connections = {c["kind"]: c for c in store.get_connections(site["id"])}
     stripe = connections.get("stripe_sales") or {}
-    if stripe.get("status") == "connected":
-        paying_html = f"{paying:,}"
+    stripe_connected = stripe.get("status") == "connected"
+    rev = store.revenue_for_site(site["id"])
+    if rev is None:
+        paying_html = "<span class='unavailable'>unavailable</span>"
+        revenue_html = "<span class='unavailable'>unavailable</span>"
     else:
-        paying_html = ("<span class='unavailable'>unavailable — "
-                       "connect your Stripe webhook below</span>")
+        if rev["paying_customers"] is None:
+            paying_html = ("<span class='unavailable'>hidden — the "
+                           "customer count is not shown (change it in "
+                           "Data &amp; privacy controls)</span>")
+        else:
+            paying_html = f"{rev['paying_customers']:,}"
+        if not stripe_connected:
+            revenue_html = ("<span class='unavailable'>unavailable — "
+                            "connect your Stripe webhook below</span>")
+        elif rev["revenue"] is None:
+            revenue_html = ("<span class='unavailable'>hidden — revenue "
+                            "is private by default (change it in Data "
+                            "&amp; privacy controls)</span>")
+        else:
+            revenue_html = (f"${rev['revenue']['total_cents'] / 100:,.2f} "
+                            f"{rev['revenue']['currency'].upper()}")
     return (
         f"<tr><td>Visitors (last 30 days)</td><td>{visitors_html}</td></tr>"
         f"<tr><td>Signups</td><td><span class='unavailable'>unavailable — "
         f"signup tracking is not connected yet</span></td></tr>"
-        f"<tr><td>Paying customers</td><td>{paying_html}</td></tr>")
+        f"<tr><td>Paying customers</td><td>{paying_html}</td></tr>"
+        f"<tr><td>Revenue</td><td>{revenue_html}</td></tr>")
 
 
 def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
@@ -210,6 +245,100 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             # unsigned visitor is sent, not to a separate sign-in page.
             return None, RedirectResponse("/", status_code=303)
         return account, None
+
+    def _signed_page(title: str, inner: str, account: dict,
+                     current: str | None = None) -> str:
+        """_page for a signed-in account: the shared header with the
+        right menu for the role (operator gets the Admin group)."""
+        return _page(title, inner, account, current=current,
+                     is_operator=config.is_operator(account["email"]))
+
+    def _safe_next(value: str) -> str:
+        """Where a 2FA page sends the user after: a same-site path
+        only, default /ops. An absolute URL is never honoured."""
+        if value and value.startswith("/") and not value.startswith("//"):
+            return value
+        return "/ops"
+
+    def _totp_field(account: dict) -> str:
+        """The fresh-code field for a sensitive action — shown only
+        when the account has 2FA enabled."""
+        if not account.get("totp_enabled"):
+            return ""
+        return ("<label for='totp_code'>Two-factor code (fresh — "
+                "required to confirm this action)</label>"
+                "<input type='text' id='totp_code' name='totp_code' "
+                "inputmode='numeric' autocomplete='one-time-code' "
+                "maxlength='8' placeholder='6-digit code or a backup code'>")
+
+    def _fresh_totp_ok(account: dict, totp_code: str) -> tuple[bool, str]:
+        """A sensitive action re-verifies with a fresh 2FA code when
+        the account has 2FA enabled (a backup code works too, and is
+        burned). Without 2FA the action proceeds on the verified
+        session. Returns (ok, error message)."""
+        if not account.get("totp_enabled"):
+            return True, ""
+        code = (totp_code or "").strip()
+        if code and (store.verify_totp_code(account["id"], code)
+                     or store.consume_backup_code(account["id"], code)):
+            return True, ""
+        return False, ("Enter your current two-factor code (or a backup "
+                       "code) to confirm this action.")
+
+    def _totp_setup_page(account: dict, nxt: str, error: str = "") -> str:
+        """The forced-setup page: QR + manual key + confirm form.
+        Reuses a pending secret when a setup is already in progress,
+        so navigating away mid-setup does not lose it."""
+        secret = store.get_totp_pending_secret(account["id"])
+        if not secret:
+            secret = store.begin_totp_setup(account["id"])["secret"]
+        uri = provisioning_uri(secret, account["email"], issuer="Ventoryn")
+        err = f"<p><strong>{esc(error)}</strong></p>" if error else ""
+        inner = (f"<div class='card'><h2>Two-factor authentication — "
+                 f"required</h2>{err}"
+                 "<p>Ventoryn requires two-factor authentication on every "
+                 "account. It keeps your sites, your connections and your "
+                 "revenue safe even if someone learns your Google password.</p>"
+                 "<p>Scan this QR code with your authenticator app (Google "
+                 "Authenticator, Authy, 1Password, or any TOTP app), then "
+                 "enter the 6-digit code it shows.</p>"
+                 f"<div class='qr'>{qr_svg(uri)}</div>"
+                 f"<p class='muted'>Or enter this key manually: "
+                 f"<code>{esc(secret)}</code></p>"
+                 "<form method='post' action='/account/two-factor/setup'>"
+                 f"<input type='hidden' name='next' value='{esc(nxt)}'>"
+                 "<label for='code'>6-digit code from your authenticator "
+                 "app</label>"
+                 "<input type='text' id='code' name='code' "
+                 "inputmode='numeric' autocomplete='one-time-code' required "
+                 "maxlength='6'>"
+                 "<p><button class='btn btn-primary' type='submit'>"
+                 "Confirm and turn on two-factor</button></p></form>"
+                 "<p class='muted'>Lost your phone? Your backup codes "
+                 "(shown once after setup) sign you in. If you lose those "
+                 "too, the operator can reset two-factor for your account "
+                 "— ask him, and set it up again at your next sign-in.</p>"
+                 "</div>")
+        return _page("Set up two-factor", inner)
+
+    def _totp_verify_page(account: dict, nxt: str, error: str = "") -> str:
+        """The code-at-sign-in page: a TOTP code or a backup code."""
+        err = f"<p><strong>{esc(error)}</strong></p>" if error else ""
+        inner = (f"<div class='card'><h2>Two-factor code</h2>{err}"
+                 "<p>Enter the 6-digit code from your authenticator app, "
+                 "or one of your backup codes (each works once).</p>"
+                 "<form method='post' action='/account/two-factor/verify'>"
+                 f"<input type='hidden' name='next' value='{esc(nxt)}'>"
+                 "<label for='code'>Two-factor code</label>"
+                 "<input type='text' id='code' name='code' "
+                 "inputmode='numeric' autocomplete='one-time-code' required "
+                 "maxlength='8'>"
+                 "<p><button class='btn btn-primary' type='submit'>"
+                 "Verify and continue</button></p></form>"
+                 "<p class='muted'>Lost your phone and your backup codes? "
+                 "The operator can reset two-factor for your account — ask "
+                 "him.</p></div>")
+        return _page("Two-factor code", inner)
 
     # -- sign-in -------------------------------------------------------------
     @app.get("/account", response_class=HTMLResponse)
@@ -286,6 +415,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             account = store.create_account(profile["sub"], profile["email"],
                                            profile.get("name", ""))
         token = store.create_session(account["id"])
+        # The admin's recent-activity feed: a real sign-in just
+        # happened.
+        store.record_activity_event(account["id"], "sign-in",
+                                    "Signed in with Google")
         # The ShipItAyiti flow: after sign-in EVERYONE goes straight
         # to Live Ops (/ops) — the operator and every customer alike.
         # /ops is scoped to the signed-in account, so a customer sees
@@ -302,7 +435,16 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if pending:
             target += ("?site_url=" +
                        urllib.parse.quote(pending, safe=""))
-        response = RedirectResponse(target, status_code=303)
+        # Two-factor is mandatory from the first sign-in: a fresh
+        # session has not passed it yet. No 2FA set up -> the setup
+        # page; 2FA enabled -> the code page. `next` carries the
+        # Live Ops destination (with the pending site URL).
+        nxt = urllib.parse.quote(target, safe="")
+        if not store.totp_state(account["id"])["enabled"]:
+            dest = f"/account/two-factor/setup?next={nxt}"
+        else:
+            dest = f"/account/two-factor/verify?next={nxt}"
+        response = RedirectResponse(dest, status_code=303)
         response.delete_cookie(PENDING_SITE_COOKIE, path="/")
         response.set_cookie(SESSION_COOKIE, token, httponly=True,
                             samesite="lax", path="/",
@@ -319,6 +461,160 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
 
+    # -- two-factor (forced) + security ----------------------------------
+    @app.get("/account/two-factor/setup", response_class=HTMLResponse)
+    def totp_setup_page(request: Request, next: str = "/ops"):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        if store.totp_state(account["id"])["enabled"]:
+            return RedirectResponse("/account/security", status_code=303)
+        return HTMLResponse(
+            _totp_setup_page(account, _safe_next(next)))
+
+    @app.post("/account/two-factor/setup", response_class=HTMLResponse)
+    def totp_setup_confirm(request: Request, code: str = Form(""),
+                           next: str = Form("/ops")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        if store.totp_state(account["id"])["enabled"]:
+            return RedirectResponse(_safe_next(next), status_code=303)
+        if store.confirm_totp_setup(account["id"], code.strip()):
+            token = request.cookies.get(SESSION_COOKIE, "")
+            if token:
+                store.mark_session_totp_verified(token)
+            codes = store.regenerate_backup_codes(account["id"])
+            codes_html = "".join(
+                f"<div>{esc(c[:4])} {esc(c[4:])}</div>" for c in codes)
+            dest = _safe_next(next)
+            inner = (f"<div class='card'><h2>Two-factor is on</h2>"
+                     "<p>Your account is protected. Save these backup "
+                     "codes now — each works once, and they are the way "
+                     "back in if you lose your phone. They are shown "
+                     "only this once.</p>"
+                     f"<div class='codes'>{codes_html}</div>"
+                     f"<p><a class='btn btn-primary' href='{esc(dest)}'>"
+                     "Continue to Live Ops</a></p></div>")
+            return HTMLResponse(_page("Two-factor is on", inner))
+        return HTMLResponse(
+            _totp_setup_page(account, _safe_next(next),
+                             "That code did not match — check your "
+                             "authenticator app and try again."))
+
+    @app.get("/account/two-factor/verify", response_class=HTMLResponse)
+    def totp_verify_page(request: Request, next: str = "/ops"):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        if not store.totp_state(account["id"])["enabled"]:
+            return RedirectResponse(
+                "/account/two-factor/setup?next=" +
+                urllib.parse.quote(_safe_next(next), safe=""),
+                status_code=303)
+        session = store.get_session(request.cookies.get(SESSION_COOKIE, ""))
+        if session and session.get("totp_verified"):
+            return RedirectResponse(_safe_next(next), status_code=303)
+        return HTMLResponse(
+            _totp_verify_page(account, _safe_next(next)))
+
+    @app.post("/account/two-factor/verify", response_class=HTMLResponse)
+    def totp_verify(request: Request, code: str = Form(""),
+                    next: str = Form("/ops")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        c = code.strip()
+        if c and (store.verify_totp_code(account["id"], c)
+                  or store.consume_backup_code(account["id"], c)):
+            token = request.cookies.get(SESSION_COOKIE, "")
+            if token:
+                store.mark_session_totp_verified(token)
+            return RedirectResponse(_safe_next(next), status_code=303)
+        return HTMLResponse(
+            _totp_verify_page(account, _safe_next(next),
+                              "That code did not work — try the current "
+                              "code from your authenticator app, or a "
+                              "backup code."))
+
+    @app.get("/account/security", response_class=HTMLResponse)
+    def security_page(request: Request):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        state = store.totp_state(account["id"])
+        if state["enabled"]:
+            twofa = ("<p>Two-factor authentication: "
+                     "<strong>Enabled</strong> — a code is required at "
+                     "every sign-in.</p>")
+        else:
+            twofa = ("<p>Two-factor authentication: "
+                     "<strong>Not set up</strong> — "
+                     "<a href='/account/two-factor/setup'>Set up "
+                     "two-factor</a>. You cannot use Ventoryn until it "
+                     "is set up.</p>")
+        paused = bool(account.get("posting_paused"))
+        pause = (f"<div class='card'><h2>Posting</h2><p>"
+                 + ("Posting is PAUSED — no agent will post or reply "
+                    "as you." if paused else
+                    "Posting is on — agents may prepare posts and replies "
+                    "(your approval first).")
+                 + f"</p><form method='post' "
+                 f"action='/account/security/pause'>"
+                 f"<input type='hidden' name='paused' value="
+                 f"'{'0' if paused else '1'}'>"
+                 f"<button class='btn' type='submit'>"
+                 f"{'Resume posting' if paused else 'Pause all posting'}"
+                 f"</button></form></div>")
+        delete = ("<div class='card'><h2>Delete your account</h2>"
+                  "<p>This deletes your account, your websites, your "
+                  "connections (tokens are revoked at the provider "
+                  "first), your jobs, your credit ledger and your "
+                  "revenue data. It cannot be undone.</p>"
+                  "<form method='post' action='/account/delete'>"
+                  f"{_totp_field(account)}"
+                  "<p><button class='btn' type='submit'>Delete my "
+                  "account</button></p></form></div>")
+        inner = (f"<div class='card'><h2>Two-factor authentication</h2>"
+                 f"{twofa}</div>{pause}{delete}")
+        return _signed_page("Security", inner, account, current="account")
+
+    @app.post("/account/security/pause")
+    def security_pause(request: Request, paused: str = Form("0")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        store.set_posting_paused(account["id"], paused == "1")
+        return RedirectResponse("/account/security", status_code=303)
+
+    @app.post("/account/delete")
+    def delete_account_route(request: Request,
+                             totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page("Security",
+                      f"<p>{esc(err)}</p><p><a href='/account/security'>"
+                      "Back</a>.</p>", account),
+                status_code=400)
+        # Revoke at the provider first, best-effort, then delete
+        # everything the account owns.
+        for site in store.list_sites(account["id"]):
+            for conn in store.get_connections(site["id"]):
+                raw = conn.get("_detail_raw") or {}
+                if raw:
+                    revoke_provider_token(conn["kind"], raw)
+        store.delete_account(account["id"])
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if token:
+            store.delete_session(token)
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
     # -- customer dashboard --------------------------------------------------
     @app.get("/account/dashboard", response_class=HTMLResponse)
     def dashboard(request: Request, subscribed: str = "",
@@ -328,7 +624,6 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return redirect
         sites = store.list_sites(account["id"])
         jobs = store.list_jobs(account["id"])
-        entries = store.list_credit_entries(account["id"], limit=10)
         # The website the visitor typed on the landing page, carried
         # through sign-in and checkout — it arrives prefilled on the
         # add-website form, never retyped.
@@ -349,6 +644,19 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         status_badge = ("<span class='badge badge-ok'>Subscribed</span>"
                         if status == "active" else
                         "<span class='badge badge-off'>Not subscribed</span>")
+        # Two-factor status, one line in the plan card (the setup page
+        # itself lives at /account/security).
+        if store.totp_state(account["id"])["enabled"]:
+            totp_line = ("<p>Two-factor authentication: "
+                         "<strong>Enabled</strong> — a code is required at "
+                         "every sign-in. <a href='/account/security'>"
+                         "Security settings</a>.</p>")
+        else:
+            totp_line = ("<p>Two-factor authentication: "
+                         "<strong>Not set up</strong> — "
+                         "<a href='/account/security'>Set up "
+                         "two-factor</a>. You cannot use Ventoryn until "
+                         "it is set up.</p>")
         site_rows = ""
         for site in sites:
             connections = {c["kind"]: c
@@ -374,29 +682,43 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             f"<td>{j['credits_charged']} credits</td>"
             f"<td>{esc(j['result'] or '—')}</td></tr>"
             for j in jobs) or ("<tr><td colspan='4'>No jobs yet.</td></tr>")
-        entry_rows = "".join(
-            f"<tr><td>{'+' if e['delta'] > 0 else ''}{e['delta']}</td>"
-            f"<td>{esc(e['reason'])}</td></tr>"
-            for e in entries) or ("<tr><td colspan='2'>No credit "
-                                  "activity yet.</td></tr>")
+        # The plan card: name + status + credit balance only. The
+        # Subscribe pitch ($20/month) and the credit table ("what a
+        # credit buys") live ONLY on the Subscribe page — My account
+        # shows your plan, your websites, recent jobs, nothing else.
+        # The owner has no $20/month plan: "Permanent — owner", no
+        # price, no Subscribe button for himself.
+        if config.is_operator(account["email"]):
+            plan_card = (
+                "<div class='card'><h2>Your plan</h2>"
+                "<p><span class='badge badge-ok'>Permanent — owner"
+                "</span></p>"
+                "<p>The owner's account — no $20/month plan, no "
+                "charge.</p>"
+                f"<p>Credit balance: <span class='big'>"
+                f"{account['credits_balance']}</span> credits.</p>"
+                f"{totp_line}"
+                f"<p><a class='btn' href='{esc(add_site_href)}'>"
+                "Add a website</a></p></div>")
+        else:
+            plan_card = (
+                f"<div class='card'><h2>Your plan</h2>"
+                f"<p>{status_badge} {esc(PLAN_NAME)}</p>"
+                f"<p>Credit balance: <span class='big'>"
+                f"{account['credits_balance']}</span> credits &middot; "
+                f"{config.monthly_credits} credits included every month "
+                f"while subscribed.</p>"
+                f"{totp_line}"
+                f"<p><a class='btn' href='{esc(add_site_href)}'>"
+                "Add a website</a></p></div>")
         inner = f"""{notice}
-<div class='card'><h2>Your plan</h2>
-<p>{status_badge} {esc(PLAN_NAME)} — {esc(PLAN_PRICE_LABEL)}</p>
-<p>Credit balance: <span class='big'>{account['credits_balance']}</span>
-credits &middot; {config.monthly_credits} credits included every month
-while subscribed.</p>
-<p><a class='btn btn-primary' href='/account/subscribe'>Subscribe — $20/month</a>
-<a class='btn' href='{esc(add_site_href)}'>Add a website</a></p></div>
+{plan_card}
 <h2>Your websites</h2>{site_rows}
 <h2>Recent jobs</h2>
 <div class='table-wrap'><table>
 <tr><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>
-{job_rows}</table></div>
-<h2>Credit activity</h2>
-<div class='table-wrap'><table>
-<tr><th>Change</th><th>Reason</th></tr>{entry_rows}</table></div>
-<h2>What a credit buys</h2>{_credit_table()}"""
-        return _page("Your dashboard", inner, account)
+{job_rows}</table></div>"""
+        return _signed_page("My account", inner, account, current="account")
 
     # -- subscribe -----------------------------------------------------------
     @app.get("/account/subscribe", response_class=HTMLResponse)
@@ -405,6 +727,16 @@ while subscribed.</p>
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
+        # The owner has no $20/month plan: his Subscribe page shows
+        # the permanent subscription and no checkout button. Regular
+        # customers see the pitch and the credit table below.
+        if config.is_operator(account["email"]):
+            inner = ("<div class='card'><p><span class='badge "
+                     "badge-ok'>Permanent — owner</span></p>"
+                     "<p>The owner's account — no $20/month plan, no "
+                     "charge, nothing to subscribe to.</p></div>")
+            return _signed_page("Subscribe", inner, account,
+                                current="subscribe")
         try:
             pending_url = validate_site_url(site_url) if site_url else ""
         except ValueError:
@@ -432,7 +764,8 @@ while subscribed.</p>
                           f"btn-primary' href='/account/sites/new?url="
                           f"{esc(urllib.parse.quote(pending_url, safe=''))}'>"
                           f"Add {esc(pending_url)}</a></p></div>")
-            return _page("Subscribe", inner, account)
+            return _signed_page("Subscribe", inner, account,
+                                current="subscribe")
         if not config.stripe_configured:
             inner = (f"{notice}<div class='card'><h2>{esc(PLAN_NAME)} — "
                      f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
@@ -445,7 +778,8 @@ while subscribed.</p>
                      f"connection is still being set up, so checkout is "
                      f"not available on this page yet.</p></div>"
                      f"<h2>What a credit buys</h2>{_credit_table()}")
-            return _page("Subscribe", inner, account)
+            return _signed_page("Subscribe", inner, account,
+                                current="subscribe")
         inner = (f"{notice}<div class='card'><h2>{esc(PLAN_NAME)} — "
                  f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                  f"<ul><li>{config.monthly_credits} credits every month"
@@ -460,7 +794,8 @@ while subscribed.</p>
                  f"<p class='muted'>Checkout is handled by Stripe. "
                  f"Ventoryn never sees your card.</p></div>"
                  f"<h2>What a credit buys</h2>{_credit_table()}")
-        return _page("Subscribe", inner, account)
+        return _signed_page("Subscribe", inner, account,
+                                current="subscribe")
 
     @app.post("/account/subscribe")
     def subscribe_start(request: Request, site_url: str = Form("")):
@@ -468,6 +803,9 @@ while subscribed.</p>
         if redirect is not None:
             return redirect
         if account["subscription_status"] == "active":
+            return RedirectResponse("/account/dashboard", status_code=303)
+        if config.is_operator(account["email"]):
+            # The owner has no $20/month plan to buy.
             return RedirectResponse("/account/dashboard", status_code=303)
         try:
             pending_url = validate_site_url(site_url) if site_url else ""
@@ -479,7 +817,7 @@ while subscribed.</p>
                 site_url=pending_url or None)
         except SaasError as exc:
             return HTMLResponse(
-                _page("Subscribe", f"<p>{esc(exc)}</p>"
+                _signed_page("Subscribe", f"<p>{esc(exc)}</p>"
                       "<p><a href='/account/subscribe'>Back</a>.</p>",
                       account),
                 status_code=400)
@@ -500,11 +838,7 @@ while subscribed.</p>
                  "placeholder='yourwebsite.com'>"
                  "<label for='country'>Market country</label>"
                  "<select id='country' name='country'>"
-                 "<option value='ca' selected>Canada (ca)</option>"
-                 "<option value='us'>United States (us)</option>"
-                 "<option value='ht'>Haiti (ht)</option>"
-                 "<option value='fr'>France (fr)</option>"
-                 "<option value='gb'>United Kingdom (gb)</option>"
+                 f"{country_options('ca')}"
                  "</select>"
                  "<label for='language'>Market language</label>"
                  "<select id='language' name='language'>"
@@ -514,7 +848,7 @@ while subscribed.</p>
                  "</select>"
                  "<p><button class='btn btn-primary' type='submit'>"
                  "Add website</button></p></form></div>")
-        return _page("Add a website", inner, account)
+        return _signed_page("Add a website", inner, account)
 
     @app.post("/account/sites")
     def site_create(request: Request, url: str = Form(...),
@@ -526,10 +860,13 @@ while subscribed.</p>
             site = store.create_site(account["id"], url, country, language)
         except ValueError as exc:
             return HTMLResponse(
-                _page("Add a website",
+                _signed_page("Add a website",
                       f"<p>{esc(exc)}</p><p><a href='/account/sites/new'>"
                       "Back</a>.</p>", account),
                 status_code=400)
+        # The admin's recent-activity feed: a real website was added.
+        store.record_activity_event(account["id"], "site-added",
+                                    f"Website added: {site['url']}")
         return RedirectResponse(f"/account/sites/{site['id']}",
                                 status_code=303)
 
@@ -540,7 +877,7 @@ while subscribed.</p>
             return redirect
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
-            return HTMLResponse(_page("Website", "<p>Website not found.</p>",
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account), status_code=404)
         connections = store.get_connections(site_id)
         plausible_raw = (store.get_connection(site_id, "plausible") or {}
@@ -555,6 +892,21 @@ while subscribed.</p>
             badge = ("<span class='badge badge-ok'>Connected</span>" if
                      conn["status"] == "connected" else
                      "<span class='badge badge-off'>Not connected</span>")
+            consent = CONNECTION_CONSENT.get(kind, "")
+            scopes = CONNECTION_SCOPES.get(kind, "")
+            gate_html = ""
+            if kind in ("reddit", "x"):
+                _gate_ok, gate_reason = check_posting_allowed(
+                    store, account, site_id, kind, config)
+                gate_html = f"<p>Posting: {esc(gate_reason)}</p>"
+            disconnect_html = ""
+            if conn["status"] == "connected":
+                disconnect_html = (
+                    f"<form method='post' action='/account/sites/{esc(site_id)}"
+                    f"/connections/{kind}/disconnect'>"
+                    f"{_totp_field(account)}"
+                    "<p><button class='btn' type='submit'>Disconnect</button>"
+                    "</p></form>")
             if kind == "plausible":
                 form = ("<form method='post' "
                         f"action='/account/sites/{esc(site_id)}/connections/plausible'>"
@@ -582,11 +934,20 @@ while subscribed.</p>
                         "shown back'><p><button class='btn' type='submit'>"
                         "Connect Stripe sales</button></p></form>")
             else:
-                form = ("<p class='muted'>Ventoryn cannot connect this "
-                        "account yet — its own app registration is still "
-                        "needed. Nothing is faked here.</p>")
+                # Reddit / X: honest about the missing app registration —
+                # the operator registers Ventoryn's app in the provider's
+                # developer console first. Nothing is faked.
+                form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                        "<p class='muted'>To connect, the operator first "
+                        "registers Ventoryn's app in the provider's "
+                        "developer console — that step is not built here "
+                        "and nothing is faked.</p>")
             conn_rows += (f"<div class='card'><h3>{esc(kind.replace('_', ' '))} "
-                          f"{badge}</h3><p>{esc(conn['note'])}</p>{form}</div>")
+                          f"{badge}</h3><p>{esc(conn['note'])}</p>"
+                          f"<p>{esc(consent)}</p>"
+                          f"<p class='muted'>Scopes requested: "
+                          f"<code>{esc(scopes)}</code></p>"
+                          f"{gate_html}{form}{disconnect_html}</div>")
         jobs = store.list_jobs(account["id"], site_id=site_id)
         job_rows = "".join(
             f"<tr><td>{esc(j['job_type'].replace('_', ' '))}</td>"
@@ -594,18 +955,83 @@ while subscribed.</p>
             f"<td>{j['credits_charged']} credits</td>"
             f"<td>{esc(j['result'] or '—')}</td></tr>"
             for j in jobs) or ("<tr><td colspan='4'>No jobs yet.</td></tr>")
-        conversions = store.list_conversions(site_id)
-        conv_rows = "".join(
-            f"<tr><td>${c['amount_cents'] / 100:,.2f} "
-            f"{esc(c['currency'].upper())}</td>"
-            f"<td>{esc(c['source'])}</td>"
-            f"<td>{esc(c['created_at'][:10])}</td></tr>"
-            for c in conversions) or ("<tr><td colspan='3'>No paying "
-                                      "customers recorded yet.</td></tr>")
+        # Conversions from revenue_for_site: the three display
+        # settings are already applied — amounts are stripped from the
+        # rows when revenue is hidden, the rows are empty when details
+        # are hidden. Attribution: Verified (signature reached the
+        # payment), Pending (owner-recorded, no Stripe event yet),
+        # Unattributed (real Stripe payment, no signature) — never
+        # guessed. The signature tag is shown next to each attributed
+        # sale, so the customer sees which link/action it came from.
+        rev = store.revenue_for_site(site_id)
+        if rev is not None and rev["conversions"]:
+            def _attribution_label(c):
+                if c.get("attribution") == "ventoryn":
+                    return "Verified"
+                if c.get("source") == "manual":
+                    return "Pending"
+                return "Unattributed"
+            conv_rows = "".join(
+                "<tr><td>"
+                + (f"${c['amount_cents'] / 100:,.2f} "
+                   f"{esc(c['currency'].upper())}"
+                   if c.get("amount_cents") is not None else
+                   "<span class='unavailable'>hidden</span>")
+                + f"</td><td>{esc(c['source'])}</td>"
+                f"<td>{_attribution_label(c)}</td>"
+                f"<td>{esc(c.get('signature_tag') or '—')}</td>"
+                f"<td>{esc(c['created_at'][:10])}</td></tr>"
+                for c in rev["conversions"])
+        elif rev is not None and not site.get("details_show", 1):
+            conv_rows = ("<tr><td colspan='5'>Conversion details are "
+                         "hidden — turn them on in Data &amp; privacy "
+                         "controls above.</td></tr>")
+        else:
+            conv_rows = ("<tr><td colspan='5'>No paying customers "
+                         "recorded yet.</td></tr>")
+
+        def _chk(on):
+            return "checked" if on else ""
+        privacy_card = (f"<div class='card'><h2>Data &amp; privacy "
+                        f"controls</h2>"
+                        "<p class='muted'>Three separate choices. Revenue "
+                        "amounts are private by default; the count and the "
+                        "per-sale details are separate settings.</p>"
+                        f"<form method='post' action='/account/sites/{esc(site_id)}/privacy'>"
+                        f"<input type='hidden' name='return_to' value="
+                        f"'/account/sites/{esc(site_id)}'>"
+                        f"<label><input type='checkbox' name='revenue_show' "
+                        f"{_chk(site.get('revenue_show'))}> Show my revenue "
+                        f"on Ventoryn</label>"
+                        f"<label><input type='checkbox' name='count_show' "
+                        f"{_chk(site.get('count_show', 1))}> Show my "
+                        f"customer count</label>"
+                        f"<label><input type='checkbox' name='details_show' "
+                        f"{_chk(site.get('details_show', 1))}> Show "
+                        f"conversion details</label>"
+                        f"{_totp_field(account)}"
+                        "<p><button class='btn' type='submit'>Save privacy "
+                        "settings</button></p></form></div>")
+        signature_card = ("<div class='card'><h2>How attribution "
+                          "works</h2>"
+                          "<p>Every link Ventoryn creates for this site "
+                          "carries the Ventoryn signature: "
+                          "<code>utm_source=ventoryn</code> plus a signed "
+                          "tag (e.g. <code>vtn_…</code>) that is recorded "
+                          "when the link is created — which agent, which "
+                          "job, when.</p>"
+                          "<p>A sale counts as Ventoryn-attributed only "
+                          "when that tag reaches your checkout (it must be "
+                          "in the Stripe metadata). Use the Ventoryn links "
+                          "and the tag follows to checkout. A sale without "
+                          "the tag is reported as unattributed — never "
+                          "guessed.</p></div>")
         inner = f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
+{privacy_card}
+{signature_card}
 <h2>Run agent work</h2>
 <div class='card'><p>Credit balance: <strong>{account['credits_balance']}</strong></p>
 <form method='post' action='/account/sites/{esc(site_id)}/jobs'>
@@ -624,7 +1050,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 {job_rows}</table></div>
 <h2>Paying customers</h2>
 <div class='table-wrap'><table>
-<tr><th>Amount</th><th>Source</th><th>Date</th></tr>
+<tr><th>Amount</th><th>Source</th><th>Attribution</th><th>Signature</th><th>Date</th></tr>
 {conv_rows}</table></div>
 <div class='card'><h3>Record a sale manually</h3>
 <p class='muted'>If a customer paid outside Stripe, record it here so the
@@ -634,7 +1060,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <input type='text' id='amount' name='amount_usd' placeholder='19.00'>
 <p><button class='btn' type='submit'>Record sale</button></p></form></div>
 <h2>Connections</h2>{conn_rows}"""
-        return _page(site["url"], inner, account)
+        return _signed_page(site["url"], inner, account)
 
     @app.post("/account/sites/{site_id}/connections/{kind}")
     def connection_update(request: Request, site_id: str, kind: str,
@@ -646,11 +1072,11 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return redirect
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
-            return HTMLResponse(_page("Website", "<p>Website not found.</p>",
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account), status_code=404)
         if kind in ("reddit", "x"):
             return HTMLResponse(
-                _page(site["url"],
+                _signed_page(site["url"],
                       "<p>This connection is not available yet — Ventoryn's "
                       "own app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
@@ -691,9 +1117,66 @@ funnel counts it. This is the owner-recorded fallback.</p>
                     "to see real paying customers here.", detail)
         else:
             return HTMLResponse(
-                _page(site["url"], "<p>Unknown connection.</p>", account),
+                _signed_page(site["url"], "<p>Unknown connection.</p>", account),
                 status_code=400)
         return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    @app.post("/account/sites/{site_id}/privacy")
+    def site_privacy(request: Request, site_id: str,
+                     return_to: str = Form(""),
+                     revenue_show: str = Form(""),
+                     count_show: str = Form(""),
+                     details_show: str = Form(""),
+                     totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account), status_code=404)
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(err)}</p><p><a href='/account/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account),
+                status_code=400)
+        # A checkbox sends "on" when ticked and nothing at all when
+        # unticked — the three settings are independent.
+        store.set_revenue_show(site_id, revenue_show == "on")
+        store.set_count_show(site_id, count_show == "on")
+        store.set_details_show(site_id, details_show == "on")
+        dest = (return_to if return_to.startswith("/account/")
+                else f"/account/sites/{site_id}")
+        return RedirectResponse(dest, status_code=303)
+
+    @app.post("/account/sites/{site_id}/connections/{kind}/disconnect")
+    def connection_disconnect(request: Request, site_id: str, kind: str,
+                              totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account), status_code=404)
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(err)}</p><p><a href='/account/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account),
+                status_code=400)
+        conn = store.get_connection(site_id, kind) or {}
+        raw = conn.get("_detail_raw") or {}
+        _revoked, note = revoke_provider_token(kind, raw)
+        store.disconnect_connection(site_id, kind)
+        inner = (f"<p>{esc(kind.replace('_', ' '))} is disconnected. "
+                 f"{esc(note)}</p>"
+                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"{esc(site['url'])}</a>.</p>")
+        return HTMLResponse(_signed_page(site["url"], inner, account))
 
     @app.post("/account/sites/{site_id}/jobs")
     def run_job(request: Request, site_id: str,
@@ -703,16 +1186,16 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return redirect
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
-            return HTMLResponse(_page("Website", "<p>Website not found.</p>",
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account), status_code=404)
         cost = CREDIT_COSTS.get(job_type)
         if cost is None:
             return HTMLResponse(
-                _page(site["url"], "<p>Unknown job type.</p>", account),
+                _signed_page(site["url"], "<p>Unknown job type.</p>", account),
                 status_code=400)
         if job_type not in RUNNABLE_JOB_TYPES:
             return HTMLResponse(
-                _page(site["url"],
+                _signed_page(site["url"],
                       f"<p>{esc(job_type.replace('_', ' '))} is not "
                       f"available yet — it will cost {cost} credits when it "
                       f"lands. Nothing was charged.</p>"
@@ -722,7 +1205,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         balance = store.credit_balance(account["id"])
         if balance < cost:
             return HTMLResponse(
-                _page(site["url"],
+                _signed_page(site["url"],
                       f"<p>That job costs {cost} credits and the balance is "
                       f"{balance}. Nothing ran and nothing was charged. "
                       f"Top up by subscribing on the "
@@ -736,7 +1219,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             job = store.charge_credits(account["id"], job_type, site_id)
         except InsufficientCredits as exc:
             return HTMLResponse(
-                _page(site["url"],
+                _signed_page(site["url"],
                       f"<p>{esc(exc)}</p><p><a href='/account/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>", account),
                 status_code=402)
@@ -755,13 +1238,19 @@ funnel counts it. This is the owner-recorded fallback.</p>
                        f"{len(result['findings'])} findings · "
                        f"report {report_name}")
             store.set_job_result(job["id"], "done", summary)
+            # The admin's recent-activity feed: a real analyze ran.
+            store.record_activity_event(
+                account["id"], "job",
+                f"Analyze ran on {site['url']}: "
+                f"site {result['site_score']}/100, "
+                f"GEO {result['geo_score']}/100")
         except Exception as exc:  # noqa: BLE001 - refund and say so
             store.grant_credits(account["id"], cost,
                                 f"Refund — {job_type} job failed")
             store.set_job_result(job["id"], "failed",
                                  f"Failed — refunded {cost} credits ({exc})")
             return HTMLResponse(
-                _page(site["url"],
+                _signed_page(site["url"],
                       f"<p>The job failed ({esc(exc)}) and the {cost} "
                       f"credits were refunded.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
@@ -777,7 +1266,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return redirect
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
-            return HTMLResponse(_page("Website", "<p>Website not found.</p>",
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account), status_code=404)
         try:
             amount_cents = int(round(float(amount_usd) * 100))
@@ -785,7 +1274,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 raise ValueError
         except (ValueError, TypeError):
             return HTMLResponse(
-                _page(site["url"],
+                _signed_page(site["url"],
                       "<p>Enter a sale amount in dollars, e.g. 19.00.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account),

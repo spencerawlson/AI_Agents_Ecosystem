@@ -1,0 +1,196 @@
+"""Landing-page redesign per the consolidated brief + the corrected
+reference-image reading (2026-11-08).
+
+- Images 1 + 2 are both the landing page: WORDING from image 1
+  ("Your First 100 Paying Customers", "Let AI Find Them. You Approve
+  Every Move.", the five steps, the trust statements); DASHBOARD
+  PREVIEW VISUAL from image 2 (light, clean dashboard panels with
+  charts and tables) — the hero keeps image 1's navy background and
+  copy, the preview inside it is rebuilt in image 2's light-panel
+  style with Ventoryn's acquisition content (24/100, funnel, agents,
+  approval queue, attribution), NOT image 2's multi-business content.
+- Image 3 is the attribution-first repositioning (report pages).
+- Vector only: no bitmap references anywhere in the rendered page.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fastapi.testclient import TestClient
+
+from test_landing import _app_with
+
+
+def _landing():
+    app, _store = _app_with()
+    return TestClient(app).get("/")
+
+
+def test_hero_copy_exact():
+    r = _landing()
+    assert r.status_code == 200
+    assert "AI-Powered Customer Acquisition" in r.text
+    assert "Your First" in r.text and "Paying Customers." in r.text
+    # The "100" is gradient text (image 1).
+    assert 'class="grad">100</span>' in r.text
+    assert "Let AI Find Them. You Approve Every Move." in r.text
+    assert "Enter your website, connect your accounts" in r.text
+    assert "Start Getting Customers" in r.text
+    assert "See How It Works" in r.text
+    for trust in ("Human-approved actions",
+                  "Verified customer attribution",
+                  "Revenue privacy controls"):
+        assert trust in r.text
+    assert "Sign in with Google" in r.text
+
+
+def test_hero_is_two_column_with_preview_inside():
+    r = _landing()
+    assert 'class="wrap hero-grid"' in r.text
+    # The preview lives inside the hero now (no separate #preview section).
+    assert 'id="preview"' not in r.text
+    assert "See what Ventoryn sees" not in r.text
+    hero = r.text.split('<section class="hero"')[1].split("</section>")[0]
+    assert 'class="preview"' in hero
+
+
+def test_public_nav_with_product_dropdown():
+    r = _landing()
+    for link in ("#product", "#how-it-works", "#attribution",
+                 "#pricing", "#faq"):
+        assert f'href="{link}"' in r.text
+    assert 'id="nav-drop-btn"' in r.text
+    assert "Product" in r.text
+    assert "Dashboard preview" in r.text
+    assert "Who it" in r.text  # dropdown item "Who it's for"
+    assert "Sign In" in r.text and "Get Started" in r.text
+    assert 'id="nav-toggle"' in r.text  # mobile nav toggle
+
+
+def test_preview_light_panels_image2_style():
+    r = _landing()
+    # Dark mini sidebar + light main area (image 2's dashboard language).
+    assert 'class="preview-side"' in r.text
+    assert 'class="preview-main"' in r.text
+    for item in ("Overview", "Campaigns", "Agents", "Approvals",
+                 "Attribution", "Integrations", "Settings"):
+        assert item in r.text
+    assert "Last 30 Days" in r.text
+    # Progress ring (SVG), not just a bar.
+    assert "Progress ring: 24 of 100 verified customers" in r.text
+    assert "/ 100 Verified Customers" in r.text
+    assert "+6 new customers (7 days)" in r.text
+    # Illustrative label, everywhere the numbers appear.
+    assert "ILLUSTRATIVE DEMO DATA" in r.text
+    assert "Illustrative demo data." in r.text
+
+
+def test_preview_funnel_image1_numbers():
+    r = _landing()
+    for n in ("2,840", "186", "154", "4,320", "312"):
+        assert n in r.text
+    for label in ("Audience Opportunities", "Approved Actions",
+                  "Published Actions", "Attributed Visits", "Signups",
+                  "Verified Customers"):
+        assert label in r.text
+
+
+def test_preview_agents_queue_attribution():
+    r = _landing()
+    for agent in ("Audience Research Agent", "Social Listening Agent",
+                  "Content Agent", "Attribution Agent"):
+        assert agent in r.text
+    assert r.text.count("Running") >= 4
+    assert "Review proposed Reddit post" in r.text
+    assert "Approve X engagement draft" in r.text
+    assert "Review community outreach opportunity" in r.text
+    assert "Approved Campaign" in r.text and "Signed Link" in r.text
+    assert "Reddit Campaign #RD-4827" in r.text
+    # Revenue hidden by default in the demo.
+    assert "$••• hidden" in r.text
+    assert "Reveal example revenue" in r.text
+
+
+def test_how_it_works_image1():
+    r = _landing()
+    assert "Ventoryn" in r.text and "Works" in r.text
+    assert "From your website to your first 100 paying customers" in r.text
+    assert "in 5 simple steps." in r.text
+    for step in ("Enter Your Website", "Connect Your Accounts",
+                 "Let AI Research Opportunities", "Approve Every Action",
+                 "Track Verified Customers"):
+        assert step in r.text
+    assert r.text.count('class="step-icon"') == 5
+    assert "Start Your First 100 Journey" in r.text
+
+
+def test_features_attribution_differentiation_who():
+    r = _landing()
+    for f in ("AI Audience Discovery", "Smart Social Engagement",
+              "Social Listening", "Approval-First Automation",
+              "Verified Conversion Attribution", "Revenue Privacy"):
+        assert f in r.text
+    assert "Not Just Clicks. Real Paying Customers." in r.text
+    for step in ("AI Recommendation", "Customer Approval",
+                 "Signed Campaign Link", "Website Visit", "Stripe Payment",
+                 "Verified Conversion"):
+        assert step in r.text
+    assert "AI Does the Research. You Make the Decisions." in r.text
+    for who in ("SaaS founders", "Independent software developers",
+                "Startup teams", "Online service businesses",
+                "Digital product creators",
+                "Founders launching their first website"):
+        assert who in r.text
+
+
+def test_pricing_from_verified_stripe_data():
+    r = _landing()
+    assert "$20/month" in r.text
+    assert "100 credits" in r.text
+    for row in ("Analyze", "GEO audit", "Community listening",
+                "Social report", "SEO article", "Video render"):
+        assert row in r.text
+    assert "No free trial" in r.text
+    assert "No guarantees" in r.text
+
+
+def test_faq_ten_items_with_2fa_in_ten():
+    r = _landing()
+    assert r.text.count("<details>") == 10
+    for q in ("What does Ventoryn do?",
+              "Will Ventoryn post without my approval?",
+              "Which accounts can I connect?",
+              "How does Ventoryn verify paying customers?",
+              "Do I need Stripe?",
+              "Can I hide my revenue?",
+              "Is getting 100 customers guaranteed?",
+              "Can I disconnect my accounts?",
+              "How is my information protected?"):
+        assert q in r.text
+    # FAQ #10 covers mandatory 2FA + zero-trust.
+    assert "two-factor" in r.text.lower()
+    assert "zero-trust" in r.text.lower()
+
+
+def test_final_cta_footer_seo_vector_only():
+    r = _landing()
+    assert "Your Next Customer Is Out There." in r.text
+    assert "Explore the Platform" in r.text
+    assert "Account Login" in r.text
+    assert "coming soon" in r.text.lower()
+    # SEO: OG tags + JSON-LD, no og:image (bitmap — flagged for Spencer).
+    assert 'property="og:title"' in r.text
+    assert 'property="og:description"' in r.text
+    assert 'property="og:image"' not in r.text
+    assert "application/ld+json" in r.text
+    assert '"price": "20"' in r.text
+    # Vector only: no bitmap references, no <img> on the page.
+    for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        assert ext not in r.text
+    assert "<img" not in r.text
+    # No image-2 copy or concept.
+    assert "multiple businesses" not in r.text.lower()
+    assert "Get Started Free" not in r.text
+    assert "revenue/expense" not in r.text.lower()

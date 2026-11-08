@@ -96,10 +96,14 @@ def test_dashboard_escapes_xss():
     sign_in(client, store)
     r = client.get("/portfolio")
     assert r.status_code == 200
-    assert "<script>" not in r.text
+    # The page has its own <script> now (the hamburger menu), so the
+    # check is the PAYLOAD, not any script tag: the raw payload must
+    # never appear, and the business name renders escaped.
+    assert '<script>alert("xss")</script>' not in r.text
+    assert 'alert("xss")' not in r.text
     assert "&lt;script&gt;" in r.text
     r = client.get(f"/businesses/{biz.id}")
-    assert "<script>" not in r.text
+    assert '<script>alert("xss")</script>' not in r.text
 
 
 if __name__ == "__main__":

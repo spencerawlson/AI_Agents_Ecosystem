@@ -61,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.app_store_audit import audit_app  # noqa: E402
 from core.community_listening import listen_reddit  # noqa: E402
 from core.community_listening import reddit_fetch as _reddit_fetch  # noqa: E402
+from core.countries import normalize_country  # noqa: E402
 from core.geo_audit import GeoAuditor, score_findings  # noqa: E402
 from core.site_audit import SiteAuditor, http_fetch  # noqa: E402
 from dashboard.reports import reports_dir  # noqa: E402
@@ -174,8 +175,11 @@ def run_analysis(url: str, country: str, language: str | None = None,
                  fetch=None, reddit_fetch=None,
                  now: datetime | None = None) -> dict:
     """Run every audit for one site + market. All fetches are
-    injected, so tests pass fake ones and production uses real HTTP."""
+    injected, so tests pass fake ones and production uses real HTTP.
+    `country` must be a real ISO 3166-1 code — anything else raises
+    ValueError (the CLI and the dashboard validate the same way)."""
     now = now or datetime.now(timezone.utc)
+    country = normalize_country(country)
     fetch = fetch or http_fetch
     keywords = keywords or []
     community = normalize_subreddit(community) if community else ""
@@ -383,6 +387,11 @@ def main(argv=None) -> int:
     if not re.match(r"^https?://", url) or not urlparse(url).netloc:
         print(f"error: {url!r} is not a website URL — "
               "use https://example.com")
+        return 2
+    try:
+        country = normalize_country(country)
+    except ValueError as exc:
+        print(f"error: {exc}")
         return 2
     now = datetime.now(timezone.utc)
     result = run_analysis(url, country, language=language,

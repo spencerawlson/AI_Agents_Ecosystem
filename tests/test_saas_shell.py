@@ -55,6 +55,12 @@ def _account(store, sub="google-sub-1", email="ada@example.com"):
 def _login(client, store, account=None):
     account = account or _account(store)
     token = store.create_session(account["id"])
+    # Two-factor is mandatory: the test session has passed it.
+    from core.totp import code_at
+    if not store.totp_state(account["id"])["enabled"]:
+        setup = store.begin_totp_setup(account["id"])
+        store.confirm_totp_setup(account["id"], code_at(setup["secret"]))
+    store.mark_session_totp_verified(token)
     client.cookies.set(saas.SESSION_COOKIE, token)
     return account
 
@@ -167,12 +173,27 @@ def test_google_login_flow(client, store, config, monkeypatch):
                    params={"code": "auth-code", "state": state},
                    follow_redirects=False)
     assert r.status_code == 303
-    # The ShipItAyiti flow: after sign-in EVERYONE goes straight to
-    # Live Ops (/ops) — the operator and every customer alike.
-    assert r.headers["location"] == "/ops"
+    # Two-factor is mandatory from the first sign-in: a fresh account
+    # goes to the setup page first, not straight to Live Ops.
+    assert r.headers["location"] == \
+        "/account/two-factor/setup?next=%2Fops"
     assert saas.SESSION_COOKIE in r.headers.get("set-cookie", "")
     account = store.get_account_by_sub("google-sub-1")
     assert account is not None and account["email"] == "ada@example.com"
+
+    # Complete the forced setup: the QR page, then the code from the
+    # pending secret. The success page shows the backup codes once.
+    r = client.get("/account/two-factor/setup")
+    assert r.status_code == 200
+    assert "Two-factor authentication" in r.text
+    from core.totp import code_at
+    secret = store.get_totp_pending_secret(account["id"])
+    r = client.post("/account/two-factor/setup",
+                    data={"code": code_at(secret), "next": "/ops"},
+                    follow_redirects=False)
+    assert r.status_code == 200
+    assert "Two-factor is on" in r.text
+    assert "backup" in r.text.lower()
 
     r = client.get("/account/dashboard")
     assert r.status_code == 200
@@ -230,7 +251,14 @@ def test_dashboard_honest_unavailable_states(client, store):
     assert r.status_code == 200
     assert "road2cissp.com" in r.text
     assert "unavailable" in r.text  # funnel values, nothing connected yet
-    assert "$20/month" in r.text
+    # My account shows the plan name only — the Subscribe pitch
+    # ($20/month) and the credit table live only on the Subscribe
+    # page, never here.
+    assert "Ventoryn Growth" in r.text
+    assert "$20/month" not in r.text
+    assert "Subscribe — $20/month" not in r.text
+    assert "What a credit buys" not in r.text
+    assert "Credit activity" not in r.text
     # Mobile: viewport + 44px tap targets.
     assert "width=device-width" in r.text
     assert "min-height: 44px" in r.text
@@ -476,5 +504,22 @@ def test_manual_sale_is_the_owner_recorded_fallback(client, store):
                     data={"amount_usd": "19.00"}, follow_redirects=False)
     assert r.status_code == 303
     assert store.paying_customer_count(site["id"]) == 1
+    # Revenue is private by default: the sale counts toward the 100
+    # goal, but no dollar figure is shown.
+    r = client.get(f"/account/sites/{site['id']}")
+    assert "$19.00" not in r.text
+    assert "hidden" in r.text
+    assert "Pending" in r.text  # owner-recorded, no Stripe event yet
+    # Turn the revenue display on and the figure appears. The privacy
+    # toggle is a sensitive action: with 2FA enabled it needs a fresh
+    # code.
+    from _signin import fresh_totp_code
+    r = client.post(f"/account/sites/{site['id']}/privacy",
+                    data={"revenue_show": "on", "count_show": "on",
+                          "details_show": "on",
+                          "totp_code": fresh_totp_code(store, account["id"]),
+                          "return_to": f"/account/sites/{site['id']}"},
+                    follow_redirects=False)
+    assert r.status_code == 303
     r = client.get(f"/account/sites/{site['id']}")
     assert "$19.00" in r.text

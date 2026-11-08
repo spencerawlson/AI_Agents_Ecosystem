@@ -43,13 +43,20 @@ class CreativeAgent(BaseAgent):
     ]
     description = "Generates versioned creative assets tied to campaigns."
 
-    def __init__(self) -> None:
+    def __init__(self, signer=None) -> None:
         super().__init__()
         self._assets: dict[str, CreativeAsset] = {}
         self._counter = 0
         # The dispatcher may run concurrent tasks on this one handler
         # instance: ID generation must never hand out a duplicate.
         self._id_lock = threading.Lock()
+        # Ventoryn signature (optional): a callable
+        # ``(url, agent) -> (signed_url, tag)`` supplied by the SaaS
+        # shell when the agent works for a Ventoryn site (see
+        # core.signature.sign_agent_link). Reply drafts are signed
+        # through it; without it drafts stay unsigned and the output
+        # says so.
+        self._signer = signer
 
     def _next_id(self) -> str:
         with self._id_lock:
@@ -377,22 +384,32 @@ class CreativeAgent(BaseAgent):
                 dropped.append({"thread_id": thread["id"],
                                 "errors": errors})
                 continue
+            # The Ventoryn signature: the site link inside the draft
+            # is signed (UTM + vtn_ tag, recorded) when the shell
+            # supplied a signer for this site. Without one the draft
+            # is unsigned and the output says so — never faked.
+            from core.community_listening import sign_reply_draft
+            signed_text, tag = sign_reply_draft(
+                str(entry["text"]), site_url, signer=self._signer)
             asset = self.create(
                 business_id, "community",
                 f"[{thread.get('venue', '')}] {thread.get('title', '')}"[:80],
-                str(entry["text"]))
+                signed_text)
             replies.append({"thread_id": thread["id"],
                             "venue": thread.get("venue", ""),
                             "url": thread.get("url", ""),
                             "title": thread.get("title", ""),
-                            "text": str(entry["text"]),
+                            "text": signed_text,
+                            "signature_tag": tag,
                             "asset_id": asset.id})
         if not replies:
             raise ValueError("LLM returned no usable reply drafts")
+        signed = sum(1 for r in replies if r.get("signature_tag"))
         out: dict = {
             "replies": replies,
             "evidence": (f"{len(replies)} reply drafts stored as creative "
                          f"assets; {len(dropped)} dropped by the 90/10 gate; "
+                         f"{signed} signed with the Ventoryn signature; "
                          f"nothing posted"),
         }
         # An empty top-level field fails the orchestrator's peer review

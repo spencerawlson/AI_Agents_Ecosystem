@@ -57,7 +57,8 @@ def test_dashboard():
     assert "$800.00" in r.text  # net profit
     assert "/ops" in r.text  # Live Ops link, not the old "game" tag
     assert "Live Ops" in r.text
-    assert "biz-card" in r.text  # styled cards, not a bare table
+    assert "v-biz" in r.text  # colored cards, not a bare table
+    assert "v-stat" in r.text
 
     r = client.get(f"/businesses/{biz.id}")
     assert r.status_code == 200

@@ -35,6 +35,7 @@ from orchestrator.approvals import ApprovalGate
 
 from _signin import (
     OPERATOR_EMAIL,
+    fresh_totp_code,
     operator_store_and_config,
     sign_in,
     sign_in_as_operator,
@@ -44,8 +45,10 @@ CUSTOMER_A = ("ada@example.com", "google-sub-ada", "Ada")
 CUSTOMER_B = ("ben@example.com", "google-sub-ben", "Ben")
 
 
-def _app_with(registry=None, ledger=None, approvals=None, audit=None):
-    store, config = operator_store_and_config()
+def _app_with(registry=None, ledger=None, approvals=None, audit=None,
+              admin_password=""):
+    store, config = operator_store_and_config(
+        admin_password=admin_password)
     app = create_app(registry=registry or BusinessRegistry(),
                      ledger=ledger or Ledger(),
                      approvals=approvals or ApprovalGate(),
@@ -85,7 +88,9 @@ def test_landing_page_public():
         "id='landing-preview'" in r.text
     assert 'id="landing-cta"' in r.text or "id='landing-cta'" in r.text
     assert "Sign in with Google" in r.text
-    assert "How it works" in r.text
+    # Reference image 1: the How It Works heading names the product.
+    assert "How" in r.text and "Ventoryn" in r.text and "Works" in r.text
+    assert "From your website to your first 100 paying customers" in r.text
     # The preview reuses the analyze pipeline in-process.
     assert 'fetch("/api/analyze"' in r.text
     # No site is named as a proof case — the page stands on the
@@ -93,11 +98,13 @@ def test_landing_page_public():
     assert "Road to CISSP" not in r.text
     assert "road2cissp" not in r.text.lower()
     # Visual design: gradient hero, styled URL card, feature strip,
-    # how-it-works grid, pricing card.
-    assert "class='hero'" in r.text
-    assert "class='card url-card'" in r.text
-    assert "class='features'" in r.text
-    assert "class='card price-card'" in r.text
+    # how-it-works grid, pricing card (either quote style).
+    assert 'class="hero"' in r.text or "class='hero'" in r.text
+    assert 'class="card url-card"' in r.text or \
+        "class='card url-card'" in r.text
+    assert 'class="features"' in r.text or "class='features'" in r.text
+    assert 'class="card price-card"' in r.text or \
+        "class='card price-card'" in r.text
     # A bare domain is enough — the box says so.
     assert "yourwebsite.com" in r.text
     assert "no https:// needed" in r.text
@@ -188,7 +195,10 @@ def test_ops_shows_only_the_signed_in_accounts_sites():
     data = client_a.get("/api/snapshot").json()
     names = [b["name"] for b in data["businesses"]]
     assert names == ["ada.example.com"]
-    assert data["totals"]["revenue"] == 0.0
+    # Revenue is hidden by default (the revenue-display toggle is
+    # off) — the totals carry null, never a $0.00 that pretends the
+    # revenue is zero.
+    assert data["totals"]["revenue"] is None
     assert data["experiment_001"] is None
     assert all(a["tasks_completed"] == 0 for a in data["agents"])
     assert data["account"]["email"] == "ada@example.com"
@@ -247,18 +257,45 @@ def test_portfolio_scoped_and_redesigned():
     ledger.record(biz.id, "advertising", -1000)
     app, store = _app_with(registry=registry, ledger=ledger)
     client_a, account_a = _customer_client(app, store, CUSTOMER_A)
-    store.create_site(account_a["id"], "https://ada.example.com")
-    store.record_conversion(
-        store.list_sites(account_a["id"])[0]["id"], 1900, "usd", "manual")
+    site = store.create_site(account_a["id"], "https://ada.example.com")
+    store.record_conversion(site["id"], 1900, "usd", "manual")
+
+    # Revenue is hidden by default — the portfolio shows "hidden",
+    # never a dollar figure, until the customer turns it on.
+    r = client_a.get("/portfolio")
+    assert r.status_code == 200
+    assert "ada.example.com" in r.text
+    assert "hidden" in r.text
+    assert "$19.00" not in r.text
+    # Turn the revenue display on (a sensitive action — fresh 2FA
+    # code, since the account has 2FA enabled) AND connect Stripe
+    # sales: the dollar total appears only when the toggle is ON and
+    # Stripe is connected. (The privacy form sets all three toggles,
+    # so send all three as on.)
+    r = client_a.post(
+        f"/account/sites/{site['id']}/connections/stripe_sales",
+        data={"webhook_secret": "whsec_test"},
+        follow_redirects=False)
+    assert r.status_code == 303
+    r = client_a.post(
+        f"/account/sites/{site['id']}/privacy",
+        data={"revenue_show": "on", "count_show": "on",
+              "details_show": "on",
+              "totp_code": fresh_totp_code(store, account_a["id"])},
+        follow_redirects=False)
+    assert r.status_code == 303
 
     r = client_a.get("/portfolio")
     assert r.status_code == 200
     assert "ada.example.com" in r.text
     assert "$19.00" in r.text
     assert "Ops Store" not in r.text  # never another account's business
-    # Redesigned: styled cards, not a bare table.
-    assert "biz-card" in r.text
-    assert "stat-card" in r.text
+    # Redesigned: colored stat cards + per-business accent cards,
+    # in the Live Ops visual language — not a bare table.
+    assert "v-stat" in r.text
+    assert "v-biz" in r.text
+    assert "linear-gradient" in r.text
+    assert "v-accent-0" in r.text
     assert '<table border="1">' not in r.text
 
     client_op, _op = _operator_client(app, store)
@@ -277,6 +314,30 @@ def test_report_scoped_to_the_account():
     client_a, account_a = _customer_client(app, store, CUSTOMER_A)
     site = store.create_site(account_a["id"], "https://ada.example.com")
     store.record_conversion(site["id"], 1900, "usd", "manual")
+
+    # Revenue is hidden by default — the report shows "hidden" until
+    # the customer turns the display on.
+    r = client_a.get("/report")
+    assert r.status_code == 200
+    assert "ada.example.com" in r.text
+    assert "hidden" in r.text
+    assert "$19.00" not in r.text
+    # The dollar total appears only when the revenue display is ON
+    # and Stripe sales is connected — connect Stripe, then turn the
+    # toggle on (fresh 2FA code; the privacy form sets all three
+    # toggles, so send all three as on).
+    r = client_a.post(
+        f"/account/sites/{site['id']}/connections/stripe_sales",
+        data={"webhook_secret": "whsec_test"},
+        follow_redirects=False)
+    assert r.status_code == 303
+    r = client_a.post(
+        f"/account/sites/{site['id']}/privacy",
+        data={"revenue_show": "on", "count_show": "on",
+              "details_show": "on",
+              "totp_code": fresh_totp_code(store, account_a["id"])},
+        follow_redirects=False)
+    assert r.status_code == 303
 
     r = client_a.get("/report")
     assert r.status_code == 200
@@ -312,22 +373,36 @@ def test_approvals_scoped_and_gated_by_owner():
     assert len(gate.pending()) == 1
 
     # The operator sees it, with the approve button, and can approve.
+    # The decide POST redirects back to the list — the item leaves
+    # pending and shows under Decided with a confirmation.
     client_op, _op = _operator_client(app, store)
     r = client_op.get("/approvals")
     assert "ad_spend_increase" in r.text
     assert "Approve" in r.text
     r = client_op.post(f"/approvals/{appr.id}/decide",
-                       data={"approved": "true"})
-    assert r.status_code == 200
+                       data={"approved": "true"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/approvals?decided={appr.id}"
     assert len(gate.pending()) == 0
+    r = client_op.get(f"/approvals?decided={appr.id}")
+    assert r.status_code == 200
+    assert "Approved — nothing ships without your say-so." in r.text
+    assert "Pending (0)" in r.text
+    assert "Decided" in r.text
+    assert "approved" in r.text
 
 
 # ---------------------------------------------------------------------------
 # /admin — operator oversight only
 # ---------------------------------------------------------------------------
 
+# The admin password for these tests (VENTORYN_ADMIN_PASSWORD in
+# production — Spencer's value, never in chat or the repo).
+ADMIN_TEST_PASSWORD = "test-admin-password"
+
+
 def _admin_setup():
-    app, store = _app_with()
+    app, store = _app_with(admin_password=ADMIN_TEST_PASSWORD)
     client_a, account_a = _customer_client(app, store, CUSTOMER_A)
     _client_b, account_b = _customer_client(app, store, CUSTOMER_B)
     store.create_site(account_a["id"], "https://ada.example.com")
@@ -337,25 +412,78 @@ def _admin_setup():
     return app, store, client_a, client_op
 
 
-def test_admin_requires_the_operator_account():
-    app, store, client_a, _op = _admin_setup()
+def _admin_client(app):
+    """A client holding a valid admin password session — the only
+    thing that opens /admin."""
+    client = TestClient(app)
+    r = client.post("/admin/login", data={"password": ADMIN_TEST_PASSWORD},
+                    follow_redirects=False)
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/admin"
+    return client
+
+
+def test_admin_requires_the_password_not_a_google_session():
+    # A signed-in Google session alone never opens /admin — not
+    # even the operator's. Everyone without the password session is
+    # sent to the password-only login page.
+    app, store, client_a, client_op = _admin_setup()
     unsigned = TestClient(app)
     for path in ("/admin", "/admin/subscribers", "/admin/accounts",
                  "/admin/agents"):
-        assert unsigned.get(path, follow_redirects=False).status_code == 303
+        r = unsigned.get(path, follow_redirects=False)
+        assert r.status_code == 303, path
+        assert r.headers["location"] == "/admin/login", path
         r = client_a.get(path, follow_redirects=False)
         assert r.status_code == 303, path
-        assert r.headers["location"] == "/", path
+        assert r.headers["location"] == "/admin/login", path
+        r = client_op.get(path, follow_redirects=False)
+        assert r.status_code == 303, path
+        assert r.headers["location"] == "/admin/login", path
+
+
+def test_admin_login_wrong_password_fails_generically():
+    app, _store, _a, _op = _admin_setup()
+    client = TestClient(app)
+    r = client.post("/admin/login", data={"password": "wrong"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/login?error=1"
+    r = client.get("/admin/login?error=1")
+    assert "Incorrect admin password or code." in r.text
+    # No username, no email, no Google button on the login page.
+    assert "password" in r.text.lower()
+    assert "Google" not in r.text
+    assert "username" not in r.text.lower()
+    assert "Sign in with Google" not in r.text
+
+
+def test_admin_login_unset_password_denies_everyone():
+    # Fail closed: no VENTORYN_ADMIN_PASSWORD configured means the
+    # login always fails with the same generic message.
+    app, store = _app_with()  # no admin password
+    client_op, _op = _operator_client(app, store)
+    client = TestClient(app)
+    for who in (client, client_op):
+        r = who.post("/admin/login",
+                     data={"password": "anything"},
+                     follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/admin/login?error=1"
+        r = who.get("/admin", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/admin/login"
 
 
 def test_admin_lists_subscribers_and_accounts():
-    _app, _store, _client_a, client_op = _admin_setup()
-    r = client_op.get("/admin/subscribers")
+    app, _store, _client_a, _client_op = _admin_setup()
+    client = _admin_client(app)
+    r = client.get("/admin/subscribers")
     assert r.status_code == 200
     assert "ada@example.com" in r.text  # subscribed
     assert "ben@example.com" not in r.text  # canceled: not a subscriber
     assert "Subscribers" in r.text
-    r = client_op.get("/admin/accounts")
+    r = client.get("/admin/accounts")
     assert r.status_code == 200
     assert "ada@example.com" in r.text
     assert "ben@example.com" in r.text  # every account exists here
@@ -363,9 +491,10 @@ def test_admin_lists_subscribers_and_accounts():
 
 
 def test_admin_has_no_customer_portfolio_or_approval_content():
-    _app, _store, _client_a, client_op = _admin_setup()
+    app, _store, _client_a, _client_op = _admin_setup()
+    client = _admin_client(app)
     for path in ("/admin/subscribers", "/admin/accounts", "/admin/agents"):
-        r = client_op.get(path)
+        r = client.get(path)
         assert r.status_code == 200
         # No per-customer portfolio content…
         assert "ada.example.com" not in r.text
@@ -373,12 +502,14 @@ def test_admin_has_no_customer_portfolio_or_approval_content():
         # …no approvals, no approve buttons for customer items…
         assert "Approve" not in r.text
         assert "ad_spend_increase" not in r.text
-        # …and the admin nav, not the customer nav.
+        # …and the Admin group in the shared header (Live,
+        # Subscribers, Accounts, Agents). The customer menu items
+        # are in the header too — that is the shared navigation —
+        # but no customer portfolio CONTENT is on the page.
         assert "Subscribers" in r.text
         assert "Accounts" in r.text
         assert "Agents" in r.text
-        assert "My Portfolio" not in r.text
-        assert "My account" not in r.text
+        assert "Live" in r.text
 
 
 def test_admin_agents_shows_activity_and_problems():
@@ -387,9 +518,10 @@ def test_admin_agents_shows_activity_and_problems():
                  tokens_used=100, cost_usd=0.02, result={"tick": 1})
     audit.record("marketing", "run_failed", task_id="t2", run_id="r2",
                  tokens_used=50, cost_usd=0.01, error="boom")
-    app, store = _app_with(audit=audit)
-    client_op, _op = _operator_client(app, store)
-    r = client_op.get("/admin/agents")
+    app, store = _app_with(audit=audit,
+                           admin_password=ADMIN_TEST_PASSWORD)
+    client = _admin_client(app)
+    r = client.get("/admin/agents")
     assert r.status_code == 200
     assert "discovery" in r.text
     assert "marketing" in r.text
@@ -428,9 +560,13 @@ def test_customer_nav_exact_and_no_removed_links():
                      "My account", "Subscribe", "Sign out"):
             assert item in r.text, (path, item)
         for gone in ("Experiments", "Experiment 001", "Daily plan",
-                     "Attribution", "for website owners",
-                     "Back to portfolio"):
+                     "for website owners", "Back to portfolio"):
             assert gone not in r.text, (path, gone)
+        # "Attribution" is a removed NAV item, but the word legitimately
+        # appears on the rebuilt report page itself (its title is
+        # "Acquisition & Attribution"). Check the menu only.
+        menu = r.text.split("<nav class='v-menu'")[1].split("</nav>")[0]
+        assert "Attribution" not in menu, path
         # The nav never links the old /game address.
         assert 'href="/game"' not in r.text
 
@@ -522,13 +658,27 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
 
     state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
 
-    # 2. Google calls back — everyone lands on Live Ops, with the URL.
+    # 2. Google calls back — two-factor is mandatory from the first
+    # sign-in, so the callback sends the fresh account to the setup
+    # page (with the Live Ops destination + URL carried as `next`).
     r = client.get("/account/auth/google/callback",
                    params={"code": "auth-code", "state": state},
                    follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"] == \
-        "/ops?site_url=https%3A%2F%2Fada.example.com"
+        "/account/two-factor/setup?next=%2Fops%3Fsite_url%3Dhttps%253A%252F%252Fada.example.com"
+    account = store.get_account_by_sub("google-sub-ada")
+    r = client.get("/account/two-factor/setup")
+    assert r.status_code == 200
+    assert "Two-factor authentication" in r.text
+    from core.totp import code_at
+    secret = store.get_totp_pending_secret(account["id"])
+    r = client.post("/account/two-factor/setup",
+                    data={"code": code_at(secret),
+                          "next": "/ops?site_url=https%3A%2F%2Fada.example.com"},
+                    follow_redirects=False)
+    assert r.status_code == 200
+    assert "Two-factor is on" in r.text
 
     # 3. /ops (signed in) prefills the analyzer with that URL.
     r = client.get("/ops?site_url=https%3A%2F%2Fada.example.com")

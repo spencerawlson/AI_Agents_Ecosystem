@@ -21,6 +21,8 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from core.countries import normalize_country
+
 _MAX_JOBS = 20
 
 
@@ -117,11 +119,9 @@ def validate_url(raw: object) -> str:
 
 
 def validate_country(raw: object) -> str:
-    """2-letter market country code, lowercased; empty means "ca"."""
-    code = str(raw or "").strip().lower() or "ca"
-    if not re.fullmatch(r"[a-z]{2}", code):
-        raise ValueError("country must be a 2-letter code (e.g. ca)")
-    return code
+    """Market country: any real ISO 3166-1 alpha-2 code, lowercased;
+    empty means "ca". Anything else is rejected."""
+    return normalize_country(raw)
 
 
 def validate_language(raw: object) -> str | None:

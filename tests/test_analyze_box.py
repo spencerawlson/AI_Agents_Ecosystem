@@ -304,7 +304,10 @@ def test_ops_page_has_analyze_panel(client):
     assert 'id="analyze-form"' in r.text
     assert 'id="analyze-url"' in r.text
     assert 'id="analyze-country"' in r.text
-    assert 'value="ca"' in r.text  # market country defaults to ca
+    # Market country defaults to ca — the full ISO selector has ca
+    # selected (an <option>, not a text input's value any more).
+    assert "<option value='ca' selected>" in r.text
+    assert 'Canada (ca)' in r.text
     assert 'id="analyze-language"' in r.text
     assert 'id="analyze-submit"' in r.text
     assert 'id="analyze-status"' in r.text

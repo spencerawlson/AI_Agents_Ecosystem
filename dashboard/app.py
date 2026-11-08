@@ -18,8 +18,11 @@ Operator tools (operator account only, by direct URL):
   GET /reports, /reports/{name}
   POST /api/tick, /api/reset
 
-Admin (operator only, separate URL):
-  GET /admin               -> /admin/subscribers
+Admin (admin password only — a signed-in Google session alone
+never opens it; the password comes from VENTORYN_ADMIN_PASSWORD,
+see docs/ventoryn-saas-shell.md):
+  GET /admin               live now + recent activity (operator home)
+  GET /admin/login         password-only login page
   GET /admin/subscribers   who subscribed
   GET /admin/accounts      all accounts on the platform
   GET /admin/agents        agent activity, health, problems (aggregates
@@ -36,6 +39,7 @@ env config, it is never hardcoded.
 from __future__ import annotations
 
 import html
+import hmac
 import os
 import re
 import threading
@@ -45,10 +49,17 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.audit import AuditLog
+from core.qrcode import qr_svg
+from core.countries import country_options
 from core.experiments import ExperimentEngine
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import SESSION_COOKIE
+import urllib.parse
+
+from core.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
+                       CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
+from core.totp import provisioning_uri
+from dashboard.nav import HEADER_CSS, header_html
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 
@@ -56,6 +67,33 @@ from orchestrator.engine import Orchestrator
 def esc(value: object) -> str:
     """HTML-escape any value interpolated into templates."""
     return html.escape(str(value), quote=True)
+
+
+# Labels for the admin's recent-activity feed (core.saas kinds).
+_ACTIVITY_KIND_LABELS = {
+    "sign-in": "Signed in",
+    "site-added": "Website added",
+    "subscribed": "Subscribed",
+    "job": "Job run",
+}
+
+
+def _ago(iso: str | None) -> str:
+    """Human "last seen" for the admin's live list: "just now",
+    "2 min ago"."""
+    if not iso:
+        return "—"
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(str(iso))
+    except ValueError:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    secs = (datetime.now(timezone.utc) - dt).total_seconds()
+    if secs < 60:
+        return "just now"
+    return f"{int(secs // 60)} min ago"
 
 
 # Events that describe one agent run — as opposed to summaries like
@@ -350,6 +388,27 @@ def create_app(
         return _saas_store.get_account_by_session(
             request.cookies.get(SESSION_COOKIE, ""))
 
+    def _activity_label(path: str) -> str:
+        """What the admin's "Live now" list shows as the last action
+        for a request path. The /api/snapshot poll (every 5s while
+        Live Ops is open) counts as Live Ops — that is how an open
+        page stays live."""
+        if path in ("/ops", "/game", "/api/snapshot"):
+            return "Live Ops"
+        if path.startswith("/portfolio"):
+            return "Portfolio"
+        if path.startswith("/approvals"):
+            return "Approvals"
+        if path.startswith("/report"):
+            return "Report"
+        if path.startswith("/account/subscribe"):
+            return "Subscribe"
+        if path.startswith("/account"):
+            return "My account"
+        if path.startswith("/admin"):
+            return "Admin"
+        return "Browsing"
+
     def _need_account(request: Request):
         """(account, None) or (None, redirect to the landing page)."""
         account = _current_account(request)
@@ -383,22 +442,28 @@ def create_app(
         """The account's own SaaS sites as business rows, so the
         portfolio, report and Live Ops render them like any other
         business. Revenue is real: the sum of recorded conversions
-        for the site. There is no per-site dollar cost in the model,
-        so costs read $0 — the page says so where it matters."""
+        for the site — but ONLY when the site's revenue display is
+        ON (revenue_for_site). When the customer chose to hide it,
+        revenue and net profit are None, and every surface that
+        shows them renders "hidden" instead of a dollar figure.
+        There is no per-site dollar cost in the model, so costs
+        read $0 — the page says so where it matters."""
         rows = []
         for site in _saas_store.list_sites(account["id"]):
-            revenue = sum(
-                c["amount_cents"]
-                for c in _saas_store.list_conversions(site["id"])) / 100
+            rev = _saas_store.revenue_for_site(site["id"])
+            revenue = (rev["revenue"]["total_cents"] / 100
+                       if rev and rev["revenue"] else None)
             rows.append({
                 "id": f"site:{site['id']}",
                 "name": site["host"] or site["url"],
                 "url": site["url"],
                 "business_type": "website",
                 "status": "active",
-                "revenue": round(revenue, 2),
+                "revenue": (round(revenue, 2) if revenue is not None
+                            else None),
                 "total_costs": 0.0,
-                "net_profit": round(revenue, 2),
+                "net_profit": (round(revenue, 2) if revenue is not None
+                               else None),
             })
         return rows
 
@@ -414,12 +479,16 @@ def create_app(
         }
 
     # -- navigation ---------------------------------------------------------
-    # The customer nav (their own pages only — never an operator tool,
-    # never another account's data): Live Ops, My Portfolio, Approvals,
-    # Report, My account, Subscribe, Sign out. The admin nav is its
-    # own thing (Subscribers, Accounts, Agents). Neither nav links
-    # Experiments, Experiment 001, Daily plan, Attribution, or
-    # "for website owners" — those stay reachable by direct URL only.
+    # Signed-in pages share ONE header (dashboard.nav): centered
+    # Ventoryn brand + page title, and a hamburger menu holding every
+    # section. The old pill row of links is gone. _CUSTOMER_NAV is
+    # kept ONLY for the operator's agent & financial report, which
+    # renders its own shell (that page is untouched). The customer
+    # /report was rebuilt per the attribution reference (image 3) and
+    # now uses the shared header like every other signed-in page.
+    # Neither links Experiments, Experiment 001, Daily plan,
+    # Attribution, or "for website owners" — those stay reachable by
+    # direct URL only.
     _CUSTOMER_NAV = (
         "<nav class='customer-nav' aria-label='Ventoryn'>"
         "<a href='/ops'>Live Ops</a>"
@@ -429,11 +498,6 @@ def create_app(
         "<a href='/account/dashboard'>My account</a>"
         "<a href='/account/subscribe'>Subscribe</a>"
         "<a href='/account/logout'>Sign out</a></nav>")
-    _ADMIN_NAV = (
-        "<nav class='admin-nav' aria-label='Ventoryn admin'>"
-        "<a href='/admin/subscribers'>Subscribers</a>"
-        "<a href='/admin/accounts'>Accounts</a>"
-        "<a href='/admin/agents'>Agents</a></nav>")
     _NAV_CSS = """
 .customer-nav, .admin-nav { display: flex; flex-wrap: wrap; gap: 6px;
   margin: 0 0 16px; }
@@ -458,14 +522,154 @@ def create_app(
 .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
   margin: 12px 0; background: #fff; }
 """
+    # Portfolio color — the Live Ops visual language, not the plain
+    # grey stat cards above (those stay exactly as they are: /report
+    # uses them, and /report must not change). Violet gradients on
+    # the three stat cards, a per-business accent top border on the
+    # business cards, same typography and spacing as Live Ops.
+    _PORTFOLIO_CSS = """
+.v-stats { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 12px; margin: 16px 0; }
+@media (max-width: 560px) { .v-stats { grid-template-columns: 1fr; } }
+.v-stat { border-radius: 16px; padding: 18px; color: #fff;
+  box-shadow: 0 2px 10px rgba(109, 40, 217, 0.12); }
+.v-stat-1 { background: linear-gradient(135deg, #6d28d9, #8b5cf6); }
+.v-stat-2 { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
+.v-stat-3 { background: linear-gradient(135deg, #059669, #10b981); }
+.v-stat-label { display: block; font-size: 13px; text-transform: uppercase;
+  letter-spacing: 1px; opacity: .85; }
+.v-stat-value { display: block; font-size: 28px; font-weight: 900;
+  margin-top: 4px; }
+.v-biz-grid { display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px; margin: 16px 0; }
+.v-biz { border-radius: 16px; padding: 18px; background: #fff;
+  border: 1px solid #e5e0f5; border-top: 6px solid #6d28d9;
+  box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
+.v-accent-0 { border-top-color: #6d28d9; }
+.v-accent-1 { border-top-color: #0ea5e9; }
+.v-accent-2 { border-top-color: #059669; }
+.v-accent-3 { border-top-color: #f59e0b; }
+.v-biz h3 { margin: 0 0 2px; font-size: 20px; color: #1a1a2e; }
+.v-biz-url { color: #666; margin: 0 0 10px; font-size: 14px; }
+.v-biz dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
+  margin: 0 0 12px; font-size: 15px; }
+.v-biz dt { color: #666; }
+.v-biz dd { margin: 0; font-weight: bold; text-align: right; }
+"""
+    # Admin look — a blend of the Kay Ayiti and ShipItAyiti admin
+    # boards: Kay Ayiti's light board (pale blue-grey background,
+    # white cards, radius 20px, red primary) with ShipItAyiti's
+    # slate/navy headers and ringed rounded cards. Same rules as the
+    # Kay Ayiti / ShipItAyiti boards: counts and tables only, never
+    # a customer's portfolio or approvals.
+    _REPORT_CSS = """
+/* Customer Acquisition & Attribution report (reference image 3):
+   progress ring, status donut, flow steps, trend chart. All SVG is
+   hand-built; every figure comes from real store data. */
+.v-report-grid { display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 16px; margin: 16px 0; }
+.v-report-grid .card { margin: 0; }
+.v-progress { text-align: center; }
+.v-bar-track { height: 12px; background: #e9e4fb; border-radius: 999px;
+  overflow: hidden; margin: 12px 0; }
+.v-bar-fill { height: 100%; background: linear-gradient(90deg, #8b5cf6,
+  #6d28d9); border-radius: 999px; }
+.v-flow { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch;
+  margin: 12px 0; }
+.v-flow-step { flex: 1 1 140px; border: 1px solid #e5e0f5;
+  border-radius: 10px; padding: 10px 12px; background: #faf8ff; }
+.v-flow-step.done { border-color: #16a34a; background: #f0fdf4; }
+.v-flow-step strong { display: block; font-size: 14px; }
+.v-flow-step span { font-size: 13px; color: #666; }
+.v-flow-check { font-weight: bold; color: #16a34a; }
+.v-flow-arrow { align-self: center; color: #6d28d9; font-weight: bold; }
+.v-donut-wrap { display: flex; gap: 16px; align-items: center;
+  flex-wrap: wrap; }
+.v-legend { list-style: none; padding: 0; margin: 0; }
+.v-legend li { margin: 6px 0; font-size: 14px; }
+.v-dot { display: inline-block; width: 12px; height: 12px;
+  border-radius: 50%; margin-right: 6px; }
+.v-trend { width: 100%; height: auto; display: block; }
+.v-bbar { display: flex; align-items: center; gap: 8px; margin: 8px 0;
+  font-size: 14px; }
+.v-bbar-label { flex: 0 0 110px; }
+.v-bbar-track { flex: 1; height: 14px; background: #f3f4f6;
+  border-radius: 999px; overflow: hidden; }
+.v-bbar-fill { display: block; height: 100%; border-radius: 999px; }
+.v-bbar-num { flex: 0 0 32px; text-align: right; font-weight: bold; }
+.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
+  margin: 12px 0; background: #fff; }
+.card h2, .card h3 { margin-top: 0; }
+.big { font-size: 32px; font-weight: bold; color: #6d28d9; }
+.btn { display: inline-block; min-height: 44px; line-height: 44px;
+  padding: 0 20px; margin: 4px 4px 4px 0; border-radius: 8px;
+  border: 1px solid #ccc; background: #fff; color: #222; font-size: 16px;
+  cursor: pointer; text-decoration: none; text-align: center;
+  box-sizing: border-box; }
+.pill { display: inline-block; font-size: 12px; font-weight: bold;
+  border-radius: 999px; padding: 3px 10px; background: #ede9fe;
+  color: #6d28d9; white-space: nowrap; }
+.pill.green { background: #dcfce7; color: #166534; }
+.card form label { display: block; margin: 12px 0 4px; font-weight: bold; }
+.card form input[type=text] { width: 100%; min-height: 44px;
+  padding: 8px 10px; font-size: 16px; border: 1px solid #ccc;
+  border-radius: 8px; box-sizing: border-box; }
+@media (max-width: 560px) {
+  .v-report-grid { grid-template-columns: 1fr; }
+}
+"""
 
-    def _operator_page(title: str, inner: str) -> str:
-        """Shell for the signed-in pages: nav + content, mobile-first,
+    _ADMIN_CSS = """
+body.v-admin { background: #f1f5f9; }
+.v-admin .v-title { color: #0f172a; }
+.v-admin-card { background: #fff; border: 1px solid #e2e8f0;
+  border-radius: 16px; padding: 18px; margin: 14px 0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }
+.v-admin-card h2 { margin: 0 0 10px; color: #0f172a; font-size: 20px; }
+.v-admin-card h2 .v-count { color: #dc2626; }
+.v-admin-card .v-live-dot { display: inline-block; width: 9px; height: 9px;
+  border-radius: 50%; background: #16a34a; margin-right: 6px; }
+.v-admin-card th { background: #f8fafc; color: #0f172a;
+  border-bottom: 2px solid #0f172a; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .5px; }
+.v-admin-card td { border-bottom: 1px solid #e2e8f0; }
+.v-admin .v-error { color: #dc2626; font-weight: bold; }
+.v-auth-card { max-width: 420px; margin: 60px auto; background: #fff;
+  border: 1px solid #e2e8f0; border-radius: 20px; padding: 28px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08); }
+.v-auth-card h1 { margin-top: 0; color: #0f172a; }
+.v-auth-card label { display: block; margin: 12px 0 4px; font-weight: bold; }
+.v-auth-card input[type=password] { width: 100%; min-height: 52px;
+  padding: 8px 14px; font-size: 18px; border: 2px solid #c4b5fd;
+  border-radius: 10px; box-sizing: border-box; background: #fff; }
+.v-auth-card input[type=text] { width: 100%; min-height: 52px;
+  padding: 8px 14px; font-size: 18px; border: 2px solid #c4b5fd;
+  border-radius: 10px; box-sizing: border-box; background: #fff; }
+.v-admin-card .qr { background: #fff; border: 1px solid #e2e8f0;
+  border-radius: 12px; padding: 12px; display: inline-block;
+  margin: 12px 0; }
+.v-admin-card .codes { font-family: monospace; font-size: 17px;
+  line-height: 1.9; background: #fafafa; border: 1px solid #e2e8f0;
+  border-radius: 8px; padding: 12px 16px; }
+.v-auth-card input[type=password]:focus { outline: none;
+  border-color: #6d28d9; }
+.v-admin-foot { text-align: center; margin: 24px 0 8px; font-size: 14px; }
+.v-admin-foot a { color: #64748b; }
+"""
+
+    def _operator_page(title: str, inner: str, account=None,
+                       current: str | None = "live-ops",
+                       is_operator: bool = False,
+                       extra_css: str = "") -> str:
+        """Shell for the signed-in pages: the shared centered header
+        (brand + page title + hamburger menu) + content, mobile-first,
         the same light styling as the Live Ops page."""
         return (f"<html><head><title>{esc(title)} — Ventoryn</title>"
                 f"<meta name='viewport' content='width=device-width,"
-                f" initial-scale=1'><style>{_PAGE_CSS}{_NAV_CSS}</style>"
-                f"</head><body>{_CUSTOMER_NAV}<h1>{esc(title)}</h1>"
+                f" initial-scale=1'><style>{_PAGE_CSS}{HEADER_CSS}"
+                f"{extra_css}</style>"
+                f"</head><body>{header_html(current, is_operator, title)}"
                 f"{inner}</body></html>")
 
     # -- public landing page ----------------------------------------------
@@ -477,64 +681,305 @@ def create_app(
     # a visitor who is not signed in. A signed-in visitor gets a
     # "Continue to Live Ops" button — /ops is their home.
     _LANDING_CSS = """
-/* Ventoryn landing page: light, playful, colorful — the Live Ops
-   visual language. Violet #C4B5FD is the action color, deep violet
-   #6D28D9 the accent; soft lavender surfaces, white cards. */
+/* Ventoryn landing page — premium AI SaaS (consolidated brief §2).
+   Deep navy / near-black hero, electric violet + blue gradients,
+   soft glass accents, clean white content sections. Vector only:
+   every graphic is inline SVG or CSS — no bitmaps anywhere. */
+:root { --navy: #0b0e1e; --navy-2: #12172e; --violet: #8b5cf6;
+  --violet-soft: #c4b5fd; --violet-deep: #6d28d9; --blue: #3b82f6;
+  --ink: #1a1a2e; --muted: #55556e; --line: #e5e0f5; --bg: #ffffff;
+  --bg-tint: #f6f4ff; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-  sans-serif; margin: 0; color: #1a1a2e; background: #f6f4ff; }
-.wrap { max-width: 880px; margin: 0 auto; padding: 0 16px 40px; }
-.hero { background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 55%,
-  #c4b5fd 100%); text-align: center; padding: 48px 20px 40px; }
-.hero-inner { max-width: 720px; margin: 0 auto; }
-.tag { display: inline-block; background: #fff; color: #6d28d9;
-  border-radius: 999px; padding: 6px 16px; font-weight: bold;
-  font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
-.hero h1 { font-size: 42px; line-height: 1.12; margin: 16px 0 12px;
-  color: #1a1a2e; }
-.hero p { font-size: 19px; line-height: 1.5; color: #3f3f56;
-  margin: 0 auto; max-width: 600px; }
-.card { border: 1px solid #e5e0f5; border-radius: 16px; padding: 20px;
+  sans-serif; margin: 0; color: var(--ink); background: var(--bg);
+  line-height: 1.55; }
+a { color: var(--violet-deep); }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+.muted { color: var(--muted); font-size: 14px; }
+.btn { display: inline-block; min-height: 44px; line-height: 44px;
+  padding: 0 22px; margin: 4px 4px 4px 0; border-radius: 10px;
+  border: 1px solid #ccc; background: #fff; color: #222; font-size: 16px;
+  cursor: pointer; text-decoration: none; text-align: center; }
+.btn-primary { background: var(--violet-soft); border-color: var(--violet-soft);
+  color: #111; font-weight: bold; }
+.btn-dark { background: var(--navy); border-color: var(--navy); color: #fff;
+  font-weight: bold; }
+.btn-ghost { background: transparent; border-color: rgba(255,255,255,.45);
+  color: #fff; }
+.btn-google { background: #fff; border-color: #888; }
+/* -- sticky public nav (§3) -- */
+.site-nav { position: sticky; top: 0; z-index: 50; background: var(--navy);
+  color: #fff; }
+.site-nav .wrap { display: flex; align-items: center; gap: 16px;
+  min-height: 60px; }
+.brand { font-size: 22px; font-weight: 800; letter-spacing: .02em;
+  color: #fff; text-decoration: none; white-space: nowrap; }
+.brand span { color: var(--violet-soft); }
+.nav-links { display: flex; gap: 4px; margin: 0 auto; list-style: none;
+  padding: 0; }
+.nav-links a { color: #d9d4f5; text-decoration: none; font-size: 15px;
+  padding: 10px 12px; border-radius: 8px; min-height: 44px;
+  display: inline-flex; align-items: center; }
+.nav-links a:hover { color: #fff; background: rgba(255,255,255,.08); }
+.nav-item { position: relative; }
+.nav-drop-btn { background: none; border: 0; color: #d9d4f5; font: inherit;
+  font-size: 15px; padding: 10px 12px; border-radius: 8px; min-height: 44px;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.nav-drop-btn:hover { color: #fff; background: rgba(255,255,255,.08); }
+.nav-drop { display: none; position: absolute; top: 100%; left: 0;
+  background: var(--navy); border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px; padding: 6px; min-width: 210px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.4); z-index: 20; }
+.nav-item.open .nav-drop { display: block; }
+.nav-drop a { display: block; padding: 10px 12px; }
+.nav-actions { display: flex; gap: 8px; align-items: center;
+  margin-left: auto; }
+.nav-actions .btn { min-height: 40px; line-height: 40px; margin: 0;
+  padding: 0 16px; font-size: 15px; }
+.nav-toggle { display: none; background: none; border: 1px solid
+  rgba(255,255,255,.35); border-radius: 8px; color: #fff; min-width: 44px;
+  min-height: 44px; font-size: 22px; cursor: pointer; margin-left: auto; }
+/* -- hero (§4) — two columns on desktop: copy left, dashboard
+   preview right (reference image 1). -- */
+.hero { background: radial-gradient(1100px 520px at 75% -10%, rgba(139,92,246,.45),
+  transparent 60%), radial-gradient(900px 480px at 10% 110%, rgba(59,130,246,.35),
+  transparent 55%), linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
+  color: #fff; padding: 56px 0 64px; }
+.hero .wrap { max-width: 1280px; }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 44px; align-items: start; }
+.hero-copy { min-width: 0; }
+.eyebrow { display: inline-block; background: rgba(196,181,253,.16);
+  border: 1px solid rgba(196,181,253,.45); color: var(--violet-soft);
+  border-radius: 999px; padding: 6px 16px; font-weight: bold; font-size: 13px;
+  letter-spacing: .08em; text-transform: uppercase; }
+.hero h1 { font-size: 54px; line-height: 1.05; margin: 20px 0 10px;
+  letter-spacing: -.01em; }
+.grad { background: linear-gradient(90deg, #c4b5fd, #8b5cf6);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero h2.sub { font-size: 24px; line-height: 1.25; font-weight: 600;
+  margin: 0 0 16px; color: #e6e2ff; }
+.hero p.lede { font-size: 18px; line-height: 1.55; color: #c9c4e8;
+  margin: 0 0 24px; max-width: 560px; }
+.hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0 20px; }
+.hero-ctas .btn { min-height: 52px; line-height: 52px; padding: 0 28px;
+  font-size: 17px; }
+.trust { list-style: none; padding: 0; margin: 0 0 8px; display: flex; gap: 8px 24px;
+  flex-wrap: wrap; color: #b9b3dd; font-size: 14px; }
+.trust li::before { content: "\\2713  "; color: var(--violet-soft);
+  font-weight: bold; }
+.signed-banner { background: #ede9fe; border-bottom: 1px solid var(--line);
+  padding: 10px 0; text-align: center; font-size: 15px; }
+.signed-banner .btn { min-height: 40px; line-height: 40px; margin-left: 8px; }
+/* -- URL card (the free preview — the functional entry point) -- */
+.url-card { background: #fff; color: var(--ink); border-radius: 16px;
+  padding: 20px; margin: 24px 0 0; text-align: left;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+.url-card h2 { margin: 0 0 4px; font-size: 22px; color: var(--ink); }
+.url-card .muted { color: var(--muted); }
+.url-card label { display: block; margin: 14px 0 4px; font-weight: bold;
+  color: var(--ink); }
+.url-card input[type=text], .url-card select { width: 100%; min-height: 52px;
+  padding: 8px 14px; font-size: 16px; border: 1px solid var(--line);
+  border-radius: 10px; background: #fff; color: #111; }
+.url-card input[type=text]:focus, .url-card select:focus { outline: none;
+  border-color: var(--violet); }
+.url-card .btn-primary { width: 100%; margin-top: 16px; }
+#landing-status { color: var(--muted); margin-top: 10px; }
+#landing-preview { background: #fff; color: var(--ink); border-radius: 12px;
+  padding: 16px; margin-top: 16px; text-align: left; }
+#landing-cta { margin-top: 12px; }
+#landing-cta .muted { color: var(--muted); }
+/* -- sections -- */
+section { padding: 64px 0; }
+section h2 { font-size: 34px; line-height: 1.2; margin: 0 0 12px;
+  text-align: center; letter-spacing: -.01em; }
+section .lede { font-size: 18px; color: var(--muted); text-align: center;
+  max-width: 680px; margin: 0 auto 36px; }
+section.alt { background: var(--bg-tint); }
+.card { border: 1px solid var(--line); border-radius: 16px; padding: 20px;
   margin: 20px 0; background: #fff;
   box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
-.card h2 { margin-top: 0; font-size: 22px; color: #1a1a2e; }
-.url-card { border: 2px solid #c4b5fd; background: #faf8ff; }
-.url-card h2 { font-size: 24px; }
-.muted { color: #666; font-size: 14px; }
-.big { font-size: 36px; font-weight: bold; color: #6d28d9; }
-.btn { display: inline-block; min-height: 44px; line-height: 44px;
-  padding: 0 20px; margin: 4px 4px 4px 0; border-radius: 10px;
-  border: 1px solid #ccc; background: #fff; color: #222; font-size: 16px;
-  cursor: pointer; text-decoration: none; text-align: center;
-  box-sizing: border-box; }
-.btn-primary { background: #c4b5fd; border-color: #c4b5fd; color: #111;
+.card h2 { margin-top: 0; font-size: 22px; color: var(--ink); }
+.big { font-size: 36px; font-weight: bold; color: var(--violet-deep); }
+/* -- dashboard preview (§5) — reference images 1 + 2: the hero keeps
+   image 1's navy background and copy; the preview inside it is rebuilt
+   in image 2's clean light-panel dashboard style (dark mini sidebar +
+   white cards on a pale background), carrying Ventoryn's acquisition
+   content — NOT image 2's multi-business content. -- */
+.preview { border: 1px solid #d9d2f2; border-radius: 20px; overflow: hidden;
+  background: #fff; box-shadow: 0 24px 60px rgba(11,14,30,.18);
+  text-align: left; }
+.preview-bar { display: flex; align-items: center; gap: 8px;
+  background: var(--navy); color: #fff; padding: 12px 16px; }
+.preview-bar .dot { width: 12px; height: 12px; border-radius: 50%; }
+.preview-bar .title { margin-left: 8px; font-weight: 700; font-size: 15px; }
+.preview-bar .meta { margin-left: auto; display: flex; align-items: center;
+  gap: 10px; font-size: 13px; color: #d9d4f5; }
+.preview-bar .demo-tag { background: rgba(196,181,253,.2);
+  border: 1px solid rgba(196,181,253,.5); color: var(--violet-soft);
+  font-size: 12px; font-weight: bold; border-radius: 999px; padding: 3px 10px; }
+.preview-bar .range { background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.2); border-radius: 8px; padding: 4px 10px;
+  font-size: 12px; }
+.preview-bar .avatar { width: 28px; height: 28px; border-radius: 50%;
+  background: var(--violet); color: #fff; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 13px;
   font-weight: bold; }
-.btn-google { background: #fff; border-color: #888; }
-label { display: block; margin: 12px 0 4px; font-weight: bold; }
-input[type=text] { width: 100%; min-height: 52px;
-  padding: 8px 14px; font-size: 18px; border: 2px solid #c4b5fd;
-  border-radius: 10px; box-sizing: border-box; background: #fff; }
-input[type=text]:focus { outline: none; border-color: #6d28d9; }
+.preview-body { display: flex; align-items: stretch; }
+.preview-side { flex: 0 0 168px; background: var(--navy-2); color: #b9b3dd;
+  padding: 14px 10px; font-size: 13px; }
+.side-item { display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+  border-radius: 8px; margin: 2px 0; }
+.side-item.active { background: rgba(139,92,246,.35); color: #fff;
+  font-weight: 600; }
+.side-item .badge { margin-left: auto; background: var(--violet); color: #fff;
+  border-radius: 999px; font-size: 11px; font-weight: bold; padding: 1px 7px; }
+.side-foot { margin-top: 16px; padding: 10px; border-top: 1px solid
+  rgba(255,255,255,.12); font-size: 12px; color: #8f89b3; }
+.preview-main { flex: 1; min-width: 0; background: #f4f2fb; padding: 16px; }
+.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.preview-cell { border: 1px solid #e5e0f5; border-radius: 12px;
+  padding: 16px; background: #fff; box-shadow: 0 1px 4px rgba(11,14,30,.06); }
+.preview-cell h3 { margin: 0 0 10px; font-size: 15px; color: var(--ink); }
+.preview-cell.wide { grid-column: 1 / -1; }
+.ring-wrap { display: flex; gap: 16px; align-items: center; }
+.ring-num { font-size: 28px; font-weight: 800; color: var(--violet-deep);
+  line-height: 1.1; }
+.ring-num small { display: block; font-size: 13px; color: var(--muted);
+  font-weight: 600; }
+.ring-sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.trend { margin-top: 12px; }
+.trend svg { display: block; width: 100%; height: auto; }
+.counter { font-size: 34px; font-weight: 800; color: var(--violet-deep); }
+.counter small { font-size: 16px; color: var(--muted); font-weight: 600; }
+.funnel-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0;
+  font-size: 13px; }
+.funnel-bar .flabel { flex: 0 0 150px; color: #333; }
+.funnel-bar .ftrack { flex: 1; height: 12px; background: #e9e4fb;
+  border-radius: 999px; overflow: hidden; }
+.funnel-bar .ffill { height: 100%; background: linear-gradient(90deg,
+  var(--violet), var(--blue)); border-radius: 999px; }
+.funnel-bar .fnum { flex: 0 0 44px; text-align: right; font-weight: 700; }
+.agent-row { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0;
+  font-size: 14px; }
+.agent-row svg { flex: 0 0 28px; }
+.agent-row b { display: block; font-size: 14px; }
+.agent-row span { color: var(--muted); font-size: 13px; }
+.queue-row { display: flex; gap: 10px; align-items: center; margin: 8px 0;
+  font-size: 14px; background: #fff; border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; }
+.queue-row .pill { margin-left: auto; flex: 0 0 auto; }
+.pill { display: inline-block; font-size: 12px; font-weight: bold;
+  border-radius: 999px; padding: 3px 10px; background: #ede9fe;
+  color: var(--violet-deep); white-space: nowrap; }
+.pill.green { background: #dcfce7; color: #166534; }
+.pill.amber { background: #fef3c7; color: #92400e; }
+.trace { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 13px; }
+.trace .tstep { background: #fff; border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; font-weight: 600; }
+.trace .tarrow { color: var(--violet-deep); font-weight: bold; }
+.demo-note { background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 16px 0 0; }
+.demo-revenue { font-size: 15px; }
+.demo-revenue .hidden-amt { color: var(--muted); letter-spacing: .1em; }
+/* -- steps (§6) -- */
 .steps { list-style: none; padding: 0; margin: 0; display: grid;
-  grid-template-columns: 1fr 1fr; gap: 16px; }
-.steps li { display: flex; gap: 12px; align-items: flex-start;
-  background: #faf8ff; border: 1px solid #e5e0f5; border-radius: 12px;
-  padding: 14px; }
-.step-num { flex: 0 0 32px; height: 32px; border-radius: 50%;
-  background: #c4b5fd; color: #111; font-weight: bold; text-align: center;
-  line-height: 32px; }
-.features { display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 16px; }
-.feature { border: 1px solid #e5e0f5; border-radius: 12px; padding: 16px;
+  grid-template-columns: repeat(5, 1fr); gap: 16px; }
+.steps li { background: #fff; border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px 16px; position: relative; }
+.steps li:not(:last-child)::after { content: "\2192"; position: absolute;
+  right: -14px; top: 50%; transform: translateY(-50%); color: var(--violet-deep);
+  font-weight: bold; font-size: 18px; z-index: 1; }
+.step-icon { display: block; margin-bottom: 10px; }
+.step-icon svg { display: block; }
+.step-num { display: inline-block; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--violet-soft); color: #111; font-weight: bold;
+  text-align: center; line-height: 32px; margin-bottom: 10px; }
+.steps li strong { display: block; font-size: 16px; margin-bottom: 6px; }
+.steps li span { font-size: 14px; color: var(--muted); line-height: 1.5; }
+.steps-cta { text-align: center; margin-top: 28px; }
+/* -- features (§7) -- */
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.feature { border: 1px solid var(--line); border-radius: 14px; padding: 20px;
   background: #fff; box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
-.feature h3 { margin: 0 0 8px; font-size: 17px; color: #1a1a2e; }
-.feature p { margin: 0; color: #444; font-size: 15px; line-height: 1.45; }
+.feature svg { margin-bottom: 10px; }
+.feature h3 { margin: 0 0 8px; font-size: 17px; color: var(--ink); }
+.feature p { margin: 0; color: #444; font-size: 15px; line-height: 1.5; }
+/* -- attribution (§8) -- */
+.flow { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap;
+  justify-content: center; margin: 24px 0; }
+.flow .fstep { background: var(--navy); color: #fff; border-radius: 10px;
+  padding: 12px 14px; font-size: 14px; font-weight: 600; text-align: center;
+  max-width: 150px; }
+.flow .farrow { align-self: center; color: var(--violet-deep);
+  font-weight: bold; font-size: 20px; }
+.rules { columns: 2; column-gap: 32px; max-width: 880px; margin: 0 auto;
+  padding: 0; list-style: none; }
+.rules li { break-inside: avoid; margin: 0 0 10px; padding-left: 24px;
+  position: relative; font-size: 15px; color: #333; }
+.rules li::before { content: "\\2713  "; color: var(--violet-deep);
+  font-weight: bold; position: absolute; left: 0; }
+/* -- differentiation (§9) + who (§10) -- */
+.principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.principle { border-top: 4px solid var(--violet); background: #fff;
+  border-radius: 0 0 14px 14px; padding: 20px; border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.principle h3 { margin: 0 0 8px; font-size: 18px; }
+.principle p { margin: 0; color: #444; font-size: 15px; }
+.who-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.who { border: 1px solid var(--line); border-radius: 14px; padding: 20px;
+  background: #fff; }
+.who h3 { margin: 0 0 6px; font-size: 17px; }
+.who p { margin: 0; color: var(--muted); font-size: 14px; }
+/* -- pricing (§11) -- */
 .price-card { background: linear-gradient(135deg, #ede9fe, #ddd6fe);
-  border: 2px solid #c4b5fd; text-align: center; }
+  border: 2px solid var(--violet-soft); text-align: center; max-width: 640px;
+  margin-left: auto; margin-right: auto; }
 .price-card ul { list-style: none; padding: 0; margin: 16px auto;
-  max-width: 420px; text-align: left; }
+  max-width: 460px; text-align: left; }
 .price-card li { margin: 8px 0; font-size: 16px; }
-.price-card li::before { content: "\2713  "; color: #6d28d9;
+.price-card li::before { content: "\\2713  "; color: var(--violet-deep);
   font-weight: bold; }
+.credit-table { width: 100%; max-width: 460px; margin: 16px auto 0;
+  border-collapse: collapse; font-size: 15px; background: #fff;
+  border-radius: 10px; overflow: hidden; }
+.credit-table th, .credit-table td { padding: 8px 12px; text-align: left;
+  border-bottom: 1px solid var(--line); }
+.credit-table th { background: var(--navy); color: #fff; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .04em; }
+.credit-table td:last-child { text-align: right; font-weight: bold;
+  color: var(--violet-deep); }
+/* -- FAQ (§12) -- */
+.faq { max-width: 760px; margin: 0 auto; }
+.faq details { border: 1px solid var(--line); border-radius: 12px;
+  padding: 16px 18px; margin: 10px 0; background: #fff; }
+.faq summary { font-weight: 700; font-size: 16px; cursor: pointer;
+  min-height: 44px; display: flex; align-items: center; }
+.faq details p { margin: 10px 0 0; color: #444; font-size: 15px; }
+/* -- final CTA (§13) -- */
+.final-cta { background: radial-gradient(900px 400px at 70% 0%, rgba(139,92,246,.5),
+  transparent 60%), linear-gradient(180deg, var(--navy), #0a0a18);
+  color: #fff; text-align: center; }
+.final-cta h2 { color: #fff; }
+.final-cta p { color: #c9c4e8; font-size: 18px; max-width: 640px;
+  margin: 0 auto 24px; }
+/* -- footer (§14) -- */
+.site-footer { background: var(--navy); color: #b9b3dd; padding: 40px 0 32px;
+  font-size: 14px; }
+.site-footer .cols { display: flex; gap: 32px; flex-wrap: wrap; }
+.site-footer .col { min-width: 160px; }
+.site-footer h4 { color: #fff; margin: 0 0 10px; font-size: 14px;
+  text-transform: uppercase; letter-spacing: .06em; }
+.site-footer a { color: #d9d4f5; text-decoration: none; display: block;
+  padding: 4px 0; min-height: 28px; }
+.site-footer a:hover { color: #fff; }
+.site-footer .soon { color: #8f89b3; display: block; padding: 4px 0; }
+.site-footer .base { margin-top: 28px; padding-top: 16px;
+  border-top: 1px solid rgba(255,255,255,.12); text-align: center;
+  color: #8f89b3; font-size: 13px; }
 .score-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
 .score { flex: 1 1 140px; border: 1px solid #ddd; border-radius: 8px;
   padding: 12px; background: #fafafa; text-align: center; }
@@ -542,21 +987,47 @@ input[type=text]:focus { outline: none; border-color: #6d28d9; }
 .score .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
 .findings { margin: 8px 0; padding-left: 20px; }
 .findings li { margin: 6px 0; }
-.footer { text-align: center; color: #888; font-size: 13px;
-  margin: 24px 0 0; }
+@media (max-width: 900px) {
+  .hero-grid { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: repeat(2, 1fr); }
+  .steps li:not(:last-child)::after { display: none; }
+  .features, .principles, .who-grid { grid-template-columns: 1fr 1fr; }
+  .preview-grid { grid-template-columns: 1fr; }
+  .rules { columns: 1; }
+}
 @media (max-width: 560px) {
-  body { background: #fff; }
-  .wrap { padding: 0 12px 32px; }
-  .hero { padding: 32px 16px 28px; }
-  .hero h1 { font-size: 28px; }
-  .hero p { font-size: 17px; }
+  .hero { padding: 40px 0 36px; }
+  .hero h1 { font-size: 34px; }
+  .hero h2.sub { font-size: 21px; }
+  .hero p.lede { font-size: 17px; }
   .btn { width: 100%; margin: 4px 0; }
-  .steps { grid-template-columns: 1fr; }
-  .features { grid-template-columns: 1fr; }
-  input[type=text] { font-size: 16px; }
+  .hero-ctas .btn { width: 100%; }
+  .nav-links { display: none; flex-direction: column; position: absolute;
+    top: 60px; left: 0; right: 0; background: var(--navy); padding: 8px 16px 16px;
+    gap: 0; }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 12px; }
+  .nav-item { width: 100%; }
+  .nav-drop { position: static; box-shadow: none; border: 0; padding: 0 0 0 12px;
+    min-width: 0; }
+  .nav-toggle { display: block; }
+  .nav-actions .btn { display: none; }
+  .nav-actions .btn-primary { display: inline-block; }
+  section { padding: 44px 0; }
+  section h2 { font-size: 26px; }
+  .steps, .features, .principles, .who-grid { grid-template-columns: 1fr; }
+  .url-card { padding: 18px 16px; }
+  .url-card input[type=text], .url-card select { font-size: 16px; }
+  .preview-side { display: none; }
+  .preview-grid { padding: 12px; }
+  .funnel-bar .flabel { flex-basis: 110px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important;
+    transition: none !important; }
 }
 """
-
     def _landing_page(account) -> str:
         import json as _json
 
@@ -565,103 +1036,368 @@ input[type=text]:focus { outline: none; border-color: #6d28d9; }
             signed_in and account["subscription_status"] == "active")
         state_json = _json.dumps({"signedIn": signed_in,
                                   "subscribed": subscribed})
+        # The credit table is rendered from the real CREDIT_COSTS —
+        # never hardcoded, so the price page cannot drift from the
+        # product. Labels are display names for the job keys.
+        _credit_labels = {
+            "analyze": "Analyze — site + GEO audit",
+            "geo_audit": "GEO audit",
+            "community_listening": "Community listening",
+            "social_report": "Social report",
+            "seo_article": "SEO article",
+            "video_render": "Video render",
+        }
+        credit_rows = "".join(
+            f"<tr><td>{_credit_labels.get(k, k)}</td>"
+            f"<td>{CREDIT_COSTS[k]} credits</td></tr>"
+            for k in ("analyze", "geo_audit", "community_listening",
+                      "social_report", "seo_article", "video_render")
+            if k in CREDIT_COSTS)
         if signed_in:
-            signin_block = (
-                "<div class='card'><p>You are signed in as "
-                f"{esc(account['email'])}.</p>"
-                "<p><a class='btn btn-primary' href='/ops'>"
-                "Continue to Live Ops</a></p></div>")
+            signed_banner = (
+                "<div class='signed-banner'><div class='wrap'>You are "
+                f"signed in as {esc(account['email'])}. "
+                "<a class='btn btn-primary' href='/ops'>"
+                "Continue to Live Ops</a></div></div>")
+            nav_signin = (
+                "<a class='btn btn-google' id='landing-signin' "
+                "href='/account/auth/google/start'>Sign In</a>")
+            hero_signin_line = ""
         elif not _saas_config.google_configured:
-            signin_block = (
-                "<div class='card'><h2>Sign in</h2>"
-                "<p>Sign-in with Google is not set up yet. The Google "
-                "sign-in is configured by the operator (a Google Cloud "
-                "OAuth client), not here — there is nothing to type in "
-                "on this page.</p></div>")
+            signed_banner = ""
+            nav_signin = "<span class='btn' aria-disabled='true'>Sign In</span>"
+            hero_signin_line = (
+                "<p class='muted' style='color:#c9c4e8'>Sign-in with Google "
+                "is not set up yet. The Google sign-in is configured by "
+                "the operator (a Google Cloud OAuth client), not here — "
+                "there is nothing to type in on this page.</p>")
         else:
-            signin_block = (
-                "<div class='card'><h2>Sign in</h2>"
-                "<p>Ventoryn works on your website after you sign in — "
-                "one Google account, no password to remember.</p>"
-                "<p><a class='btn btn-google' id='landing-signin' "
-                "href='/account/auth/google/start'>Sign in with Google"
-                "</a></p>"
-                "<p class='muted'>Ventoryn sees your Google name and "
-                "email address, and nothing else.</p></div>")
-        return f"""<html><head><title>Ventoryn — get your website its first 100 paying customers</title>
+            signed_banner = ""
+            nav_signin = (
+                "<a class='btn btn-google' id='landing-signin' "
+                "href='/account/auth/google/start'>Sign In</a>")
+            hero_signin_line = (
+                "<p style='color:#c9c4e8;font-size:15px'>Sign in with "
+                "Google — one account, no password to remember.</p>")
+        json_ld = _json.dumps({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "Ventoryn",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Web",
+            "description": ("Ventoryn gets your website its first 100 "
+                            "paying customers. AI agents discover your "
+                            "audience and prepare campaigns; you approve "
+                            "every action; verified attribution shows "
+                            "which efforts turn into paying customers."),
+            "offers": {"@type": "Offer", "price": "20",
+                       "priceCurrency": "USD",
+                       "description": "$20/month, 100 credits per month"},
+            "url": _saas_config.base_url,
+        })
+        return f"""<!DOCTYPE html>
+<html lang="en"><head><title>Ventoryn — get your website its first 100 paying customers</title>
+<meta charset="utf-8">
 <meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta name="description" content="Ventoryn gets your website its first 100 paying customers. AI agents discover your audience and prepare campaigns. You approve every action, while verified attribution shows which efforts turn into paying customers.">
+<meta property="og:title" content="Ventoryn — Your First 100 Paying Customers">
+<meta property="og:description" content="Enter your website, connect your accounts, and let Ventoryn's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{esc(_saas_config.base_url)}/">
+<script type="application/ld+json">{json_ld}</script>
 <style>{_LANDING_CSS}</style></head><body>
-<div class='hero'>
-<div class='hero-inner'>
-<span class='tag'>Ventoryn</span>
-<h1>Get your website its first 100 paying customers</h1>
-<p>Type in your website URL. Ventoryn analyzes it, then a crew of AI
-agents works on it every day — bringing it traffic and sales — until
-it has 100 paying customers. Then 200.</p>
+<header class="site-nav"><div class="wrap">
+<a class="brand" href="/">Ventoryn<span>.</span></a>
+<button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu">☰</button>
+<nav aria-label="Product"><ul class="nav-links" id="nav-links">
+<li class="nav-item"><button class="nav-drop-btn" id="nav-drop-btn" aria-expanded="false" aria-haspopup="true">Product \u2304</button>
+<div class="nav-drop" id="nav-drop">
+<a href="#product">Features</a>
+<a href="#start">Dashboard preview</a>
+<a href="#who">Who it&#39;s for</a>
+</div></li>
+<li><a href="#how-it-works">How It Works</a></li>
+<li><a href="#attribution">Attribution</a></li>
+<li><a href="#pricing">Pricing</a></li>
+<li><a href="#faq">FAQ</a></li>
+</ul></nav>
+<div class="nav-actions">{nav_signin}
+<a class="btn btn-primary" href="#start">Get Started</a></div>
+</div></header>
+{signed_banner}
+<main>
+<section class="hero" id="start">
+<div class="wrap hero-grid">
+<div class="hero-copy">
+<span class="eyebrow">AI-Powered Customer Acquisition</span>
+<h1>Your First <span class="grad">100</span> Paying Customers.</h1>
+<h2 class="sub">Let AI Find Them. You Approve Every Move.</h2>
+<p class="lede">Enter your website, connect your accounts, and let
+Ventoryn&rsquo;s AI agents discover your audience, prepare campaigns, and
+identify opportunities to grow. You approve every action, while verified
+attribution shows which efforts turn into paying customers.</p>
+<div class="hero-ctas">
+<a class="btn btn-primary" href="#start">Start Getting Customers</a>
+<a class="btn btn-ghost" href="#how-it-works">See How It Works</a>
 </div>
-</div>
-<div class='wrap'>
-<div class='card url-card'>
+<ul class="trust">
+<li>Human-approved actions</li>
+<li>Verified customer attribution</li>
+<li>Revenue privacy controls</li>
+</ul>
+{hero_signin_line}
+<div class="card url-card">
 <h2>🔍 Analyze your site — free preview</h2>
-<p class='muted'>The same analysis Ventoryn runs before it starts work:
+<p class="muted">The same analysis Ventoryn runs before it starts work:
 your site score, your answer-engine (GEO) score, and the top things
 to fix. Nothing is published.</p>
-<form id='landing-analyze-form'>
-<label for='landing-url'>Your website URL</label>
-<input id='landing-url' type='text' inputmode='url'
- placeholder='yourwebsite.com' autocomplete='off' required>
-<p class='muted'>Just your domain works — type example.com, no https:// needed.</p>
-<label for='landing-country'>Market country</label>
-<input id='landing-country' type='text' value='ca' maxlength='2'
- autocomplete='off' required>
-<p><button type='submit' class='btn btn-primary'
- id='landing-submit'>Analyze my site — free</button></p>
+<form id="landing-analyze-form">
+<label for="landing-url">Your website URL</label>
+<input id="landing-url" type="text" inputmode="url"
+ placeholder="yourwebsite.com" autocomplete="off" required>
+<p class="muted">Just your domain works — type example.com, no https:// needed.</p>
+<label for="landing-country">Market country</label>
+<select id="landing-country" autocomplete="off" required>
+{country_options("ca")}</select>
+<p><button type="submit" class="btn btn-primary"
+ id="landing-submit">Analyze my site — free</button></p>
 </form>
-<div id='landing-status' class='muted' aria-live='polite'></div>
-<div id='landing-preview' hidden></div>
-<div id='landing-cta' hidden></div>
+<div id="landing-status" class="muted" aria-live="polite"></div>
+<div id="landing-preview" hidden></div>
+<div id="landing-cta" hidden></div>
 </div>
-{signin_block}
-<div class='features'>
-<div class='feature'><h3>🛠️ A crew that works daily</h3>
-<p>Eight AI agents — research, SEO, community, video and reports —
-working on your site every day.</p></div>
-<div class='feature'><h3>✅ You decide</h3>
-<p>Nothing is published or posted without your approval. You pay
-for it, you decide.</p></div>
-<div class='feature'><h3>🎯 Real sales, not just traffic</h3>
-<p>The goal is paying customers — your first 100 — not page views.</p></div>
 </div>
-<div class='card'>
-<h2>How it works</h2>
-<ol class='steps'>
-<li><span class='step-num'>1</span><span><strong>Enter your URL.</strong>
- The free preview above shows what Ventoryn sees — and what it
- would fix first.</span></li>
-<li><span class='step-num'>2</span><span><strong>Subscribe — $20/month.</strong>
- Sign in with Google, pay with Stripe. Ventoryn never sees your
- card.</span></li>
-<li><span class='step-num'>3</span><span><strong>The agents work daily.</strong>
- SEO articles, community replies, site fixes, videos, reports —
- every day, until the site has paying customers.</span></li>
-<li><span class='step-num'>4</span><span><strong>You approve before anything ships.</strong>
- Nothing is published or posted without your sign-off — you pay
- for it, you decide.</span></li>
+<div class="preview" role="img" aria-label="Illustrative preview of the Ventoryn dashboard: 24 of 100 verified customers, acquisition funnel, agent activity, approval queue, and a conversion attribution trace. All numbers are example data.">
+<div class="preview-bar">
+<span class="dot" style="background:#ff5f57"></span>
+<span class="dot" style="background:#febc2e"></span>
+<span class="dot" style="background:#28c840"></span>
+<span class="title">Ventoryn — Live Ops</span>
+<span class="meta">
+<span class="demo-tag">ILLUSTRATIVE DEMO DATA</span>
+<span class="range">Last 30 Days \u2304</span>
+<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2 2 0 002-2h-4a2 2 0 002 2zM6 9a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9z" fill="none" stroke="#d9d4f5" stroke-width="2"/></svg>
+<span class="avatar">V</span>
+</span>
+</div>
+<div class="preview-body">
+<div class="preview-side" aria-hidden="true">
+<div class="side-item active">Overview</div>
+<div class="side-item">Campaigns</div>
+<div class="side-item">Agents</div>
+<div class="side-item">Approvals <span class="badge">3</span></div>
+<div class="side-item">Attribution</div>
+<div class="side-item">Integrations</div>
+<div class="side-item">Settings</div>
+<div class="side-foot">Growth Plan<br>Goal: First 100 Customers<br>24 / 100</div>
+</div>
+<div class="preview-main">
+<div class="preview-grid">
+<div class="preview-cell">
+<h3>Customer acquisition progress</h3>
+<div class="ring-wrap">
+<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Progress ring: 24 of 100 verified customers"><circle cx="60" cy="60" r="52" fill="none" stroke="#e9e4fb" stroke-width="12"/><circle cx="60" cy="60" r="52" fill="none" stroke="#8b5cf6" stroke-width="12" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="248.3" transform="rotate(-90 60 60)"/><text x="60" y="56" text-anchor="middle" font-size="24" font-weight="800" fill="#6d28d9">24</text><text x="60" y="74" text-anchor="middle" font-size="11" fill="#666">/ 100</text></svg>
+<div><div class="ring-num">24 <small>/ 100 Verified Customers</small></div>
+<p class="ring-sub">24 verified paying customers so far — 76 to go. Example numbers.</p>
+<span class="pill green">+6 new customers (7 days)</span></div>
+</div>
+<div class="trend"><svg viewBox="0 0 300 64" role="img" aria-label="Illustrative acquisition trend rising to 24 verified customers"><polyline points="0,56 30,54 60,50 90,48 120,44 150,38 180,34 210,28 240,20 270,12 300,8" fill="none" stroke="#8b5cf6" stroke-width="2.5"/><line x1="0" y1="8" x2="300" y2="8" stroke="#c4b5fd" stroke-width="1" stroke-dasharray="4 4"/></svg></div>
+</div>
+<div class="preview-cell">
+<h3>Acquisition funnel</h3>
+<div class="funnel-bar"><span class="flabel">Audience Opportunities</span><span class="ftrack"><span class="ffill" style="display:block;width:81%"></span></span><span class="fnum">2,840</span></div>
+<div class="funnel-bar"><span class="flabel">Approved Actions</span><span class="ftrack"><span class="ffill" style="display:block;width:21%"></span></span><span class="fnum">186</span></div>
+<div class="funnel-bar"><span class="flabel">Published Actions</span><span class="ftrack"><span class="ffill" style="display:block;width:19%"></span></span><span class="fnum">154</span></div>
+<div class="funnel-bar"><span class="flabel">Attributed Visits</span><span class="ftrack"><span class="ffill" style="display:block;width:100%"></span></span><span class="fnum">4,320</span></div>
+<div class="funnel-bar"><span class="flabel">Signups</span><span class="ftrack"><span class="ffill" style="display:block;width:27%"></span></span><span class="fnum">312</span></div>
+<div class="funnel-bar"><span class="flabel">Verified Customers</span><span class="ftrack"><span class="ffill" style="display:block;width:7%"></span></span><span class="fnum">24</span></div>
+</div>
+<div class="preview-cell">
+<h3>Agent activity</h3>
+<div class="agent-row"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="#6d28d9" stroke-width="2"/><line x1="17" y1="17" x2="24" y2="24" stroke="#6d28d9" stroke-width="2"/></svg><div><b>Audience Research Agent</b><span>Identifying relevant communities</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
+<div class="agent-row"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M4 14h4l3-7 4 14 3-7h6" fill="none" stroke="#3b82f6" stroke-width="2"/></svg><div><b>Social Listening Agent</b><span>Monitoring conversations</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
+<div class="agent-row"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="4" width="18" height="14" rx="2" fill="none" stroke="#8b5cf6" stroke-width="2"/><line x1="9" y1="9" x2="19" y2="9" stroke="#8b5cf6" stroke-width="2"/><line x1="9" y1="13" x2="16" y2="13" stroke="#8b5cf6" stroke-width="2"/></svg><div><b>Content Agent</b><span>Preparing engagement proposals</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
+<div class="agent-row"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 3l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11V7z" fill="none" stroke="#166534" stroke-width="2"/><path d="M10 14l3 3 5-6" fill="none" stroke="#166534" stroke-width="2"/></svg><div><b>Attribution Agent</b><span>Verifying conversions</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
+</div>
+<div class="preview-cell">
+<h3>Approval queue</h3>
+<div class="queue-row">Review proposed Reddit post <span class="pill">Review</span></div>
+<div class="queue-row">Approve X engagement draft <span class="pill green">Approve</span></div>
+<div class="queue-row">Review community outreach opportunity <span class="pill">Review</span></div>
+<p class="muted" style="margin:8px 0 0">Proposed actions — nothing is
+published until you approve it.</p>
+</div>
+<div class="preview-cell wide">
+<h3>Conversion attribution — example trace</h3>
+<div class="trace"><span class="tstep">Approved Campaign</span><span class="tarrow">→</span><span class="tstep">Signed Link</span><span class="tarrow">→</span><span class="tstep">Website Visit</span><span class="tarrow">→</span><span class="tstep">Stripe Checkout</span><span class="tarrow">→</span><span class="tstep">Verified Customer</span> <span class="pill green">Verified</span></div>
+<p class="muted" style="margin:10px 0 0">Attribution: Reddit Campaign #RD-4827 — <span class="pill green">Verified</span></p>
+<p class="demo-revenue" style="margin:12px 0 0">Revenue for this example
+customer: <span class="hidden-amt" id="demo-revenue-value">$••• hidden</span>
+— revenue is private by default.
+<button class="btn" id="demo-revenue-toggle" type="button" style="min-height:36px;line-height:36px;margin-left:8px">Reveal example revenue</button></p>
+</div>
+</div>
+<p class="demo-note"><strong>Illustrative demo data.</strong> Every
+number in this preview is an example to show how the dashboard reads —
+not real customer data, not a result Ventoryn promises.</p>
+</div>
+</div>
+</div>
+</section>
+<section id="how-it-works" class="alt">
+<div class="wrap">
+<h2>How <span class="grad">Ventoryn</span> Works</h2>
+<p class="lede">From your website to your first 100 paying customers — in 5 simple steps.</p>
+<ol class="steps">
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="none" stroke="#6d28d9" stroke-width="2"/><path d="M3 14h22M14 3c3 3.5 3 18.5 0 22M14 3c-3 3.5-3 18.5 0 22" fill="none" stroke="#6d28d9" stroke-width="1.6"/></svg></span><span class="step-num">1</span><strong>Enter Your Website</strong><span>Tell Ventoryn where your business lives. We analyze your website, product positioning, and potential audience.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="4" y="8" width="20" height="12" rx="2" fill="none" stroke="#3b82f6" stroke-width="2"/><path d="M10 14h8" stroke="#3b82f6" stroke-width="2"/></svg></span><span class="step-num">2</span><strong>Connect Your Accounts</strong><span>Securely connect supported social networks, analytics tools, and Stripe to bring your acquisition data together.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="#8b5cf6" stroke-width="2"/><line x1="17" y1="17" x2="24" y2="24" stroke="#8b5cf6" stroke-width="2"/></svg></span><span class="step-num">3</span><strong>Let AI Research Opportunities</strong><span>Ventoryn&rsquo;s agents find relevant audiences, conversations, communities, and content opportunities.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 3l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11V7z" fill="none" stroke="#166534" stroke-width="2"/><path d="M10 14l3 3 5-6" fill="none" stroke="#166534" stroke-width="2"/></svg></span><span class="step-num">4</span><strong>Approve Every Action</strong><span>Review recommended posts, replies, and campaigns before anything is published or executed.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M6 25V4" stroke="#92400e" stroke-width="2"/><path d="M6 4h16l-4 5 4 5H6" fill="none" stroke="#92400e" stroke-width="2"/></svg></span><span class="step-num">5</span><strong>Track Verified Customers</strong><span>Follow attribution from approved action to checkout and see your progress toward 100 paying customers.</span></li>
 </ol>
+<div class="steps-cta"><a class="btn btn-primary" href="#start">Start Your First 100 Journey</a></div>
 </div>
-<div class='card price-card'>
+</section>
+<section id="product">
+<div class="wrap">
+<h2>What Ventoryn does for your website</h2>
+<p class="lede">AI does the research. You make the decisions. Nothing
+goes live without your approval.</p>
+<div class="features">
+<div class="feature"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="8" fill="none" stroke="#6d28d9" stroke-width="2.5"/><line x1="20" y1="20" x2="28" y2="28" stroke="#6d28d9" stroke-width="2.5"/></svg><h3>AI Audience Discovery</h3><p>Relevant conversations, communities, and audience segments found from your website and offering — not from a bought list.</p></div>
+<div class="feature"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 8h24v14H4z" fill="none" stroke="#3b82f6" stroke-width="2.5"/><path d="M4 8l16 9L4 8z" fill="none" stroke="#3b82f6" stroke-width="2.5"/></svg><h3>Smart Social Engagement</h3><p>Draft relevant Reddit and X content that respects platform rules, community guidelines — and your approval.</p></div>
+<div class="feature"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><path d="M6 16h4l3-8 4 16 3-8h6" fill="none" stroke="#8b5cf6" stroke-width="2.5"/></svg><h3>Social Listening</h3><p>Monitor supported conversations and find genuine opportunities to help potential customers — where they already are.</p></div>
+<div class="feature"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 5v8c0 7-5 11-11 13C10 27 5 23 5 16V8z" fill="none" stroke="#166534" stroke-width="2.5"/><path d="M11 16l4 4 7-8" fill="none" stroke="#166534" stroke-width="2.5"/></svg><h3>Approval-First Automation</h3><p>All proposed actions sit in a review queue. Never publish, reply, send outreach, or spend money before explicit authorization.</p></div>
+<div class="feature"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><path d="M10 16l4 4 8-9" fill="none" stroke="#6d28d9" stroke-width="2.5"/><circle cx="16" cy="16" r="13" fill="none" stroke="#6d28d9" stroke-width="2.5"/></svg><h3>Verified Conversion Attribution</h3><p>Unique attribution identifiers with supported analytics and Stripe events, plus verification evidence. Verified attribution is distinguished from modeled or untracked conversions.</p></div>
+<div class="feature"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect x="7" y="14" width="18" height="13" rx="2" fill="none" stroke="#92400e" stroke-width="2.5"/><path d="M11 14V9a5 5 0 0110 0v5" fill="none" stroke="#92400e" stroke-width="2.5"/></svg><h3>Revenue Privacy</h3><p>You control whether revenue amounts are displayed — and whether the customer count is displayed. They are separate settings. Private Stripe information is never exposed publicly.</p></div>
+</div>
+</div>
+</section>
+<section id="attribution" class="alt">
+<div class="wrap">
+<h2>Not Just Clicks. Real Paying Customers.</h2>
+<p class="lede">Ventoryn connects approved marketing actions to actual
+checkout events, giving you evidence of which activities contributed to
+new paying customers.</p>
+<div class="flow">
+<span class="fstep">AI Recommendation</span><span class="farrow">→</span>
+<span class="fstep">Customer Approval</span><span class="farrow">→</span>
+<span class="fstep">Signed Campaign Link</span><span class="farrow">→</span>
+<span class="fstep">Website Visit</span><span class="farrow">→</span>
+<span class="fstep">Stripe Payment</span><span class="farrow">→</span>
+<span class="fstep">Verified Conversion</span>
+</div>
+<ul class="rules">
+<li>Every approved action carries a unique, tamper-resistant attribution identifier, bound to the campaign and the action that was approved.</li>
+<li>Stripe webhook signatures are validated on every payment notice, and payment events are processed idempotently — a payment delivered twice counts once.</li>
+<li>A customer is counted only after an eligible, successful payment event is verified.</li>
+<li>Repeat purchases are deduplicated per a documented customer identity policy; refunds, disputes, and reversed payments are reconciled.</li>
+<li>Protection against replay, manipulation, and unauthorized reassignment of attribution.</li>
+<li>Consent, privacy, and tracking requirements are respected; cross-device and cross-session attribution is shown as limited when deterministic evidence is unavailable.</li>
+<li>Ventoryn never claims every customer can be attributed with certainty — where the evidence is missing, a sale is shown as Unattributed or Verification Pending.</li>
+</ul>
+</div>
+</section>
+<section id="differentiation">
+<div class="wrap">
+<h2>AI Does the Research. You Make the Decisions.</h2>
+<p class="lede">Automation is not a substitute for authentic engagement.
+Ventoryn is built on three principles.</p>
+<div class="principles">
+<div class="principle"><h3>Your Brand, Your Voice</h3><p>Recommendations are aligned with your business&rsquo;s positioning — your voice, not a generic template.</p></div>
+<div class="principle"><h3>Nothing Goes Live Without Approval</h3><p>You control the content and every external action. Nothing is published, replied to, or sent without your explicit authorization.</p></div>
+<div class="principle"><h3>Proof Over Vanity Metrics</h3><p>Verified conversions — not likes and impressions. The number that matters is paying customers.</p></div>
+</div>
+</div>
+</section>
+<section id="who" class="alt">
+<div class="wrap">
+<h2>Who Ventoryn is for</h2>
+<p class="lede">Built for businesses looking for their first paying
+customers.</p>
+<div class="who-grid">
+<div class="who"><h3>SaaS founders</h3><p>Your product is live. Your first 100 paying customers are not — yet.</p></div>
+<div class="who"><h3>Independent software developers</h3><p>Ship the product, let Ventoryn find the people who will pay for it.</p></div>
+<div class="who"><h3>Startup teams</h3><p>Small team, no marketing department — agents do the daily outreach work.</p></div>
+<div class="who"><h3>Online service businesses</h3><p>Turn your website into a steady flow of new clients.</p></div>
+<div class="who"><h3>Digital product creators</h3><p>Courses, templates, tools — find the buyers already looking.</p></div>
+<div class="who"><h3>Founders launching their first website</h3><p>Day one on the web, with a plan to reach 100 paying customers.</p></div>
+</div>
+</div>
+</section>
+<section id="pricing">
+<div class="wrap">
+<h2>Pricing</h2>
+<p class="lede">One plan. Everything included.</p>
+<div class="card price-card">
 <h2>$20/month</h2>
-<p><span class='big'>$20</span> / month</p>
+<p><span class="big">$20</span> / month</p>
 <ul>
 <li>Your websites on Ventoryn</li>
 <li>100 credits every month</li>
 <li>A growth report per site</li>
 <li>Agents working daily toward your first 100 paying customers</li>
 </ul>
-<p><a class='btn btn-primary' href='/account/subscribe'>Subscribe — $20/month</a></p>
+<table class="credit-table">
+<thead><tr><th>What a credit buys</th><th>Cost</th></tr></thead>
+<tbody>{credit_rows}</tbody>
+</table>
+<p style="margin-top:16px"><a class="btn btn-primary" href="/account/subscribe">Subscribe — $20/month</a></p>
+<p class="muted">No free trial. No guarantees — the first 100 paying
+customers is a target Ventoryn works toward, not a promised outcome.
+Cancel anytime from your account.</p>
 </div>
-<p class='footer'>Ventoryn — get your website its first 100 paying customers.</p>
 </div>
+</section>
+<section id="faq" class="alt">
+<div class="wrap">
+<h2>Frequently asked questions</h2>
+<div class="faq">
+<details><summary>What does Ventoryn do?</summary><p>Ventoryn is a service that gets a website its first 100 paying customers. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities — and you approve every action before anything happens. Progress is measured in verified paying customers, not page views.</p></details>
+<details><summary>How does Ventoryn help me find customers?</summary><p>Its agents research where your audience already gathers — relevant communities, conversations, and search demand — then prepare outreach (posts, replies, articles, videos) for your review. Approved actions go out; everything else stays a draft.</p></details>
+<details><summary>Will Ventoryn post without my approval?</summary><p>No. Nothing is ever published, replied to, or sent without your explicit approval. Every proposed action sits in your approval queue first. You pay for the service — you decide what goes out under your name.</p></details>
+<details><summary>Which accounts can I connect?</summary><p>Per website: Reddit, X, Plausible (analytics), and Stripe (sales). Reddit and X posting need the platform OAuth app registrations first — until then the connection honestly says so. X&rsquo;s API is paid and rate-limited, so posting there is slower.</p></details>
+<details><summary>How does Ventoryn verify paying customers?</summary><p>Every approved action carries a unique, signed attribution link. When a visitor follows it and pays through your Stripe checkout, the payment notice (signature-verified, processed once) is matched to that link — and only then is the customer counted as verified. A sale with no signature is reported as unattributed, never guessed.</p></details>
+<details><summary>Do I need Stripe?</summary><p>To count verified paying customers, yes — Ventoryn reads payments from your Stripe account (read-only; it can never charge or refund). Without a Stripe connection, Ventoryn can still analyze your site and prepare campaigns, but paying customers show as unavailable until you connect it.</p></details>
+<details><summary>Can I hide my revenue?</summary><p>Yes — revenue is private by default. You choose, per website, whether revenue amounts are displayed and whether the customer count is displayed. They are two separate settings. With revenue hidden, no dollar figure appears anywhere on Ventoryn — your sales still count toward the 100 goal. Revenue figures never go into logs.</p></details>
+<details><summary>Is getting 100 customers guaranteed?</summary><p>No. The first 100 paying customers is a target Ventoryn works toward — not a guaranteed outcome. What Ventoryn guarantees is the work: daily research, prepared campaigns, your approval on everything, and honest attribution of what actually turned into a paying customer.</p></details>
+<details><summary>Can I disconnect my accounts?</summary><p>Yes, anytime, from your site&rsquo;s Connections section. Disconnecting revokes the token at the provider (where the provider allows it) and deletes the stored token and revenue data. Deleting your account does the same for everything it owns.</p></details>
+<details><summary>How is my information protected?</summary><p>Two-factor authentication (TOTP) is mandatory for every account from the first sign-in — you set it up with an authenticator app and backup codes. Sign-in is zero-trust: every request is verified server-side against your session, sessions expire, and a logged-out session stops working immediately. Tokens Ventoryn holds are encrypted at rest, server-side only, with the minimum scopes for the job. Sensitive actions — disconnecting a connection, changing the revenue display, disconnecting Stripe — ask for a fresh two-factor code. The admin account is protected by its own password plus two-factor, separate from any customer sign-in.</p></details>
+</div>
+</div>
+</section>
+<section class="final-cta">
+<div class="wrap">
+<h2>Your Next Customer Is Out There.</h2>
+<p>Give Ventoryn your website. Let intelligent agents discover
+opportunities, prepare outreach, and help turn real engagement into
+measurable customer growth.</p>
+<div class="hero-ctas">
+<a class="btn btn-primary" href="#start">Start Your First 100 Journey</a>
+<a class="btn btn-ghost" href="/account/login">Explore the Platform</a>
+</div>
+</div>
+</section>
+</main>
+<footer class="site-footer"><div class="wrap">
+<div class="cols">
+<div class="col"><h4>Product</h4>
+<a href="#product">Product</a>
+<a href="#how-it-works">How It Works</a>
+<a href="#attribution">Attribution</a>
+<a href="#pricing">Pricing</a>
+<a href="#faq">FAQ</a></div>
+<div class="col"><h4>Account</h4>
+<a href="/account/login">Account Login</a>
+<a href="/account/subscribe">Subscribe — $20/month</a></div>
+<div class="col"><h4>Company</h4>
+<span class="soon">Documentation — coming soon</span>
+<span class="soon">Support — coming soon</span>
+<span class="soon">Privacy Policy — coming soon</span>
+<span class="soon">Terms of Service — coming soon</span></div>
+</div>
+<p class="base">Ventoryn — get your website its first 100 paying customers.</p>
+</div></footer>
 <script>
 "use strict";
 window.VENTORYN = {state_json};
@@ -765,6 +1501,53 @@ $("landing-analyze-form").addEventListener("submit", async (e) => {{
     $("landing-submit").disabled = false;
   }}
 }});
+// Mobile public nav (§3): the toggle opens/closes the link list.
+const navToggle = $("nav-toggle");
+const navLinks = $("nav-links");
+if (navToggle && navLinks) {{
+  navToggle.addEventListener("click", () => {{
+    const open = navLinks.classList.toggle("open");
+    navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    navToggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+  }});
+  navLinks.addEventListener("click", (e) => {{
+    if (e.target.tagName === "A") {{
+      navLinks.classList.remove("open");
+      navToggle.setAttribute("aria-expanded", "false");
+    }}
+  }});
+}}
+// Product dropdown (§3): toggle on tap/click; tap-outside closes.
+const dropBtn = $("nav-drop-btn");
+const dropItem = dropBtn && dropBtn.closest(".nav-item");
+if (dropBtn && dropItem) {{
+  dropBtn.addEventListener("click", function (e) {{
+    e.stopPropagation();
+    const open = dropItem.classList.toggle("open");
+    dropBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  }});
+  document.addEventListener("click", function () {{
+    dropItem.classList.remove("open");
+    dropBtn.setAttribute("aria-expanded", "false");
+  }});
+  dropItem.querySelectorAll("a").forEach(function (a) {{
+    a.addEventListener("click", function () {{
+      dropItem.classList.remove("open");
+      dropBtn.setAttribute("aria-expanded", "false");
+    }});
+  }});
+}}
+// Demo revenue reveal (§5): example figures only, hidden by default.
+const demoToggle = $("demo-revenue-toggle");
+const demoValue = $("demo-revenue-value");
+if (demoToggle && demoValue) {{
+  demoToggle.addEventListener("click", () => {{
+    const hidden = demoValue.textContent.indexOf("hidden") !== -1;
+    demoValue.textContent = hidden ? "$1,240 (example)" : "$••• hidden";
+    demoToggle.textContent = hidden ? "Hide example revenue"
+      : "Reveal example revenue";
+  }});
+}}
 </script>
 </body></html>"""
 
@@ -798,33 +1581,46 @@ $("landing-analyze-form").addEventListener("submit", async (e) => {{
             biz_rows += _site_business_rows(account)
         else:
             biz_rows = _site_business_rows(account)
-        total_revenue = sum(r["revenue"] for r in biz_rows)
-        total_profit = sum(r["net_profit"] for r in biz_rows)
+        def _money(value):
+            return "hidden" if value is None else f"${value:,.2f}"
+        any_hidden = any(r["revenue"] is None for r in biz_rows)
+        total_revenue = sum(r["revenue"] for r in biz_rows
+                            if r["revenue"] is not None)
+        total_profit = sum(r["net_profit"] for r in biz_rows
+                           if r["net_profit"] is not None)
         cards = "".join(
-            f"<div class='biz-card'><div class='biz-name'>{esc(r['name'])}</div>"
-            f"<div class='biz-sub'>{esc(r['business_type'])} · "
-            f"{esc(r['status'])}</div>"
-            f"<div class='biz-nums'><span>Revenue "
-            f"${r['revenue']:,.2f}</span><span>Costs "
-            f"${r['total_costs']:,.2f}</span><span>Net "
-            f"${r['net_profit']:,.2f}</span></div></div>"
-            for r in biz_rows) or (
+            f"<article class='v-biz v-accent-{i % 4}'>"
+            f"<h3>{esc(r['name'])}</h3>"
+            f"<p class='v-biz-url'>{esc(r['business_type'])} · "
+            f"{esc(r['status'])}</p>"
+            f"<dl><dt>Revenue</dt><dd>{_money(r['revenue'])}</dd>"
+            f"<dt>Costs</dt><dd>${r['total_costs']:,.2f}</dd>"
+            f"<dt>Net profit</dt><dd>{_money(r['net_profit'])}</dd></dl>"
+            f"</article>"
+            for i, r in enumerate(biz_rows)) or (
             "<div class='card'><p>No websites yet. "
             "<a href='/account/sites/new'>Add your first website</a> — "
             "Ventoryn works to bring it its first 100 paying "
             "customers.</p></div>")
-        inner = f"""<div class='stat-cards'>
-<div class='stat-card'><div class='label'>Websites</div>
-<div class='value'>{len(biz_rows)}</div></div>
-<div class='stat-card'><div class='label'>Revenue</div>
-<div class='value'>${total_revenue:,.2f}</div></div>
-<div class='stat-card'><div class='label'>Net profit</div>
-<div class='value'>${total_profit:,.2f}</div></div></div>
+        hidden_note = ("<p class='muted'>Revenue from a site whose "
+                       "revenue display is off is not included in these "
+                       "totals — the site shows &quot;hidden&quot; instead.</p>"
+                       if any_hidden else "")
+        inner = f"""<div class='v-stats'>
+<div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>
+<span class='v-stat-value'>{len(biz_rows)}</span></div>
+<div class='v-stat v-stat-2'><span class='v-stat-label'>Revenue</span>
+<span class='v-stat-value'>{_money(total_revenue) if not any_hidden else "hidden"}</span></div>
+<div class='v-stat v-stat-3'><span class='v-stat-label'>Net profit</span>
+<span class='v-stat-value'>{_money(total_profit) if not any_hidden else "hidden"}</span></div></div>
 <p class='muted'>Costs per website read $0 here: the site's own costs
 are its credits, and credits are not dollars. Revenue is real — the
-sum of recorded paying customers per site.</p>
-{cards}"""
-        return _operator_page("My Portfolio", inner)
+sum of recorded paying customers per site.</p>{hidden_note}
+<div class='v-biz-grid'>{cards}</div>"""
+        return _operator_page(
+            "My Portfolio", inner, account=account, current="portfolio",
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS)
 
     @app.get("/businesses", response_class=HTMLResponse)
     def business_list(request: Request):
@@ -885,7 +1681,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
 {rows}</table><p><a href="/ops">Live Ops</a></p></body></html>"""
 
     @app.get("/approvals", response_class=HTMLResponse)
-    def approval_queue(request: Request):
+    def approval_queue(request: Request, decided: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -903,7 +1699,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
                 return True
             return a.business_id in owned
         pending = [a for a in gate.pending() if _sees(a)]
-        decided = [a for a in gate.decided(20) if _sees(a)]
+        decided_list = [a for a in gate.decided(20) if _sees(a)]
         pend_rows = "".join(
             f"<tr><td>{_approval_summary(a, reg)}</td>"
             f"<td><form method='post' action='/approvals/{esc(a.id)}/decide'>"
@@ -911,20 +1707,47 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
             f"<button name='approved' value='false'>Reject</button></form></td></tr>"
             for a in pending
         ) or "<tr><td colspan='2'>Nothing awaiting approval.</td></tr>"
+
+        def _decided_when(a) -> str:
+            if getattr(a, "decided_at", None):
+                return esc(str(a.decided_at).replace("T", " ")[:19])
+            return "—"
         dec_rows = "".join(
             f"<tr><td>{_approval_summary(a, reg)}</td>"
             f"<td>{esc(a.status.value)}</td>"
+            f"<td>{_decided_when(a)}</td>"
             f"<td>{esc(a.decided_by or '—')}</td></tr>"
-            for a in decided
-        ) or "<tr><td colspan='3'>No decisions yet.</td></tr>"
-        inner = f"""<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p>
+            for a in decided_list
+        ) or "<tr><td colspan='4'>No decisions yet.</td></tr>"
+        # Confirmation after a decide: the POST redirects back here
+        # with ?decided=<id>, and the decided item is already out of
+        # pending and in the Decided section below. Nothing may still
+        # look pending after it was decided.
+        banner = ""
+        if decided:
+            item = gate.get(decided)
+            if item is not None and item.status.value in ("approved",
+                                                          "rejected"):
+                verb = ("Approved" if item.status.value == "approved"
+                        else "Rejected")
+                color = ("#e6f4ea; border-color: #34a853" if
+                         item.status.value == "approved" else
+                         "#fce8e6; border-color: #ea4335")
+                banner = (
+                    f"<div style='background: {color}; border: 1px solid;"
+                    f" border-radius: 10px; padding: 12px 16px;"
+                    f" margin: 12px 0; font-weight: bold;'>{verb} — "
+                    f"nothing ships without your say-so.</div>")
+        inner = f"""{banner}<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p>
 <h2>Pending ({len(pending)})</h2>
 <div class="table-wrap"><table>
 <tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
-<h2>Recently decided</h2>
+<h2>Decided</h2>
 <div class="table-wrap"><table>
-<tr><th>Request</th><th>Decision</th><th>By</th></tr>{dec_rows}</table></div>"""
-        return _operator_page("✅ Approvals", inner)
+<tr><th>Request</th><th>Decision</th><th>Decided</th><th>By</th></tr>{dec_rows}</table></div>"""
+        return _operator_page(
+            "✅ Approvals", inner, account=account, current="approvals",
+            is_operator=_saas_config.is_operator(account["email"]))
 
     @app.post("/approvals/{approval_id}/decide")
     def decide_approval(request: Request, approval_id: str,
@@ -946,21 +1769,30 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
                 _saas_config.is_operator(account["email"]) or
                 target.business_id in _owned_business_ids(account)):
             return HTMLResponse(
-                "<html><body><p>This approval is not yours to decide.</p>"
-                "<p><a href='/approvals'>Back</a></p></body></html>",
+                _operator_page(
+                    "✅ Approvals",
+                    "<p>This approval is not yours to decide.</p>"
+                    "<p><a href='/approvals'>Back</a></p>",
+                    account=account, current="approvals",
+                    is_operator=_saas_config.is_operator(account["email"])),
                 status_code=403)
         try:
             gate.decide(approval_id, approved=approved.lower() == "true",
                         decided_by=account["email"])
         except ValueError as exc:
             return HTMLResponse(
-                f"<html><body><p>Could not record decision: {esc(exc)}</p>"
-                f"<p><a href='/approvals'>Back</a></p></body></html>",
+                _operator_page(
+                    "✅ Approvals",
+                    f"<p>Could not record decision: {esc(exc)}</p>"
+                    "<p><a href='/approvals'>Back</a></p>",
+                    account=account, current="approvals",
+                    is_operator=_saas_config.is_operator(account["email"])),
                 status_code=400,
             )
-        return HTMLResponse(
-            "<html><body>Recorded. <a href='/approvals'>Back</a></body></html>"
-        )
+        # Redirect back to the list — the item is out of pending and
+        # under Decided with a confirmation, never still pending.
+        return RedirectResponse(f"/approvals?decided={approval_id}",
+                                status_code=303)
 
     @app.get("/reports", response_class=HTMLResponse)
     def reports_page(request: Request):
@@ -1079,13 +1911,25 @@ nothing in them was published.</p>
         """Ventoryn live-ops view of the local runtime. Sign-in
         required — /ops is the post-sign-in home for every account,
         and the page is scoped to the signed-in account by the
-        snapshot it polls. Not signed in -> the landing page."""
-        _, redirect = _need_account(request)
+        snapshot it polls. Not signed in -> the landing page. The
+        shared header (hamburger menu) is injected where the page
+        carries the <!--VENTORYN_HEADER--> placeholder — no page
+        title in it, the HUD already carries "Ventoryn — Live Ops"."""
+        account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
         page = static_dir / "game.html"
         if page.exists():
-            return FileResponse(str(page), media_type="text/html")
+            text = page.read_text(encoding="utf-8")
+            header = header_html(
+                "live-ops",
+                _saas_config.is_operator(account["email"]), "")
+            text = text.replace("<!--VENTORYN_HEADER-->", header)
+            # The market-country selector: every ISO country, ca
+            # selected by default (core.countries.country_options).
+            text = text.replace("<!--VENTORYN_COUNTRY_OPTIONS-->",
+                                country_options("ca"))
+            return HTMLResponse(text)
         return HTMLResponse(
             "<html><body><h1>Live Ops view not built yet</h1>"
             "<p><a href='/'>Back</a></p></body></html>", status_code=503)
@@ -1174,10 +2018,17 @@ nothing in them was published.</p>
                 "cost_usd": 0.0, "last_task": "",
             } for t in state["orchestrator"].registry.agent_types()]
             exp = None
+        # A hidden revenue is not $0 and not a number at all: if
+        # any business's revenue is hidden, the totals are hidden
+        # too (the true total includes amounts the customer chose not
+        # to show). Callers render None as "hidden".
+        any_hidden = any(r["revenue"] is None for r in biz_rows)
         totals = {
-            "revenue": round(sum(r["revenue"] for r in biz_rows), 2),
+            "revenue": (None if any_hidden else
+                        round(sum(r["revenue"] for r in biz_rows), 2)),
             "total_costs": round(sum(r["total_costs"] for r in biz_rows), 2),
-            "net_profit": round(sum(r["net_profit"] for r in biz_rows), 2),
+            "net_profit": (None if any_hidden else
+                           round(sum(r["net_profit"] for r in biz_rows), 2)),
             "businesses": len(biz_rows),
         }
         return {
@@ -1373,13 +2224,272 @@ nothing in them was published.</p>
             "total_costs": snap["totals"]["total_costs"],
             "net_profit": snap["totals"]["net_profit"],
         }
+        def _money(value):
+            return "hidden" if value is None else f"${value:,.2f}"
+
         if not _saas_config.is_operator(account["email"]):
-            site_rows = "".join(
-                f"<tr><td>{esc(s['url'])}</td>"
-                f"<td>{_saas_store.paying_customer_count(s['id'])}</td>"
-                f"<td>${sum(c['amount_cents'] for c in _saas_store.list_conversions(s['id'])) / 100:,.2f}</td></tr>"
-                for s in _saas_store.list_sites(account["id"])
-            ) or "<tr><td colspan='3'>No websites yet.</td></tr>"
+            # Acquisition & Attribution (reference image 3): the
+            # product's attribution-first view. Every figure is real
+            # and tagged with its source; the count toggle is
+            # respected per site — a site with the count hidden
+            # contributes nothing to the displayed counts.
+            from core.saas import plausible_visitors
+
+            sites = _saas_store.list_sites(account["id"])
+            site_ids = [s["id"] for s in sites]
+            counted_ids = [s["id"] for s in sites
+                           if s.get("count_show", 1)]
+            counts = _saas_store.conversion_status_counts(counted_ids)
+            verified = counts["verified"]
+            total_conv = counts["total"]
+            last7 = _saas_store.verified_in_last_days(counted_ids, days=7)
+            trend = _saas_store.verified_trend(counted_ids, days=30)
+            any_count_hidden = len(counted_ids) != len(site_ids)
+
+            # Progress ring (SVG): verified / 100.
+            pct = min(verified, 100) / 100
+            circ = 326.7
+            ring = (
+                f"<svg width='140' height='140' viewBox='0 0 140 140' "
+                f"role='img' aria-label='Progress: {verified} of 100 "
+                f"verified customers'><circle cx='70' cy='70' r='52' "
+                f"fill='none' stroke='#e9e4fb' stroke-width='14'/>"
+                f"<circle cx='70' cy='70' r='52' fill='none' "
+                f"stroke='#8b5cf6' stroke-width='14' stroke-linecap='round' "
+                f"stroke-dasharray='{circ}' "
+                f"stroke-dashoffset='{circ * (1 - pct):.1f}' "
+                f"transform='rotate(-90 70 70)'/>"
+                f"<text x='70' y='66' text-anchor='middle' font-size='28' "
+                f"font-weight='800' fill='#6d28d9'>{verified}</text>"
+                f"<text x='70' y='86' text-anchor='middle' font-size='13' "
+                f"fill='#666'>/ 100</text></svg>")
+
+            # Attribution flow: a step shows a check only where this
+            # account has real evidence for it.
+            jobs = _saas_store.list_jobs(account["id"])
+            gate = state["approvals"]
+            site_biz_ids = {f"site:{s['id']}" for s in sites}
+            decided_here = [
+                a for a in gate.decided(limit=100)
+                if getattr(a, "business_id", None) in site_biz_ids]
+            any_sig = any(
+                _saas_store.list_signatures(s["id"]) for s in sites)
+            has_visitors = False
+            for s in sites:
+                conn = _saas_store.get_connection(s["id"], "plausible") or {}
+                if conn.get("status") == "connected":
+                    raw = conn.get("_detail_raw") or {}
+                    key = raw.get("api_key")
+                    if key:
+                        v = plausible_visitors(
+                            key, raw.get("site_domain") or s["host"])
+                        if v:
+                            has_visitors = True
+                            break
+            any_stripe = any(
+                c.get("stripe_event_id") or c.get("source") != "manual"
+                for s in sites
+                for c in _saas_store.list_conversions(s["id"], limit=1000))
+            flow_steps = [
+                ("AI Recommendation", bool(jobs),
+                 "A job ran for this account."),
+                ("Customer Approval", bool(decided_here),
+                 "An approval was decided by this account."),
+                ("Signed Campaign Link", any_sig,
+                 "A signed Ventoryn link was created."),
+                ("Website Visit", has_visitors,
+                 "Plausible recorded visitors on a connected site."),
+                ("Stripe Payment", any_stripe,
+                 "A Stripe payment was recorded."),
+                ("Verified Conversion", verified > 0,
+                 "A signed sale was verified."),
+            ]
+            flow_html = "".join(
+                f"<div class='v-flow-step{' done' if ok else ''}'>"
+                f"<span class='v-flow-check'>{'✓' if ok else '·'}</span> "
+                f"<strong>{esc(label)}</strong>"
+                f"<span>{esc(note if ok else 'No evidence yet')}</span></div>"
+                + ("<span class='v-flow-arrow'>→</span>" if i < 5 else "")
+                for i, (label, ok, note) in enumerate(flow_steps))
+
+            # Conversion status donut (SVG, three arcs + total).
+            if total_conv:
+                import math
+                dc = 2 * math.pi * 54
+                segs = [("Verified", counts["verified"], "#16a34a"),
+                        ("Pending", counts["pending"], "#d97706"),
+                        ("Unattributed", counts["unattributed"], "#9ca3af")]
+                arcs = ""
+                offset = 0.0
+                for _label, n, color in segs:
+                    if n == 0:
+                        continue
+                    length = dc * n / total_conv
+                    arcs += (
+                        f"<circle cx='70' cy='70' r='54' fill='none' "
+                        f"stroke='{color}' stroke-width='22' "
+                        f"stroke-dasharray='{length:.1f} {dc - length:.1f}' "
+                        f"stroke-dashoffset='{-offset:.1f}' "
+                        f"transform='rotate(-90 70 70)'/>")
+                    offset += length
+                donut = (
+                    f"<svg width='140' height='140' viewBox='0 0 140 140' "
+                    f"role='img' aria-label='Conversion status: "
+                    f"{counts['verified']} verified, {counts['pending']} "
+                    f"pending, {counts['unattributed']} unattributed'>"
+                    f"<circle cx='70' cy='70' r='54' fill='none' "
+                    f"stroke='#f3f4f6' stroke-width='22'/>{arcs}"
+                    f"<text x='70' y='66' text-anchor='middle' "
+                    f"font-size='26' font-weight='800' fill='#1a1a2e'>"
+                    f"{total_conv}</text>"
+                    f"<text x='70' y='84' text-anchor='middle' "
+                    f"font-size='12' fill='#666'>total</text></svg>")
+                legend = "".join(
+                    f"<li><span class='v-dot' style='background:{color}'>"
+                    f"</span>{label}: <strong>{n}</strong> "
+                    f"({(100 * n / total_conv):.1f}%)</li>"
+                    for label, n, color in segs)
+            else:
+                donut = (
+                    "<svg width='140' height='140' viewBox='0 0 140 140' "
+                    "role='img' aria-label='Conversion status: no "
+                    "conversions yet'><circle cx='70' cy='70' r='54' "
+                    "fill='none' stroke='#f3f4f6' stroke-width='22'/>"
+                    "<text x='70' y='75' text-anchor='middle' font-size='14' "
+                    "fill='#666'>No data</text></svg>")
+                legend = "<li>No conversions recorded yet.</li>"
+
+            # Campaign performance: one row per signed action.
+            campaigns = {}
+            for s in sites:
+                for sig in _saas_store.list_signatures(s["id"], limit=1000):
+                    key = sig["action_id"] or sig["tag"]
+                    if key not in campaigns:
+                        campaigns[key] = {
+                            "url": sig["target_url"], "agent": sig["agent"],
+                            "verified": 0}
+                    campaigns[key]["verified"] += sum(
+                        1 for c in _saas_store.list_conversions(
+                            s["id"], limit=1000)
+                        if c.get("action_id") == sig["action_id"]
+                        and c.get("attribution") == "ventoryn")
+            camp_rows = "".join(
+                f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
+                f"<td>{c['verified']}</td><td>Active</td></tr>"
+                for c in campaigns.values()) or (
+                "<tr><td colspan='4'>No signed campaigns yet — run agent "
+                "work from a site page.</td></tr>")
+
+            # Acquisition trend: cumulative verified by day + Goal: 100.
+            # Real data only — no estimated/projection line is drawn.
+            if trend:
+                vmax = max(100, max(p["verified"] for p in trend))
+                tw, th = 600, 160
+                npts = len(trend)
+                pts = " ".join(
+                    f"{(i * tw / max(npts - 1, 1)):.1f},"
+                    f"{(th - (p['verified'] / vmax) * th):.1f}"
+                    for i, p in enumerate(trend))
+                goal_y = th - (100 / vmax) * th
+                trend_svg = (
+                    f"<svg viewBox='0 0 {tw} {th}' class='v-trend' "
+                    f"role='img' aria-label='Acquisition trend: verified "
+                    f"customers over the last 30 days, goal 100'>"
+                    f"<line x1='0' y1='{goal_y:.1f}' x2='{tw}' "
+                    f"y2='{goal_y:.1f}' stroke='#c4b5fd' stroke-width='1.5' "
+                    f"stroke-dasharray='6 4'/>"
+                    f"<text x='{tw - 4}' y='{goal_y - 6:.1f}' "
+                    f"text-anchor='end' font-size='11' fill='#6d28d9'>"
+                    f"Goal: 100</text>"
+                    f"<polyline points='{pts}' fill='none' "
+                    f"stroke='#8b5cf6' stroke-width='2.5'/></svg>"
+                    f"<p class='muted'>Verified customers, cumulative, "
+                    f"last 30 days. The dashed line is the goal of 100 — "
+                    f"no projection is drawn, only real verified sales.</p>")
+            else:
+                trend_svg = ("<p class='muted'>No verified customers yet — "
+                             "the trend appears once the first signed sale "
+                             "lands.</p>")
+
+            # Conversion breakdown bars.
+            maxb = max(counts["verified"], counts["pending"],
+                       counts["unattributed"], 1)
+            breakdown_html = "".join(
+                f"<div class='v-bbar'><span class='v-bbar-label'>{label}"
+                f"</span><span class='v-bbar-track'><span "
+                f"class='v-bbar-fill' style='width:{(100 * n / maxb):.0f}%;"
+                f"background:{color}'></span></span>"
+                f"<span class='v-bbar-num'>{n}</span></div>"
+                for label, n, color in [
+                    ("Verified", counts["verified"], "#16a34a"),
+                    ("Pending", counts["pending"], "#d97706"),
+                    ("Unattributed", counts["unattributed"], "#9ca3af")])
+
+            # Data & privacy controls: one form per site, posting to
+            # the same privacy endpoint as the site page (fresh 2FA
+            # code required there when 2FA is enabled).
+            def _chk(on):
+                return "checked" if on else ""
+            totp_field = ""
+            if account.get("totp_enabled"):
+                totp_field = (
+                    "<label>Two-factor code (fresh — required to confirm "
+                    "this change)</label><input type='text' "
+                    "name='totp_code' inputmode='numeric' "
+                    "autocomplete='one-time-code' maxlength='8'>")
+            privacy_forms = ""
+            for s in sites:
+                privacy_forms += (
+                    f"<div class='card'><h3>{esc(s['url'])}</h3>"
+                    f"<form method='post' action='/account/sites/{esc(s['id'])}/privacy'>"
+                    f"<input type='hidden' name='return_to' value='/report'>"
+                    f"<label><input type='checkbox' name='revenue_show' "
+                    f"{_chk(s.get('revenue_show'))}> Show my revenue on "
+                    f"Ventoryn</label>"
+                    f"<label><input type='checkbox' name='count_show' "
+                    f"{_chk(s.get('count_show', 1))}> Show my customer "
+                    f"count</label>"
+                    f"<label><input type='checkbox' name='details_show' "
+                    f"{_chk(s.get('details_show', 1))}> Show conversion "
+                    f"details</label>"
+                    f"{totp_field}"
+                    "<p><button class='btn' type='submit'>Save privacy "
+                    "settings</button></p></form></div>")
+            if not privacy_forms:
+                privacy_forms = ("<p class='muted'>No websites yet — add "
+                                 "one to set its privacy controls.</p>")
+
+            # Your websites + recent jobs (revenue/count hidden per
+            # the toggles, via revenue_for_site).
+            site_rows = ""
+            for s in sites:
+                rev = _saas_store.revenue_for_site(s["id"])
+                conn = _saas_store.get_connection(s["id"], "stripe_sales") or {}
+                stripe_connected = conn.get("status") == "connected"
+                if rev is None:
+                    count_html = "<span class='unavailable'>unavailable</span>"
+                    revenue_html = "<span class='unavailable'>unavailable</span>"
+                else:
+                    count_html = (
+                        f"{rev['paying_customers']:,}"
+                        if rev["paying_customers"] is not None else
+                        "<span class='unavailable'>hidden</span>")
+                    if not stripe_connected:
+                        revenue_html = ("<span class='unavailable'>"
+                                        "unavailable — connect Stripe "
+                                        "sales</span>")
+                    elif rev["revenue"] is None:
+                        revenue_html = ("<span class='unavailable'>"
+                                        "hidden</span>")
+                    else:
+                        revenue_html = (
+                            f"${rev['revenue']['total_cents'] / 100:,.2f} "
+                            f"{rev['revenue']['currency'].upper()}")
+                site_rows += (
+                    f"<tr><td>{esc(s['url'])}</td><td>{count_html}</td>"
+                    f"<td>{revenue_html}</td></tr>")
+            site_rows = site_rows or (
+                "<tr><td colspan='3'>No websites yet.</td></tr>")
             job_rows = "".join(
                 f"<tr><td>{esc(j['job_type'].replace('_', ' '))}</td>"
                 f"<td>{esc(j['status'])}</td>"
@@ -1387,17 +2497,51 @@ nothing in them was published.</p>
                 f"<td>{esc(j['result'] or '—')}</td></tr>"
                 for j in _saas_store.list_jobs(account["id"])
             ) or "<tr><td colspan='4'>No jobs yet.</td></tr>"
-            inner = f"""<p>Generated: {esc(utcnow().isoformat())}</p>
-<div class='stat-cards'>
-<div class='stat-card'><div class='label'>Revenue</div>
-<div class='value'>${fin["revenue"]:,.2f}</div></div>
-<div class='stat-card'><div class='label'>Paying customers</div>
-<div class='value'>{sum(_saas_store.paying_customer_count(s['id']) for s in _saas_store.list_sites(account['id']))}</div></div>
-<div class='stat-card'><div class='label'>Credit balance</div>
-<div class='value'>{account['credits_balance']}</div></div></div>
-<p class='muted'>Revenue is the sum of recorded paying customers
-across your sites. Visitors read "unavailable" until Plausible is
-connected on a site — see its page under My account.</p>
+            count_note = (
+                "<p class='muted'>The customer count is hidden on one or "
+                "more of your sites — change it in Data &amp; privacy "
+                "controls below.</p>" if any_count_hidden else "")
+            inner = f"""<p class='muted'>Track your journey to your first
+100 verified paying customers.</p>
+<p class='muted'>Generated: {esc(utcnow().isoformat())}</p>
+<div class='v-report-grid'>
+<div class='card v-progress'><h2>Progress to 100</h2>{ring}
+<div class='v-bar-track'><div class='v-bar-fill' style='width:{min(verified, 100)}%'></div></div>
+<p><span class='pill green'>+{last7} verified customers (7 days)</span></p>
+<p class='muted'>Goal: 100 verified paying customers.</p>{count_note}</div>
+<div class='card'><h2>Verified</h2><div class='big'>{verified}</div>
+<p class='muted'>The Ventoryn signature reached the payment.</p></div>
+<div class='card'><h2>Pending</h2><div class='big'>{counts['pending']}</div>
+<p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div>
+<div class='card'><h2>Unattributed</h2><div class='big'>{counts['unattributed']}</div>
+<p class='muted'>Real Stripe payment, no signature.</p></div>
+</div>
+<div class='card'><h2>Attribution flow</h2><div class='v-flow'>{flow_html}</div>
+<p class='muted'>A step shows a check only where this account has real
+evidence for it. Steps without evidence read "No evidence yet" — nothing
+is assumed.</p></div>
+<div class='v-report-grid'>
+<div class='card'><h2>Conversion status</h2>
+<div class='v-donut-wrap'>{donut}<ul class='v-legend'>{legend}</ul></div></div>
+<div class='card'><h2>Campaign performance</h2>
+<div class='table-wrap'><table>
+<tr><th>Campaign</th><th>Source</th><th>Verified conversions</th><th>Status</th></tr>
+{camp_rows}</table></div>
+<p class='muted'>Clicks per campaign are not tracked yet — the table shows
+verified conversions only.</p></div>
+</div>
+<div class='card'><h2>Data &amp; privacy controls</h2>
+<p class='muted'>Revenue amounts are private by default. The count and the
+per-sale details are separate settings.</p>{privacy_forms}</div>
+<div class='v-report-grid'>
+<div class='card'><h2>Acquisition trend</h2>{trend_svg}</div>
+<div class='card'><h2>Conversion breakdown</h2>{breakdown_html}
+<div class='card'><h2>Data source &amp; accuracy</h2><ul>
+<li><strong>Real data</strong> — live, verified events (e.g. Stripe, analytics).</li>
+<li><strong>Estimated data</strong> — Ventoryn does not show estimated data on this report — figures are real or unavailable.</li>
+<li><strong>Demonstration data</strong> — sample data shown for illustration only — used only on the public landing preview.</li>
+</ul></div></div>
+</div>
 <h2>Your websites</h2>
 <div class="table-wrap"><table>
 <tr><th>Website</th><th>Paying customers</th><th>Revenue</th></tr>
@@ -1406,7 +2550,9 @@ connected on a site — see its page under My account.</p>
 <div class="table-wrap"><table>
 <tr><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>
 {job_rows}</table></div>"""
-            return _operator_page("📊 Report", inner)
+            return _operator_page("Acquisition & Attribution", inner,
+                                  account=account, current="report",
+                                  is_operator=False, extra_css=_REPORT_CSS)
         agent_rows = "".join(
             f"<tr><td>{esc(a['type'])}</td>"
             f"<td>{a['tasks_completed']}</td>"
@@ -1419,9 +2565,9 @@ connected on a site — see its page under My account.</p>
             f"<tr><td>{esc(b['name'])}</td>"
             f"<td>{esc(b['business_type'])}</td>"
             f"<td>{esc(b['status'])}</td>"
-            f"<td>${b['revenue']:,.2f}</td>"
+            f"<td>{_money(b['revenue'])}</td>"
             f"<td>${b['total_costs']:,.2f}</td>"
-            f"<td>${b['net_profit']:,.2f}</td></tr>"
+            f"<td>{_money(b['net_profit'])}</td></tr>"
             for b in snap["businesses"]
         ) or "<tr><td colspan='6'>No businesses yet.</td></tr>"
         exp_block = (
@@ -1433,7 +2579,10 @@ connected on a site — see its page under My account.</p>
         ) if exp else (
             "<h2>Experiment 001</h2><p>Not configured on this runtime.</p>"
         )
-        net_color = "green" if fin["net_profit"] >= 0 else "red"
+        # Net profit is None when any site's revenue is hidden — the
+        # card reads "hidden" and the color stays neutral.
+        net_color = ("#666" if fin["net_profit"] is None else
+                     "green" if fin["net_profit"] >= 0 else "red")
         return f"""<html><head><title>Agent &amp; Financial Report</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
@@ -1456,11 +2605,11 @@ th {{ background: #f0f0f0; }}
 <h2>Financials</h2>
 <div class="cards">
 <div class="card"><div class="label">Revenue</div>
-<div class="value">${fin["revenue"]:,.2f}</div></div>
+<div class="value">{_money(fin["revenue"])}</div></div>
 <div class="card"><div class="label">Total costs</div>
 <div class="value">${fin["total_costs"]:,.2f}</div></div>
 <div class="card"><div class="label">Net profit</div>
-<div class="value" style="color:{net_color}">${fin["net_profit"]:,.2f}</div></div>
+<div class="value" style="color:{net_color}">{_money(fin["net_profit"])}</div></div>
 </div>
 <h2>Agent performance</h2>
 <div class="table-wrap"><table>
@@ -1537,30 +2686,302 @@ th {{ background: #f0f0f0; }}
         return app.state.runtime_holder["rt"]
 
     # -- /admin: operator oversight, separate URL --------------------------
-    # ventoryn.app/admin is the operator home — and ONLY this:
-    # who subscribed, all accounts, and what the agents are doing
-    # (activity, health, problems). Aggregates only: the admin does
-    # NOT get any customer's portfolio or approvals — those are the
-    # customer's own financial decisions, made alone. No approve
-    # buttons for customer items anywhere here, and no per-customer
-    # site URLs or funnels.
-    def _admin_page(title: str, inner: str) -> str:
+    # ventoryn.app/admin is the operator home — and ONLY this: who
+    # is live now, who subscribed, all accounts, and what the agents
+    # are doing (activity, health, problems). Aggregates only: the
+    # admin does NOT get any customer's portfolio or approvals —
+    # those are the customer's own financial decisions, made alone.
+    # No approve buttons for customer items anywhere here, and no
+    # per-customer site URLs or funnels.
+    #
+    # The gate is a PASSWORD, not the Google session:
+    # VENTORYN_ADMIN_PASSWORD (env, Spencer's value, never in chat
+    # or the repo), checked server-side only. A signed-in Google
+    # session alone never opens /admin — not even the operator's.
+    # Unset password => login always fails with the same generic
+    # message (fail closed). Same pattern as the Kay Ayiti and Road
+    # to CISSP admins.
+    def _need_admin(request: Request):
+        """(True, None) or (None, redirect to /admin/login) — the
+        admin password session is what opens /admin, never a Google
+        session."""
+        token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
+        if not _saas_store.check_admin_session(token):
+            return None, RedirectResponse("/admin/login", status_code=303)
+        session = _saas_store.get_admin_session(token)
+        if _saas_store.admin_totp_state()["enabled"] and not (
+                session or {}).get("totp_verified"):
+            return None, RedirectResponse("/admin/login", status_code=303)
+        return True, None
+
+    def _admin_page(title: str, inner: str, current: str) -> str:
+        """Admin shell: the shared centered header (operator menu,
+        with the Admin group) + the admin board look — Kay Ayiti's
+        light board blended with ShipItAyiti's slate/navy headers."""
         return (f"<html><head><title>{esc(title)} — Ventoryn admin</title>"
                 f"<meta name='viewport' content='width=device-width,"
-                f" initial-scale=1'><style>{_PAGE_CSS}{_NAV_CSS}</style>"
-                f"</head><body>{_ADMIN_NAV}<h1>{esc(title)}</h1>"
-                f"{inner}</body></html>")
+                f" initial-scale=1'><style>{_PAGE_CSS}{HEADER_CSS}"
+                f"{_ADMIN_CSS}</style>"
+                f"</head><body class='v-admin'>"
+                f"{header_html(current, True, title)}{inner}"
+                f"<p class='v-admin-foot'>Signed in as admin · "
+                f"<a href='/admin/logout'>Admin sign out</a></p>"
+                f"</body></html>")
+
+    def _admin_auth_page(title: str, inner: str) -> str:
+        """Password-only login page: no header, no menu, no Google
+        button — just the password field."""
+        return (f"<html><head><title>{esc(title)} — Ventoryn admin</title>"
+                f"<meta name='viewport' content='width=device-width,"
+                f" initial-scale=1'><style>{_PAGE_CSS}{_ADMIN_CSS}</style>"
+                f"</head><body class='v-admin'>"
+                f"<div class='v-auth-card'><h1>{esc(title)}</h1>"
+                f"{inner}</div></body></html>")
+
+    @app.get("/admin/login", response_class=HTMLResponse)
+    def admin_login_page(request: Request, error: str = ""):
+        if _saas_store.check_admin_session(
+                request.cookies.get(ADMIN_SESSION_COOKIE, "")):
+            return RedirectResponse("/admin", status_code=303)
+        totp_on = _saas_store.admin_totp_state()["enabled"]
+        code_hint = (
+            "<p class='muted'>Two-factor is enabled: enter the 6-digit "
+            "code from your authenticator app (or a backup code) as "
+            "well.</p>" if totp_on else
+            "<p class='muted'>Two-factor is not enabled yet — the code "
+            "field can stay empty. Set it up under /admin once you are "
+            "in.</p>")
+        inner = ("<p>Enter the admin password to open the Ventoryn "
+                 "admin.</p>"
+                 + ("<p class='v-error'>Incorrect admin password or "
+                    "code.</p>" if error else "")
+                 + "<form method='post' action='/admin/login'>"
+                   "<label for='v-admin-password'>Admin password</label>"
+                   "<input id='v-admin-password' name='password' "
+                   "type='password' autocomplete='current-password' "
+                   "required>"
+                   "<label for='v-admin-code'>Authenticator code</label>"
+                   "<input id='v-admin-code' name='code' type='text' "
+                   "inputmode='numeric' autocomplete='one-time-code' "
+                   "maxlength='8' placeholder='6-digit code, if enabled'>"
+                 + code_hint +
+                   "<button type='submit'>Open admin</button></form>")
+        return HTMLResponse(_admin_auth_page("Admin sign-in", inner))
+
+    @app.post("/admin/login")
+    def admin_login(request: Request, password: str = Form(""),
+                    code: str = Form("")):
+        # Fail closed: an unset password fails exactly like a wrong
+        # one — the same generic message either way. Constant-time
+        # compare; the password and the code are never logged or
+        # rendered. Wrong guesses are rate-limited (lockout after a few
+        # failures) and every attempt is recorded in the audit log.
+        key = request.client.host if request.client else "unknown"
+        if _saas_store.admin_login_locked(key):
+            state["audit"].record(agent_type="admin",
+                                 event="admin_login",
+                                 result={"success": False, "locked": True})
+            return RedirectResponse("/admin/login?error=1",
+                                    status_code=303)
+        ok = (_saas_config.admin_configured and hmac.compare_digest(
+            password, _saas_config.admin_password))
+        totp_on = _saas_store.admin_totp_state()["enabled"]
+        if ok and totp_on:
+            c = (code or "").strip()
+            ok = bool(c) and (
+                _saas_store.verify_admin_totp_code(c)
+                or _saas_store.consume_admin_backup_code(c))
+        _saas_store.record_admin_attempt(key, bool(ok))
+        state["audit"].record(agent_type="admin", event="admin_login",
+                             result={"success": bool(ok),
+                                     "totp_required": totp_on})
+        if not ok:
+            return RedirectResponse("/admin/login?error=1",
+                                    status_code=303)
+        token = _saas_store.create_admin_session()
+        if totp_on:
+            _saas_store.mark_admin_session_totp_verified(token)
+        response = RedirectResponse("/admin", status_code=303)
+        response.set_cookie(ADMIN_SESSION_COOKIE, token, httponly=True,
+                            samesite="lax", path="/",
+                            secure=_saas_config.cookie_secure,
+                            max_age=ADMIN_SESSION_TTL_HOURS * 3600)
+        return response
+
+    @app.get("/admin/logout")
+    def admin_logout(request: Request):
+        _saas_store.delete_admin_session(
+            request.cookies.get(ADMIN_SESSION_COOKIE, ""))
+        response = RedirectResponse("/admin/login", status_code=303)
+        response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+        return response
+
+    # -- admin two-factor ---------------------------------------
+    # Setup lives under /admin, after the password login. The secret is
+    # generated here, shown ONCE as a QR code + manual key, and only
+    # confirmed by a code — until then password-only login still works,
+    # so the build itself can never lock the operator out. Once enabled,
+    # the code is required at every login (_need_admin enforces it).
+    @app.get("/admin/two-factor/setup", response_class=HTMLResponse)
+    def admin_totp_setup_page(request: Request, error: str = ""):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        state2 = _saas_store.admin_totp_state()
+        if state2["enabled"]:
+            inner = ("<div class='v-admin-card'><h2>Two-factor is on</h2>"
+                     "<p>The admin login requires the password and a "
+                     "6-digit authenticator code at every sign-in.</p>"
+                     "<form method='post' action='/admin/two-factor/reset'>"
+                     "<button type='submit'>Reset two-factor</button></form>"
+                     "<p class='muted'>Resetting turns two-factor off — "
+                     "the next admin login is password-only until it is "
+                     "set up again.</p></div>")
+            return _admin_page("Two-factor", inner, "admin-two-factor")
+        secret = _saas_store.get_admin_totp_pending_secret()
+        if not secret:
+            secret = _saas_store.begin_admin_totp_setup()["secret"]
+        uri = provisioning_uri(secret, "admin@ventoryn.app",
+                               issuer="Ventoryn")
+        inner = ("<div class='v-admin-card'><h2>Set up two-factor</h2>"
+                 "<p>Two-factor is required for the admin once it is "
+                 "enabled. Scan this QR code with your authenticator "
+                 "app, then enter the 6-digit code it shows.</p>"
+                 + ("<p class='v-error'>That code did not match — try "
+                    "again.</p>" if error else "")
+                 + f"<div class='qr'>{qr_svg(uri)}</div>"
+                 + f"<p class='muted'>Or enter this key manually: "
+                   f"<code>{esc(secret)}</code></p>"
+                 + "<form method='post' action='/admin/two-factor/setup'>"
+                   "<label for='v-totp-code'>6-digit code</label>"
+                   "<input id='v-totp-code' name='code' type='text' "
+                   "inputmode='numeric' autocomplete='one-time-code' "
+                   "required maxlength='6'>"
+                   "<p><button type='submit'>Confirm and turn on "
+                   "two-factor</button></p></form>"
+                 + "<p class='muted'>Backup codes are shown once after "
+                   "setup — save them. If you lose your phone and the "
+                   "codes, two-factor can only be reset from inside an "
+                   "admin session.</p></div>")
+        return _admin_page("Two-factor", inner, "admin-two-factor")
+
+    @app.post("/admin/two-factor/setup", response_class=HTMLResponse)
+    def admin_totp_setup_confirm(request: Request, code: str = Form("")):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        if _saas_store.confirm_admin_totp_setup(code.strip()):
+            codes = _saas_store.regenerate_admin_backup_codes()
+            codes_html = "".join(
+                f"<div>{esc(c[:4])} {esc(c[4:])}</div>" for c in codes)
+            inner = ("<div class='v-admin-card'><h2>Two-factor is on</h2>"
+                     "<p>Save these backup codes now — each works once, "
+                     "and they are the way back in if you lose your "
+                     "phone. They are shown only this once.</p>"
+                     f"<div class='codes'>{codes_html}</div>"
+                     "<p><a class='btn' href='/admin'>Back to the "
+                     "admin</a></p></div>")
+            state["audit"].record(agent_type="admin",
+                                 event="admin_totp_enabled",
+                                 result={"success": True})
+            return _admin_page("Two-factor", inner, "admin-two-factor")
+        state["audit"].record(agent_type="admin",
+                             event="admin_totp_enabled",
+                             result={"success": False})
+        return RedirectResponse("/admin/two-factor/setup?error=1",
+                                status_code=303)
+
+    @app.post("/admin/two-factor/reset")
+    def admin_totp_reset(request: Request):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        _saas_store.reset_admin_totp()
+        state["audit"].record(agent_type="admin",
+                             event="admin_totp_reset",
+                             result={"success": True})
+        return RedirectResponse("/admin/two-factor/setup", status_code=303)
+
+    @app.post("/admin/accounts/{account_id}/reset-totp")
+    def admin_reset_customer_totp(request: Request, account_id: str):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        account = _saas_store.get_account(account_id)
+        if account is None:
+            return RedirectResponse("/admin/accounts", status_code=303)
+        _saas_store.reset_totp(account_id)
+        state["audit"].record(
+            agent_type="admin", event="admin_customer_totp_reset",
+            result={"success": True, "email": account["email"]})
+        return RedirectResponse("/admin/accounts", status_code=303)
 
     @app.get("/admin", response_class=HTMLResponse)
     def admin_home(request: Request):
-        _, redirect = _need_operator(request)
+        _, redirect = _need_admin(request)
         if redirect is not None:
             return redirect
-        return RedirectResponse("/admin/subscribers", status_code=303)
+        # Stamp the viewer as live before rendering, so the operator
+        # sees himself in the list on his first load (the request
+        # middleware stamps after the response, which would be one
+        # page behind).
+        account = _current_account(request)
+        if account is not None:
+            _saas_store.touch_activity(account["id"], "Admin")
+        live = _saas_store.live_accounts()
+        events = _saas_store.recent_activity_events(limit=30)
+        accounts = _saas_store.list_accounts()
+        subscribers = [a for a in accounts
+                       if a["subscription_status"] == "active"]
+        live_rows = "".join(
+            f"<tr><td><span class='v-live-dot'></span>"
+            f"{esc(a['email'])}</td>"
+            f"<td>{esc(a['name'] or '—')}</td>"
+            f"<td>{esc(a['last_action'] or '—')}</td>"
+            f"<td>{_ago(a['last_seen_at'])}</td></tr>"
+            for a in live) or (
+            "<tr><td colspan='4'>Nobody is on the platform right "
+            "now.</td></tr>")
+        event_rows = "".join(
+            f"<tr><td>{esc((e['created_at'] or '')[:19].replace('T', ' '))}</td>"
+            f"<td>{esc(e['email'])}</td>"
+            f"<td>{esc(_ACTIVITY_KIND_LABELS.get(e['kind'], e['kind']))}</td>"
+            f"<td>{esc(e['detail'] or '—')}</td></tr>"
+            for e in events) or (
+            "<tr><td colspan='4'>No activity recorded yet.</td></tr>")
+        totals = _saas_store.admin_revenue_totals()
+        inner = (f"<div class='v-admin-card'><h2>Live now "
+                 f"<span class='v-count'>({len(live)})</span></h2>"
+                 f"<p class='muted'>Accounts active in the last "
+                 f"{LIVE_WINDOW_MINUTES} minutes — stamped when a "
+                 f"signed-in account makes a request. Nobody is "
+                 f"invented; stale sessions drop off.</p>"
+                 f"<div class='table-wrap'><table>"
+                 f"<tr><th>Account</th><th>Name</th><th>Last action</th>"
+                 f"<th>Last seen</th></tr>{live_rows}</table></div></div>"
+                 f"<div class='v-admin-card'><h2>Recent activity</h2>"
+                 f"<p class='muted'>Sign-ins, websites added, "
+                 f"subscriptions, analyze runs — only real events.</p>"
+                 f"<div class='table-wrap'><table>"
+                 f"<tr><th>When</th><th>Account</th><th>Event</th>"
+                 f"<th>Detail</th></tr>{event_rows}</table></div></div>"
+                 f"<div class='v-admin-card'><h2>At a glance</h2>"
+                 f"<p>Subscribers: <strong>{len(subscribers)}</strong> · "
+                 f"Accounts: <strong>{len(accounts)}</strong></p>"
+                 f"<p>Platform revenue (sites with revenue display on): "
+                 f"<strong>${totals['total_cents'] / 100:,.2f} "
+                 f"{totals['currency'].upper()}</strong> · Paying customers "
+                 f"(count display on): <strong>{totals['paying_customers']}</strong></p>"
+                 f"<p class='muted'>Dollar figures include only sites whose "
+                 f"revenue display is on; counts include only sites whose count "
+                 f"display is on.</p>"
+                 f"<p><a href='/admin/two-factor/setup'>Admin two-factor "
+                 f"setup</a></p></div>")
+        return _admin_page("Live", inner, "admin-live")
 
     @app.get("/admin/subscribers", response_class=HTMLResponse)
     def admin_subscribers(request: Request):
-        _, redirect = _need_operator(request)
+        _, redirect = _need_admin(request)
         if redirect is not None:
             return redirect
         rows = ""
@@ -1575,7 +2996,8 @@ th {{ background: #f0f0f0; }}
                 f"<td>{esc(account['name'] or '—')}</td>"
                 f"<td>{len(sites)}</td><td>{paying}</td>"
                 f"<td>{account['credits_balance']}</td></tr>")
-        inner = ("<p class='muted'>Every account with an active "
+        inner = ("<div class='v-admin-card'>"
+                 "<p class='muted'>Every account with an active "
                  "$20/month subscription. Counts only — no site URLs, "
                  "no funnels, no approvals: those belong to the "
                  "customer.</p>"
@@ -1583,36 +3005,45 @@ th {{ background: #f0f0f0; }}
                  "<tr><th>Email</th><th>Name</th><th>Sites</th>"
                  "<th>Paying customers</th><th>Credits</th></tr>"
                  f"{rows or '<tr><td colspan=5>No subscribers yet.</td></tr>'}"
-                 "</table></div>")
-        return _admin_page("Subscribers", inner)
+                 "</table></div></div>")
+        return _admin_page("Subscribers", inner, "admin-subscribers")
 
     @app.get("/admin/accounts", response_class=HTMLResponse)
     def admin_accounts(request: Request):
-        _, redirect = _need_operator(request)
+        _, redirect = _need_admin(request)
         if redirect is not None:
             return redirect
         rows = ""
         for account in _saas_store.list_accounts():
             sites = _saas_store.list_sites(account["id"])
+            totp = _saas_store.totp_state(account["id"])
+            reset_cell = ("—" if not totp["enabled"] else
+                          f"<form method='post' action='/admin/accounts/"
+                          f"{esc(account['id'])}/reset-totp'>"
+                          f"<button type='submit'>Reset 2FA</button></form>")
             rows += (
                 f"<tr><td>{esc(account['email'])}</td>"
                 f"<td>{esc(account['name'] or '—')}</td>"
                 f"<td>{esc(account['subscription_status'])}</td>"
                 f"<td>{len(sites)}</td>"
                 f"<td>{account['credits_balance']}</td>"
-                f"<td>{esc((account['created_at'] or '')[:10])}</td></tr>")
-        inner = ("<p class='muted'>Every account that exists on the "
+                f"<td>{esc((account['created_at'] or '')[:10])}</td>"
+                f"<td>{'Enabled' if totp['enabled'] else 'Not set up'}</td>"
+                f"<td>{reset_cell}</td></tr>")
+        inner = ("<div class='v-admin-card'>"
+                 "<p class='muted'>Every account that exists on the "
                  "platform — subscribed or not. Counts only.</p>"
                  "<div class='table-wrap'><table>"
                  "<tr><th>Email</th><th>Name</th><th>Subscription</th>"
-                 "<th>Sites</th><th>Credits</th><th>Created</th></tr>"
-                 f"{rows or '<tr><td colspan=6>No accounts yet.</td></tr>'}"
-                 "</table></div>")
-        return _admin_page("Accounts", inner)
+                 "<th>Sites</th><th>Credits</th><th>Created</th>"
+                 "<th>Two-factor</th><th>Reset 2FA</th></tr>"
+                 f"{rows or '<tr><td colspan=8>No accounts yet.</td></tr>'}"
+                 "</table></div></div>")
+        return _admin_page("Accounts", inner, "admin-accounts")
 
     @app.get("/admin/agents", response_class=HTMLResponse)
     def admin_agents(request: Request):
-        _, redirect = _need_operator(request)
+        _, redirect = _need_admin(request)
         if redirect is not None:
             return redirect
         orch = state["orchestrator"]
@@ -1652,7 +3083,8 @@ th {{ background: #f0f0f0; }}
             for e in problems[-20:]
         ) or ("<tr><td colspan='5'>No failed or reworked runs "
               "recorded.</td></tr>")
-        inner = ("<p class='muted'>What the agents are doing, which "
+        inner = ("<div class='v-admin-card'>"
+                 "<p class='muted'>What the agents are doing, which "
                  "need flagging or improvement, which did not work, and "
                  "what problems they are having. Aggregates and agent "
                  "health only — no customer portfolios, no approvals, "
@@ -1662,13 +3094,14 @@ th {{ background: #f0f0f0; }}
                  "<tr><th>Agent</th><th>Tasks</th><th>Tokens</th>"
                  "<th>Cost (USD)</th><th>Failed / reworked</th>"
                  "<th>Last task</th></tr>"
-                 f"{stat_rows}</table></div>"
+                 f"{stat_rows}</table></div></div>"
+                 "<div class='v-admin-card'>"
                  "<h2>Problems (latest 20 failed or reworked runs)</h2>"
                  "<div class='table-wrap'><table>"
                  "<tr><th>When</th><th>Agent</th><th>Event</th>"
                  "<th>Business</th><th>Detail</th></tr>"
-                 f"{problem_rows}</table></div>")
-        return _admin_page("Agents", inner)
+                 f"{problem_rows}</table></div></div>")
+        return _admin_page("Agents", inner, "admin-agents")
 
     # -- Ventoryn SaaS shell (customer accounts, billing, credits) --------
     # The store/config were resolved at the top of create_app (so the
@@ -1679,6 +3112,63 @@ th {{ background: #f0f0f0; }}
     from dashboard.saas_routes import register_saas_routes
 
     register_saas_routes(app, _saas_store, _saas_config)
+
+    # -- activity: who is live now -----------------------------------------
+    # Every authenticated request stamps the account's last-seen
+    # (throttled to one write per minute per account in the store),
+    # which is what the admin's "Live now" list reads. It runs after
+    # the response so it can never slow or break a request — presence
+    # is best-effort by design.
+    @app.middleware("http")
+    async def _touch_activity(request: Request, call_next):
+        response = await call_next(request)
+        try:
+            account = _current_account(request)
+            if account is not None:
+                _saas_store.touch_activity(
+                    account["id"], _activity_label(request.url.path))
+        except Exception:  # noqa: BLE001 - presence never breaks a page
+            pass
+        return response
+
+    # -- forced two-factor gate -------------------------------------
+    # Two-factor is mandatory from the first sign-in. A session whose
+    # account has not finished setup, or whose session has not passed
+    # the code, is limited to the setup / verify pages (and logout, the
+    # landing page, the public analyze API, and static assets); every
+    # other signed-in route redirects there. A session deleted
+    # server-side (or expired) is simply no session — the route itself
+    # redirects unsigned visitors to the landing page.
+    _TOTP_FREE_PATHS = ("/", "/account/two-factor/setup",
+                        "/account/two-factor/verify", "/account/logout",
+                        "/account/auth/google/start",
+                        "/account/auth/google/callback",
+                        "/account/billing/webhook")
+
+    @app.middleware("http")
+    async def _totp_gate(request: Request, call_next):
+        path = request.url.path
+        if path.startswith("/admin") or path.startswith("/static"):
+            return await call_next(request)
+        if path in _TOTP_FREE_PATHS or path.startswith("/api/analyze"):
+            return await call_next(request)
+        token = request.cookies.get(SESSION_COOKIE, "")
+        session = _saas_store.get_session(token) if token else None
+        if session is None:
+            return await call_next(request)
+        account = _saas_store.get_account(session["account_id"])
+        if account is None:
+            return await call_next(request)
+        if session.get("totp_verified"):
+            return await call_next(request)
+        nxt = urllib.parse.quote(
+            path + (("?" + request.url.query) if request.url.query else ""),
+            safe="")
+        if _saas_store.totp_state(account["id"])["enabled"]:
+            dest = f"/account/two-factor/verify?next={nxt}"
+        else:
+            dest = f"/account/two-factor/setup?next={nxt}"
+        return RedirectResponse(dest, status_code=303)
 
     return app
 

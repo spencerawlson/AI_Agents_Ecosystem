@@ -243,14 +243,14 @@
   #analyze-panel h2 { display: flex; align-items: center; gap: 8px; }
   #analyze-panel .analyze-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
   .analyze-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 700; color: var(--dim); }
-  .analyze-field input {
+  .analyze-field input, .analyze-field select {
     min-height: 44px; border: 2px solid var(--border); border-radius: 12px;
     padding: 10px 12px; font-size: 15px; font-family: inherit; color: var(--ink);
     background: var(--bg); width: 100%; box-sizing: border-box;
   }
-  .analyze-field input:focus { outline: none; border-color: var(--accent); }
+  .analyze-field input:focus, .analyze-field select:focus { outline: none; border-color: var(--accent); }
   .analyze-url { flex: 2 1 280px; }
-  .analyze-country { flex: 0 1 110px; }
+  .analyze-country { flex: 0 1 210px; }
   .analyze-language { flex: 0 1 130px; }
   #analyze-submit { min-height: 44px; }
   .analyze-status { font-size: 13px; font-weight: 700; color: var(--dim); margin-top: 12px; }
@@ -362,10 +362,38 @@
   @media (prefers-reduced-motion: reduce) {
     .blob, .floater, .char-card.working .avatar, .char-card.working .char-svg { animation: none !important; }
   }
-  /* Customer nav + pending-site banner (the signed-in home):
-     pill links in the same light language as the ops panels. */
-  #customer-nav { display: flex; flex-wrap: wrap; gap: 6px; max-width: 1400px; margin: 0 auto; padding: 12px 22px 0; }
-  #customer-nav a { display: inline-block; min-height: 44px; line-height: 44px; padding: 0 14px; border-radius: 8px; background: #f3efff; border: 1px solid #c4b5fd; color: #111; text-decoration: none; font-size: 15px; }
+  /* The shared header lives here (injected server-side): centered
+     Ventoryn brand + hamburger menu, aligned with the ops content.
+     The pill nav row is gone. Same rules as dashboard/nav.py. */
+  .v-header-wrap { max-width: 1400px; margin: 0 auto; padding: 12px 22px 0; }
+  .v-header-wrap .v-header { margin-bottom: 0; }
+  .v-header { position: relative; width: 100%; margin: 0 auto 8px; }
+  .v-bar { display: flex; align-items: center; gap: 12px; }
+  .v-burger { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px;
+    padding: 0; font-size: 22px; line-height: 1; border-radius: 10px;
+    border: 1px solid #c4b5fd; background: #f3efff; color: #111;
+    cursor: pointer; }
+  .v-burger:hover { background: #e9e2ff; }
+  .v-brand { flex: 1; text-align: center; font-size: 24px; font-weight: 900;
+    color: #6d28d9; text-decoration: none; letter-spacing: .3px; }
+  .v-bar-spacer { flex: 0 0 44px; width: 44px; }
+  .v-title { text-align: center; font-size: 26px; font-weight: 800;
+    margin: 10px 0 4px; color: #1a1a2e; }
+  .v-menu { position: absolute; left: 0; right: 0; top: 100%; z-index: 50;
+    background: #fff; border: 1px solid #e5e0f5; border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(109, 40, 217, 0.16); padding: 8px;
+    margin-top: 4px; }
+  .v-menu a { display: block; min-height: 44px; line-height: 44px;
+    padding: 0 14px; border-radius: 8px; color: #1a1a2e;
+    text-decoration: none; font-size: 16px; }
+  .v-menu a:hover { background: #f3efff; }
+  .v-current { display: block; min-height: 44px; line-height: 44px;
+    padding: 0 14px; border-radius: 8px; color: #666; font-size: 16px;
+    background: #faf8ff; }
+  .v-current em { font-style: normal; color: #6d28d9; font-weight: bold; }
+  .v-group { display: block; padding: 10px 14px 4px; font-size: 12px;
+    font-weight: bold; text-transform: uppercase; letter-spacing: 1px;
+    color: #888; }
   #pending-site { display: none; max-width: 1400px; margin: 12px auto 0; padding: 14px 16px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 12px; }
   #pending-site.show { display: block; }
   #pending-site a.cta { display: inline-block; min-height: 44px; line-height: 44px; padding: 0 20px; border-radius: 8px; background: linear-gradient(135deg, #f09a4e, #e8833a); color: #fff; font-weight: bold; text-decoration: none; margin-top: 8px; }
@@ -391,15 +419,7 @@
   <div id="live-wrap"><span id="live-dot"></span><span id="live-label">LIVE</span></div>
 </header>
 <div id="error-banner"></div>
-<nav id="customer-nav" aria-label="Ventoryn">
-  <a href="/ops">Live Ops</a>
-  <a href="/portfolio">My Portfolio</a>
-  <a href="/approvals">Approvals</a>
-  <a href="/report">Report</a>
-  <a href="/account/dashboard">My account</a>
-  <a href="/account/subscribe">Subscribe</a>
-  <a href="/account/logout">Sign out</a>
-</nav>
+<div class="v-header-wrap"><!--VENTORYN_HEADER--></div>
 <div id="pending-site" role="status"></div>
 <div id="main">
   <div class="panel" id="analyze-panel">
@@ -413,7 +433,7 @@
         </label>
         <label class="analyze-field analyze-country">
           <span class="analyze-label">Market country</span>
-          <input id="analyze-country" type="text" value="ca" maxlength="2" autocomplete="off" required>
+          <select id="analyze-country" required><!--VENTORYN_COUNTRY_OPTIONS--></select>
         </label>
         <label class="analyze-field analyze-language">
           <span class="analyze-label">Language (optional)</span>
@@ -504,6 +524,9 @@ const esc = (v) => String(v == null ? "" : v)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const fmtUSD = (n) => {
+  /* A hidden revenue is not $0.00 — the snapshot carries null when
+     the revenue display is off, and the HUD must say so. */
+  if (n == null) return "hidden";
   const v = Number(n) || 0;
   return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
