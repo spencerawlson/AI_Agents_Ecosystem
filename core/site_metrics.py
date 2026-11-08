@@ -44,6 +44,15 @@ class PlausibleClient:
         except Exception as exc:  # noqa: BLE001
             raise MetricsUnavailable(f"Plausible request failed: {exc}") from exc
 
+    def source_breakdown(self, period: str = "30d", limit: int = 25) -> list[dict]:
+        """Sessions per referrer for the period, for attribution:
+        [{"source": "Google", "visitors": n, "pageviews": n}]."""
+        rows = self._get("/api/v1/stats/breakdown", period=period,
+                         property="visit:source", limit=limit,
+                         metrics="visitors,pageviews").get("results", [])
+        return [{"source": r.get("source"), "visitors": r.get("visitors"),
+                 "pageviews": r.get("pageviews")} for r in rows]
+
     def snapshot(self, period: str = "7d") -> dict:
         """Aggregate traffic + top sources and pages for the period."""
         agg = self._get("/api/v1/stats/aggregate", period=period,

@@ -31,6 +31,8 @@ CLI:
     python ecosystem/road2cissp_growth.py seo [--count 2]
     python ecosystem/road2cissp_growth.py listen [--limit 5]
     python ecosystem/road2cissp_growth.py record-revenue --amount 190 --note "10 subs, Oct"
+    python ecosystem/road2cissp_growth.py record-conversion --amount 19 --touches "community:r/cissp"
+    python ecosystem/road2cissp_growth.py attribution [--model linear]
     python ecosystem/road2cissp_growth.py record-cost --amount 12 --label "Domain renewal"
     python ecosystem/road2cissp_growth.py pnl
 
@@ -212,6 +214,38 @@ def record_revenue(rt, business_id: str, amount_usd: float,
     return rt.ledger.record(
         business_id=business_id, kind="revenue", amount_usd=amount_usd,
         description=f"Stripe subscription revenue — owner-reported{suffix}")
+
+
+def record_conversion(rt, business_id: str, state: dict,
+                      amount_usd: float, touches: list[dict],
+                      note: str = "", now: datetime | None = None) -> dict:
+    """Record one paying learner with the touch journey that brought
+    them, and book the revenue in the ledger. The journey is
+    owner-reported — there is no signup webhook, so nothing here
+    invents a channel. Returns the stored conversion dict."""
+    from core.attribution import classify_touch
+    from orchestrator.models import new_id
+
+    if amount_usd <= 0:
+        raise ValueError("conversion amount must be positive")
+    if not touches:
+        raise ValueError("at least one touch is required")
+    now = now or datetime.now(timezone.utc)
+    channels = [classify_touch(t) for t in touches]
+    conversion = {
+        "id": new_id("conv"),
+        "at": now.isoformat(),
+        "amount_usd": round(float(amount_usd), 2),
+        "touches": touches,
+        "channels": channels,
+        "note": note or None,
+    }
+    conversions = state.setdefault("conversions", [])
+    conversions[:] = (conversions + [conversion])[-500:]
+    record_revenue(rt, business_id, amount_usd,
+                   note=(f"via {' → '.join(channels)}"
+                         + (f" — {note}" if note else "")))
+    return conversion
 
 
 def record_external_cost(rt, business_id: str, amount_usd: float,
@@ -779,6 +813,103 @@ def run_listen(rt, state_path: Path | None = None,
     return summary
 
 
+# -- funnel attribution ----------------------------------------------------
+
+def run_attribution(rt, state_path: Path | None = None,
+                    reports_root: Path | None = None,
+                    now: datetime | None = None,
+                    model: str = "last_touch",
+                    use_plausible: bool = True) -> dict:
+    """One attribution build: sessions per channel from Plausible (or
+    the latest recorded snapshot when the key is absent), conversions
+    per channel from the owner-recorded list, three models available,
+    suggestions as rules. Writes reports/attribution_<date>.md and
+    records the totals in the state. Pure arithmetic — no agent is
+    dispatched, no money is spent, nothing is published."""
+    from core.attribution import build_attribution, classify_source
+    from core.site_metrics import MetricsUnavailable, PlausibleClient
+    from dashboard.reports import reports_dir
+
+    now = now or datetime.now(timezone.utc)
+    state_path = state_path or default_state_path()
+    reports_root = reports_root or reports_dir()
+    state = load_state(state_path)
+    summary: dict = {"ran": [], "errors": [], "report": None,
+                     "attribution": None}
+    sessions: dict[str, int] | None = None
+    sessions_source = "unavailable"
+    if use_plausible and PlausibleClient.configured():
+        try:
+            sessions = {}
+            for row in PlausibleClient().source_breakdown("30d"):
+                channel = classify_source(row.get("source"))
+                sessions[channel] = (sessions.get(channel, 0)
+                                     + int(row.get("visitors") or 0))
+            sessions = sessions or None
+            sessions_source = "plausible (30d)"
+            summary["ran"].append(
+                f"sessions from Plausible: {sessions or 'none'}")
+        except MetricsUnavailable as exc:
+            summary["errors"].append(f"plausible: {exc}")
+            summary["ran"].append(
+                "Plausible failed — falling back to the latest snapshot")
+    elif use_plausible:
+        summary["ran"].append(
+            "no Plausible key — sessions from the latest recorded snapshot")
+    attribution = build_attribution(
+        state, sessions_by_channel=sessions,
+        sessions_source=sessions_source, model=model, now=now)
+    summary["attribution"] = attribution
+    state["attribution_last"] = {
+        "at": now.isoformat(), "model": model,
+        "sessions_source": attribution["sessions_source"],
+        "totals": attribution["totals"],
+        "suggestions": attribution["suggestions"],
+    }
+    save_state(state_path, state)
+
+    totals = attribution["totals"]
+    lines = [f"# Road to CISSP — funnel attribution ({now:%Y-%m-%d})", "",
+             f"Model: **{model}** · sessions: "
+             f"{attribution['sessions_source']} · "
+             f"{attribution['conversions_count']} conversions recorded", "",
+             "| Channel | Sessions | Conversions | Revenue | Conv. rate | $/session |",
+             "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    for row in attribution["channels"]:
+        rate = (f"{row['conversion_rate']:.2%}"
+                if row["conversion_rate"] is not None else "—")
+        rps = (f"${row['revenue_per_session']:.4f}"
+               if row["revenue_per_session"] is not None else "—")
+        lines.append(
+            f"| {row['channel']} | {row['sessions'] if row['sessions'] is not None else '—'} "
+            f"| {row['conversions']:.2f} | ${row['revenue']:.2f} "
+            f"| {rate} | {rps} |")
+    t_rate = (f"{totals['conversion_rate']:.2%}"
+              if totals["conversion_rate"] is not None else "—")
+    lines += [f"| **Total** | {totals['sessions'] if totals['sessions'] is not None else '—'} "
+              f"| {totals['conversions']:.2f} | ${totals['revenue']:.2f} "
+              f"| {t_rate} | |", "",
+              "## Next moves", ""]
+    for s in attribution["suggestions"]:
+        lines.append(f"- **{s['channel'] or 'overall'}** ({s['signal']}): "
+                     f"{s['suggestion']}")
+    if not attribution["suggestions"]:
+        lines.append("- No suggestions — nothing measured yet.")
+    lines += ["",
+              "Conversions are owner-recorded (`record-conversion`); "
+              "sessions come from Plausible when the key is set. "
+              "Nothing here is an API sync."]
+    path = reports_root / f"attribution_{now:%Y%m%d}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    summary["report"] = str(path)
+    summary["ran"].append(
+        f"{attribution['conversions_count']} conversions, "
+        f"${totals['revenue']:.2f} revenue attributed "
+        f"({model}; sessions: {attribution['sessions_source']})")
+    return summary
+
+
 def _cell(v) -> str:
     return str(v if v is not None else "—").replace("|", "/").replace("\n", " ")
 
@@ -929,6 +1060,34 @@ def main(argv=None) -> int:
                          help="book Stripe subscription revenue (owner-reported)")
     p_r.add_argument("--amount", type=float, required=True)
     p_r.add_argument("--note", default="")
+    p_r.add_argument("--channel", default="",
+                     help="channel that brought this revenue (also records "
+                          "a conversion, e.g. community)")
+    p_r.add_argument("--source", default="",
+                     help="source within the channel (e.g. r/cissp)")
+    p_r.add_argument("--touches", default="",
+                     help="full touch journey, comma-separated "
+                          "\"channel[:source]\" (e.g. \"seo:google, "
+                          "community:r/cissp\")")
+    p_conv = sub.add_parser("record-conversion",
+                            help="record one paying learner with the touch "
+                                 "journey that brought them (also books "
+                                 "the revenue)")
+    p_conv.add_argument("--amount", type=float, required=True)
+    p_conv.add_argument("--touches", required=True,
+                        help="comma-separated \"channel[:source]\" in "
+                             "journey order, e.g. \"seo:google, "
+                             "community:r/cissp\"")
+    p_conv.add_argument("--note", default="")
+    p_a = sub.add_parser("attribution",
+                         help="build the per-channel funnel attribution "
+                              "report from recorded conversions + Plausible")
+    p_a.add_argument("--model", default="last_touch",
+                     choices=["first_touch", "last_touch", "linear"])
+    p_a.add_argument("--no-plausible", dest="plausible",
+                     action="store_false", default=True,
+                     help="use the latest recorded snapshot instead of "
+                          "fetching Plausible")
     p_c = sub.add_parser("record-cost", help="book a real-world cost")
     p_c.add_argument("--amount", type=float, required=True)
     p_c.add_argument("--label", required=True)
@@ -1029,20 +1188,67 @@ def main(argv=None) -> int:
         print(f"{args.item_id}: {status} on {date}")
         return 0
 
-    if args.cmd in ("record-revenue", "record-cost", "pnl"):
+    if args.cmd in ("record-revenue", "record-cost", "pnl",
+                    "record-conversion", "attribution"):
         from ecosystem.runtime import build_runtime
 
         rt = build_runtime(approvals_persist=True)
         biz_id = _business_id(rt)
         if args.cmd == "record-revenue":
-            entry = record_revenue(rt, biz_id, args.amount, args.note)
-            print(f"booked revenue ${entry.amount_usd:.2f}: "
-                  f"{entry.description}")
+            if args.touches or args.channel:
+                from core.attribution import parse_touches
+
+                spec = args.touches
+                if not spec and args.channel:
+                    spec = args.channel + (f":{args.source}" if args.source
+                                           else "")
+                try:
+                    touches = parse_touches(spec)
+                except ValueError as exc:
+                    print(str(exc))
+                    return 1
+                state = load_state(path)
+                conv = record_conversion(rt, biz_id, state, args.amount,
+                                         touches, note=args.note)
+                save_state(path, state)
+                print(f"recorded conversion {conv['id']}: "
+                      f"${conv['amount_usd']:.2f} via "
+                      f"{' → '.join(conv['channels'])}")
+            else:
+                entry = record_revenue(rt, biz_id, args.amount, args.note)
+                print(f"booked revenue ${entry.amount_usd:.2f}: "
+                      f"{entry.description}")
+        elif args.cmd == "record-conversion":
+            from core.attribution import parse_touches
+
+            try:
+                touches = parse_touches(args.touches)
+            except ValueError as exc:
+                print(str(exc))
+                return 1
+            state = load_state(path)
+            conv = record_conversion(rt, biz_id, state, args.amount,
+                                     touches, note=args.note)
+            save_state(path, state)
+            print(f"recorded conversion {conv['id']}: "
+                  f"${conv['amount_usd']:.2f} via "
+                  f"{' → '.join(conv['channels'])}")
         elif args.cmd == "record-cost":
             entry = record_external_cost(rt, biz_id, args.amount,
                                           args.label)
             print(f"booked cost ${-entry.amount_usd:.2f}: "
                   f"{entry.description}")
+        elif args.cmd == "attribution":
+            summary = run_attribution(rt, model=args.model,
+                                      use_plausible=args.plausible)
+            for line in summary["ran"]:
+                print(f"ran: {line}")
+            for line in summary["errors"]:
+                print(f"error: {line}")
+            if summary["report"]:
+                print(f"report: {summary['report']}")
+            return 1 if summary["errors"] and not summary["attribution"] \
+                else 0
         print_pnl(rt, rt.businesses.get(biz_id))
         return 0
 
@@ -1051,6 +1257,18 @@ def main(argv=None) -> int:
         for job in ("audit", "keywords", "metrics", "strategy"):
             print(f"{job:9} last run {state['last_run'].get(job, 'never')}")
         print(f"seo articles drafted: {len(state.get('seo_articles', {}))}")
+        conversions = state.get("conversions", [])
+        if conversions:
+            total = sum(c.get("amount_usd", 0) for c in conversions)
+            print(f"conversions recorded: {len(conversions)} "
+                  f"(${total:.2f} attributed)")
+        last_attr = state.get("attribution_last") or {}
+        if last_attr:
+            totals = last_attr.get("totals", {})
+            print(f"last attribution: {last_attr.get('model')} · "
+                  f"{totals.get('conversions', 0)} conversions · "
+                  f"${totals.get('revenue', 0):.2f} · sessions "
+                  f"{last_attr.get('sessions_source')}")
         community = state.get("community_threads", {})
         if community:
             by_status: dict[str, int] = {}

@@ -224,7 +224,7 @@ def create_app(
 <h1>Portfolio</h1>
 <p>Businesses: {len(businesses)} | Revenue: ${total_revenue:,.2f} | Net profit: ${total_profit:,.2f}</p>
 <table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
+<p><a href="/experiments">Experiments</a> | <a href="/approvals">Approvals</a> | <a href="/reports">📄 Reports</a> | <a href="/api/daily-plan">📋 Daily plan</a> | <a href="/api/attribution">📊 Attribution</a> | <a href="/experiment-001">Experiment 001</a> | <a href="/report">📊 Report</a> | <a href="/game">🎮 Live game view</a></p>
 </body></html>"""
 
     @app.get("/businesses", response_class=HTMLResponse)
@@ -561,6 +561,27 @@ nothing in them was published.</p>
             state=state, now=datetime.now(timezone.utc),
             cadence=CADENCE, retry_after=RETRY_AFTER)
         return JSONResponse(plan)
+
+    @app.get("/api/attribution")
+    def api_attribution():
+        """Per-channel funnel attribution for Road to CISSP, as JSON.
+
+        Pure read from the growth state file (same file the daily
+        plan reads, ``DAILY_PLAN_STATE_PATH`` when set): recorded
+        conversions attributed per channel, sessions from the latest
+        recorded Plausible snapshot. No Plausible fetch here, no agent
+        dispatched, no money spent. The CLI (``attribution``) is the
+        one that fetches fresh Plausible data and writes the report.
+        """
+        from core.attribution import build_attribution
+        from ecosystem.road2cissp_growth import (
+            default_state_path, load_state,
+        )
+
+        state_path = os.environ.get("DAILY_PLAN_STATE_PATH")
+        state = load_state(Path(state_path) if state_path
+                           else default_state_path())
+        return JSONResponse(build_attribution(state))
 
     @app.get("/report", response_class=HTMLResponse)
     def report_page():

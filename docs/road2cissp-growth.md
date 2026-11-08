@@ -57,6 +57,7 @@ python ecosystem/road2cissp_growth.py status                # experiments + last
 python ecosystem/road2cissp_growth.py daily-plan            # today's ordered moves (builds the plan, runs nothing)
 python ecosystem/road2cissp_growth.py daily-plan-done fix:prerender-routes
 python ecosystem/road2cissp_growth.py listen               # search Reddit, draft replies (drafts only, nothing posted)
+python ecosystem/road2cissp_growth.py attribution          # per-channel funnel attribution (see attribution.md)
 python ecosystem/road2cissp_growth.py record-metrics --visitors 420 --signups 12
 python ecosystem/road2cissp_growth.py outcome reddit-answers --worked "62 referral visits, 9 sign-ins"
 ```
