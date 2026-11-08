@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from dashboard.app import create_app
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 from orchestrator.registry import AgentRegistry
@@ -333,6 +333,6 @@ def test_live_ops_is_ventoryn_and_mobile_friendly():
     root = Path(__file__).resolve().parent.parent
     doc = root / "docs" / "ventoryn-live-ops.md"
     assert doc.exists()
-    assert doc.read_text().splitlines()[0] == "# Ventoryn — Live Ops"
+    assert doc.read_text(encoding="utf-8").splitlines()[0] == "# Ventoryn — Live Ops"
     assert not (root / "docs" / "tycoon-live-ops.md").exists()
     assert not (root / "docs" / "collegium-live-ops.md").exists()

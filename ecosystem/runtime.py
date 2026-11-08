@@ -248,8 +248,8 @@ def build_runtime(use_postgres: bool = False,
 
 def create_dashboard_app(rt: Runtime | None = None):
     """Build the FastAPI dashboard bound to a runtime."""
-    from core.saas import SaasConfig, SaasStore, default_saas_db_path
-    from dashboard.app import create_app
+    from ventoryn.saas import SaasConfig, SaasStore, default_saas_db_path
+    from ventoryn.app import create_app
 
     rt = rt or build_runtime(use_postgres=bool(os.environ.get("DATABASE_URL")))
     # SaaS shell state lives in the shared state file when one is
@@ -266,6 +266,6 @@ def create_dashboard_app(rt: Runtime | None = None):
         audit=rt.audit,
         saas_store=SaasStore(saas_db) if saas_db else SaasStore(":memory:"),
         saas_config=SaasConfig.from_env(),
+        runtime=rt,
     )
-    app.state.runtime_holder = {"rt": rt}
     return app

@@ -6,8 +6,8 @@ site get cited? The ecosystem's version is `core/geo_audit.py`, run
 from the Road to CISSP program:
 
 ```bash
-python ecosystem/road2cissp_growth.py geo
-python ecosystem/road2cissp_growth.py status   # shows the last GEO score
+python businesses/road2cissp/growth.py geo
+python businesses/road2cissp/growth.py status   # shows the last GEO score
 ```
 
 Real HTTP, no key, no LLM, no spend. Report:

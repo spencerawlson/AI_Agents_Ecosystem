@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 
-import core.saas as saas
-import dashboard.saas_routes as saas_routes
-from core.saas import SaasConfig, SaasStore
-from dashboard.app import create_app
+import ventoryn.saas as saas
+import ventoryn.saas_routes as saas_routes
+from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.app import create_app
 
 
 @pytest.fixture()
@@ -56,7 +56,7 @@ def _login(client, store, account=None):
     account = account or _account(store)
     token = store.create_session(account["id"])
     # Two-factor is mandatory: the test session has passed it.
-    from core.totp import code_at
+    from ventoryn.totp import code_at
     if not store.totp_state(account["id"])["enabled"]:
         setup = store.begin_totp_setup(account["id"])
         store.confirm_totp_setup(account["id"], code_at(setup["secret"]))
@@ -186,7 +186,7 @@ def test_google_login_flow(client, store, config, monkeypatch):
     r = client.get("/account/two-factor/setup")
     assert r.status_code == 200
     assert "Two-factor authentication" in r.text
-    from core.totp import code_at
+    from ventoryn.totp import code_at
     secret = store.get_totp_pending_secret(account["id"])
     r = client.post("/account/two-factor/setup",
                     data={"code": code_at(secret), "next": "/ops"},
@@ -448,7 +448,7 @@ def test_job_analyze_charges_and_reports(client, store, tmp_path, monkeypatch):
     assert "Site 85/100" in jobs[0]["result"]
     reports = list(tmp_path.glob("analyze_road2cissp-com_*.md"))
     assert len(reports) == 1
-    assert "Site score: **85/100**" in reports[0].read_text()
+    assert "Site score: **85/100**" in reports[0].read_text(encoding="utf-8")
 
 
 def test_job_insufficient_credits_refused(client, store):

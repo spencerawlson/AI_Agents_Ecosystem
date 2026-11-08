@@ -20,7 +20,7 @@ portfolio index page.
    decided.
 4. **`/reports`** lists reports newest-first (title, mission, date, parsed
    AI spend) and renders each to safe HTML. There is no `markdown`
-   dependency: `dashboard/reports.py` renders exactly what missions emit
+   dependency: `ventoryn/reports.py` renders exactly what missions emit
    (`#`/`##`/`###`, `>` quotes, `**bold**`, `_italic_`, `` `code` ``,
    `|` tables `|`, `-` lists, `---` rules) and escapes everything else,
    so a report can never inject markup or scripts.

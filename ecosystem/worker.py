@@ -2,7 +2,7 @@
 
 Focus: the agents' job is marketing road2cissp.com. Every tick runs the
 Road to CISSP growth program's due jobs (site audit, keyword research,
-metrics, weekly strategy, content drafts — see ecosystem/road2cissp_growth.py).
+metrics, weekly strategy, content drafts — see businesses/road2cissp/growth.py).
 Cadences live in the program's state file, so frequent ticks are cheap.
 
 Opt-in extras (off by default so the agents stay focused):
@@ -24,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.models import BusinessStatus, Opportunity
 from core.scoring import ScoringEngine
@@ -36,20 +36,20 @@ MONITOR_STATE_PATH = Path.home() / ".config" / "evergreen-etsy" / "monitor_state
 
 def _load_monitor_state() -> dict:
     if MONITOR_STATE_PATH.exists():
-        return json.loads(MONITOR_STATE_PATH.read_text())
+        return json.loads(MONITOR_STATE_PATH.read_text(encoding="utf-8"))
     return {"last_revenue_usd": 0.0}
 
 
 def _save_monitor_state(state: dict) -> None:
     MONITOR_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MONITOR_STATE_PATH.write_text(json.dumps(state, indent=1))
+    MONITOR_STATE_PATH.write_text(json.dumps(state, indent=1), encoding="utf-8")
 
 
 def run_etsy_monitor_tick(rt, tick: int) -> dict | None:
     """Check Experiment 001 against the charter. Returns the snapshot,
     or None when Etsy isn't configured (warns once). Idempotent: revenue
     is recorded to the ledger only as deltas."""
-    from ecosystem.etsy_monitor import (
+    from businesses.etsy_evergreen.monitor import (
         EXPERIMENT_BUSINESS_NAME,
         EXPERIMENT_BUSINESS_TYPE,
         EtsyCredentialsError,
@@ -115,9 +115,9 @@ def run_store_tick(rt, tick: int, optimize_every: int = 30) -> dict | None:
     from core.cj_orders import CJOrders
     from core.llm import LLMGateway
     from core.supplier_search import CJDropshippingSource
-    from dashboard.reports import reports_dir
-    from ecosystem.shopify_pipeline import default_state_path
-    from ecosystem.store_ops import run_store_cycle
+    from ventoryn.reports import reports_dir
+    from businesses.shopify_store.pipeline import default_state_path
+    from businesses.shopify_store.store_ops import run_store_cycle
 
     optimize = bool(optimize_every) and tick % optimize_every == 0
     try:
@@ -147,7 +147,7 @@ def run_store_tick(rt, tick: int, optimize_every: int = 30) -> dict | None:
 
 def run_growth_tick(rt, tick: int) -> dict | None:
     """Road to CISSP growth program: run whatever jobs are due. Never raises."""
-    from ecosystem.road2cissp_growth import run_growth_cycle
+    from businesses.road2cissp.growth import run_growth_cycle
 
     try:
         summary = run_growth_cycle(rt)

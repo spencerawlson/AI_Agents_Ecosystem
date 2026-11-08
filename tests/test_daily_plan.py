@@ -14,10 +14,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ecosystem import daily_plan
-from ecosystem.road2cissp_growth import (
+from businesses.road2cissp.growth import (
     CADENCE, RETRY_AFTER, load_state, save_state,
 )
-import ecosystem.road2cissp_growth as growth
+import businesses.road2cissp.growth as growth
 
 T0 = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
 
@@ -304,13 +304,26 @@ def test_cli_done_unknown_item_fails(tmp_path, monkeypatch, capsys):
 def test_dashboard_daily_plan_endpoint(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
 
     state = _ranked_state()
     path = tmp_path / "state.json"
     save_state(path, state)
     monkeypatch.setenv("DAILY_PLAN_STATE_PATH", str(path))
-    client = TestClient(create_app())
+    from core.registry import BusinessRegistry
+    from _signin import OPERATOR_EMAIL, operator_store_and_config, sign_in
+
+    registry = BusinessRegistry()
+    biz = registry.create(growth.BUSINESS_NAME, "education_website")
+    registry.assign_owner(biz.id, OPERATOR_EMAIL)
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(registry=registry, saas_store=store,
+                                   saas_config=config))
+    assert client.get("/api/daily-plan").status_code == 401
+    # Another signed-in account does not manage Road to CISSP.
+    sign_in(client, store, email="someone@example.com", sub="sub-other")
+    assert client.get("/api/daily-plan").status_code == 404
+    sign_in(client, store)
     r = client.get("/api/daily-plan")
     assert r.status_code == 200
     plan = r.json()

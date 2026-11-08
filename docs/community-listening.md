@@ -5,10 +5,10 @@ and drafts replies. The ecosystem's version starts where the evidence
 actually reaches, and says so where it does not.
 
 ```bash
-python ecosystem/road2cissp_growth.py listen            # search + draft (needs LLM)
-python ecosystem/road2cissp_growth.py listen --no-llm   # search only; threads recorded as found
-python ecosystem/road2cissp_growth.py listen --limit 3
-python ecosystem/road2cissp_growth.py status            # community thread counts
+python businesses/road2cissp/growth.py listen            # search + draft (needs LLM)
+python businesses/road2cissp/growth.py listen --no-llm   # search only; threads recorded as found
+python businesses/road2cissp/growth.py listen --limit 3
+python businesses/road2cissp/growth.py status            # community thread counts
 ```
 
 ## Sources
@@ -36,7 +36,7 @@ never invents threads to fill the gap.
 1. **Search.** Each subreddit in the site profile (`r/cissp`,
    `r/cybersecurity`, `r/ITCareerQuestions`, `r/CompTIA`, `r/ccna`)
    is searched for the business's keywords
-   (`LISTEN_KEYWORDS` in `ecosystem/road2cissp_growth.py`), newest
+   (`LISTEN_KEYWORDS` in `businesses/road2cissp/growth.py`), newest
    first, past week only. At most 10 queries per run, interleaved so
    every subreddit is covered before any second keyword.
 2. **Filter.** NSFW, locked, deleted-author and older-than-14-days

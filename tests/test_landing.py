@@ -24,13 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 
-import core.saas as saas
-import dashboard.saas_routes as saas_routes
+import ventoryn.saas as saas
+import ventoryn.saas_routes as saas_routes
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import SaasConfig, SaasStore
-from dashboard.app import create_app
+from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 from _signin import (
@@ -671,7 +671,7 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
     r = client.get("/account/two-factor/setup")
     assert r.status_code == 200
     assert "Two-factor authentication" in r.text
-    from core.totp import code_at
+    from ventoryn.totp import code_at
     secret = store.get_totp_pending_secret(account["id"])
     r = client.post("/account/two-factor/setup",
                     data={"code": code_at(secret),

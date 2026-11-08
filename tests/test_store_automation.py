@@ -18,11 +18,11 @@ from core.product_discovery import ProductIdea, SeedIdeaSource, discover
 from core.sourcing import ProductBrief, Supplier
 from core.supplier_search import (CJDropshippingSource, CombinedSupplierSource,
                                   SupplierSearchError)
-from ecosystem.ads_pipeline import (BUDGET_ACTION, LAUNCH_ACTION, AdsPolicy,
+from businesses.shopify_store.ads_pipeline import (BUDGET_ACTION, LAUNCH_ACTION, AdsPolicy,
                                     apply_approvals, campaign_key, draft_campaigns)
-from ecosystem.shopify_pipeline import (APPROVAL_ACTION, discover_briefs,
+from businesses.shopify_store.pipeline import (APPROVAL_ACTION, discover_briefs,
                                         load_state, save_state)
-from ecosystem.store_ops import (draft_articles, guard_campaigns,
+from businesses.shopify_store.store_ops import (draft_articles, guard_campaigns,
                                  product_performance, run_seo, run_store_cycle,
                                  seo_audit, seo_fix)
 from orchestrator.approvals import ApprovalGate
@@ -466,10 +466,10 @@ def test_articles_hidden_once_per_product_and_need_llm(tmp_path):
 # -- full cycle -----------------------------------------------------------------
 
 def test_full_cycle_from_supplier_approval_to_guarded_ads(tmp_path, gate):
-    from ecosystem.shopify_pipeline import ListingWriter, source
+    from businesses.shopify_store.pipeline import ListingWriter, source
 
     brief = ProductBrief.model_validate_json(
-        (Path(__file__).resolve().parent.parent / "examples" / "shopify_brief.example.json").read_text())
+        (Path(__file__).resolve().parent.parent / "examples" / "shopify_brief.example.json").read_text(encoding="utf-8"))
     brief.suppliers[0].image_urls = ["https://img.example/a.jpg"]
     source(brief, gate, tmp_path / "reports", ListingWriter(), now=NOW)
     top = next(a for a in gate.pending() if a.details["rank"] == 1)
@@ -506,7 +506,7 @@ def test_full_cycle_from_supplier_approval_to_guarded_ads(tmp_path, gate):
 def test_dashboard_renders_ad_approvals(gate):
     from fastapi.testclient import TestClient
 
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
 
     gate.request(LAUNCH_ACTION, amount_usd=70.0, details={
         "platform": "meta", "product_title": "Laptop Stand", "daily_budget_usd": 10,

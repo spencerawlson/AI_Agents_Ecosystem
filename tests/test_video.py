@@ -22,8 +22,8 @@ from core.video_render import (
     SIZES, load_script, render_slides, render_video, validate_script,
     write_srt,
 )
-import ecosystem.road2cissp_growth as growth
-from ecosystem.road2cissp_growth import load_state, save_state
+import businesses.road2cissp.growth as growth
+from businesses.road2cissp.growth import load_state, save_state
 
 NOW = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
 FFMPEG = shutil.which("ffmpeg")
@@ -230,7 +230,7 @@ def test_run_video_from_script_file(tmp_path, monkeypatch):
     info = _probe(video["video_path"])
     assert abs(float(info["format"]["duration"]) - 15) < 0.6
     assert Path(summary["report"]).exists()
-    assert "NOT YET POSTED" in Path(summary["report"]).read_text()
+    assert "NOT YET POSTED" in Path(summary["report"]).read_text(encoding="utf-8")
     saved = load_state(tmp_path / "state.json")
     assert saved["videos"]["cissp-in-60-seconds"]["status"] == "rendered"
 

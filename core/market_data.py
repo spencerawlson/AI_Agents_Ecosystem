@@ -83,10 +83,10 @@ class EtsyMarketClient:
         try:  # persist so the refresh sticks
             tok_path = Path.home() / ".config" / "evergreen-etsy" / "tokens.json"
             if tok_path.exists():
-                tok = json.loads(tok_path.read_text())
+                tok = json.loads(tok_path.read_text(encoding="utf-8"))
                 tok["access_token"] = self.creds["access_token"]
                 tok["refresh_token"] = self.creds["refresh_token"]
-                tok_path.write_text(json.dumps(tok))
+                tok_path.write_text(json.dumps(tok), encoding="utf-8")
                 tok_path.chmod(0o600)
         except Exception as exc:
             log.warning("could not persist refreshed Etsy tokens: %s", exc)
@@ -408,8 +408,8 @@ def _load_etsy_creds() -> dict | None:
         tok_path = Path.home() / ".config" / "evergreen-etsy" / "tokens.json"
         if not (cfg_path.exists() and tok_path.exists()):
             return None
-        cfg = json.loads(cfg_path.read_text())
-        tok = json.loads(tok_path.read_text())
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        tok = json.loads(tok_path.read_text(encoding="utf-8"))
         if not (cfg.get("keystring") and tok.get("access_token")):
             return None
         return {

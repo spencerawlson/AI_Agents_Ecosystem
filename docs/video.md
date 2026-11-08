@@ -5,10 +5,10 @@ ecosystem can now do the same for its own sites — write the script,
 render the slideshow, hand the file to the owner to post.
 
 ```bash
-python ecosystem/road2cissp_growth.py video --script script.json
-python ecosystem/road2cissp_growth.py video --script script.json --audio voiceover.mp3
-python ecosystem/road2cissp_growth.py video --script script.json --format wide
-python ecosystem/road2cissp_growth.py video --from-experiment reddit-answers
+python businesses/road2cissp/growth.py video --script script.json
+python businesses/road2cissp/growth.py video --script script.json --audio voiceover.mp3
+python businesses/road2cissp/growth.py video --script script.json --format wide
+python businesses/road2cissp/growth.py video --from-experiment reddit-answers
 ```
 
 ## The script
@@ -67,5 +67,5 @@ name a video-script day.
 - `core/video_render.py` — validation, slides, SRT, ffmpeg assembly.
   No network, no LLM.
 - `agents/creative/agent.py` — `video-script` in `content_pieces`.
-- `ecosystem/road2cissp_growth.py` — `run_video`, the `video` CLI.
+- `businesses/road2cissp/growth.py` — `run_video`, the `video` CLI.
 - `requirements.txt` — Pillow (slides); ffmpeg is a system binary.

@@ -10,8 +10,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.geo_audit import GeoAuditor, parse_geo_page, parse_robots
-import ecosystem.road2cissp_growth as growth
-from ecosystem.road2cissp_growth import load_state, save_state
+import businesses.road2cissp.growth as growth
+from businesses.road2cissp.growth import load_state, save_state
 
 SITE = "https://road2cissp.com"
 

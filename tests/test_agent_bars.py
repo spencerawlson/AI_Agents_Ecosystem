@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents.base import BaseAgent
 from core.audit import AuditLog
 from core.state_store import SharedAuditLog
-from dashboard.app import agent_stats_from_audit, create_app
+from ventoryn.app import agent_stats_from_audit, create_app
 from orchestrator.engine import Orchestrator
 from orchestrator.models import TaskStatus
 from orchestrator.registry import AgentRegistry

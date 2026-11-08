@@ -19,8 +19,8 @@ from core.attribution import (
     aggregate, build_attribution, classify_source, classify_touch,
     parse_touches, parse_utm, sessions_from_snapshot, suggest,
 )
-import ecosystem.road2cissp_growth as growth
-from ecosystem.road2cissp_growth import load_state, save_state
+import businesses.road2cissp.growth as growth
+from businesses.road2cissp.growth import load_state, save_state
 
 NOW = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
 SITE = "https://road2cissp.com"
@@ -280,7 +280,7 @@ def test_api_attribution(tmp_path, monkeypatch):
 
     from core.ledger import Ledger
     from core.registry import BusinessRegistry
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
     from orchestrator.approvals import ApprovalGate
     from orchestrator.engine import Orchestrator
     from orchestrator.registry import AgentRegistry
@@ -292,9 +292,20 @@ def test_api_attribution(tmp_path, monkeypatch):
     state["conversions"] = [_conv(19.0, [{"channel": "seo"}])]
     save_state(path, state)
     monkeypatch.setenv("DAILY_PLAN_STATE_PATH", str(path))
-    app = create_app(registry=BusinessRegistry(), ledger=Ledger(),
-                     approvals=ApprovalGate())
-    r = TestClient(app).get("/api/attribution")
+    from _signin import OPERATOR_EMAIL, operator_store_and_config, sign_in
+
+    registry = BusinessRegistry()
+    biz = registry.create(growth.BUSINESS_NAME, "education_website")
+    registry.assign_owner(biz.id, OPERATOR_EMAIL)
+    store, config = operator_store_and_config()
+    app = create_app(registry=registry, ledger=Ledger(),
+                     approvals=ApprovalGate(), saas_store=store,
+                     saas_config=config)
+    client = TestClient(app)
+    # Not signed in: the business's data is not served.
+    assert client.get("/api/attribution").status_code == 401
+    sign_in(client, store)
+    r = client.get("/api/attribution")
     assert r.status_code == 200
     body = r.json()
     assert body["model"] == "last_touch"

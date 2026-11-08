@@ -16,7 +16,7 @@ from core.shopify_adapter import (ShopifyCommerceAdapter,
                                   ShopifyCredentialsError, ShopifyError)
 from core.sourcing import (ProductBrief, Supplier, alibaba_search_url,
                            rank_suppliers, render_supplier_report)
-from ecosystem.shopify_pipeline import (APPROVAL_ACTION, ListingWriter,
+from businesses.shopify_store.pipeline import (APPROVAL_ACTION, ListingWriter,
                                         publish_approved, source)
 from orchestrator.approvals import ApprovalGate
 
@@ -57,7 +57,7 @@ def test_impossible_margin_rejected():
 # -- sourcing ------------------------------------------------------------------
 
 def _brief(**kw) -> ProductBrief:
-    return ProductBrief.model_validate_json(EXAMPLE.read_text()).model_copy(update=kw)
+    return ProductBrief.model_validate_json(EXAMPLE.read_text(encoding="utf-8")).model_copy(update=kw)
 
 
 def test_reliable_supplier_ranks_first_and_risks_flagged():
@@ -316,7 +316,7 @@ def test_llm_listing_is_clipped_and_falls_back(gate):
 def test_dashboard_shows_supplier_approval(gate, tmp_path):
     from fastapi.testclient import TestClient
 
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
 
     from _signin import operator_store_and_config, sign_in
 

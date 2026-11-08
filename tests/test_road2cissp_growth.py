@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents.creative.agent import CreativeAgent
 from agents.marketing.agent import MarketingAgent
 from core.site_audit import SiteAuditor, parse_page
-from ecosystem import road2cissp_growth as growth
+from businesses.road2cissp import growth as growth
 from ecosystem.runtime import build_runtime
 from orchestrator.models import Task
 

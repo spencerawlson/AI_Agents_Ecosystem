@@ -5,10 +5,10 @@ road2cissp.com — the weekly growth cycle, turned into a daily list
 the way HeyCatch sells it, but built on the ecosystem's own engine.
 
 ```bash
-python ecosystem/road2cissp_growth.py daily-plan            # today (UTC)
-python ecosystem/road2cissp_growth.py daily-plan --date 2026-11-08
-python ecosystem/road2cissp_growth.py daily-plan-done fix:prerender-routes
-python ecosystem/road2cissp_growth.py daily-plan-skip task:2
+python businesses/road2cissp/growth.py daily-plan            # today (UTC)
+python businesses/road2cissp/growth.py daily-plan --date 2026-11-08
+python businesses/road2cissp/growth.py daily-plan-done fix:prerender-routes
+python businesses/road2cissp/growth.py daily-plan-skip task:2
 ```
 
 Or read it from the dashboard: `GET /api/daily-plan` (also linked
@@ -67,10 +67,10 @@ the count is shown as "…and N more".
 - Builder: `ecosystem/daily_plan.py` (`build_daily_plan`,
   `record_plan`, `mark_item`, `render_markdown`, `render_text`).
 - CLI: `daily-plan`, `daily-plan-done`, `daily-plan-skip` in
-  `ecosystem/road2cissp_growth.py`. Building a plan records its item
+  `businesses/road2cissp/growth.py`. Building a plan records its item
   ids in `data/road2cissp_growth.json` under `daily_plans`, and writes
   `reports/daily_plan_<yyyymmdd>.md`.
-- Dashboard: `GET /api/daily-plan` in `dashboard/app.py`. It builds
+- Dashboard: `GET /api/daily-plan` in `ventoryn/app.py`. It builds
   (but does not record) the plan from the growth state file
   (`DAILY_PLAN_STATE_PATH` overrides the path, for tests).
 - Tests: `tests/test_daily_plan.py` — ranking, due/back-off,

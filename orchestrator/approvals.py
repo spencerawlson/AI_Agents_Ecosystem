@@ -64,7 +64,7 @@ class ApprovalGate:
     def _read_file(self) -> tuple[int, dict[str, Approval]]:
         """Read (rev, approvals) from disk; tolerate missing/corrupt files."""
         try:
-            raw = json.loads(self._persist_path.read_text())  # type: ignore[union-attr]
+            raw = json.loads(self._persist_path.read_text(encoding="utf-8"))  # type: ignore[union-attr]
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return 0, {}
         try:
@@ -92,7 +92,7 @@ class ApprovalGate:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._persist_path.with_name(
                 self._persist_path.name + ".tmp")
-            tmp.write_text(json.dumps(payload))
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
             os.replace(tmp, self._persist_path)
             self._approvals = disk
             self._rev = rev

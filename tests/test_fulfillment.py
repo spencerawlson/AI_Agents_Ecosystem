@@ -14,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.cj_orders import CJOrders, OrderQuote, SupplierOrderStatus
 from core.shopify_adapter import ShopifyCommerceAdapter, ShopifyError
-from ecosystem.fulfillment import (COST_ACTION, FulfilmentPolicy,
+from businesses.shopify_store.fulfillment import (COST_ACTION, FulfilmentPolicy,
                                    fulfilment_overview, process_orders)
-from ecosystem.shopify_pipeline import load_state, run_check
+from businesses.shopify_store.pipeline import load_state, run_check
 from orchestrator.approvals import ApprovalGate
 
 from _signin import operator_store_and_config, sign_in
@@ -355,7 +355,7 @@ def test_run_check_reports_each_integration(capsys, monkeypatch):
 def test_dashboard_renders_cost_approval(gate):
     from fastapi.testclient import TestClient
 
-    from dashboard.app import create_app
+    from ventoryn.app import create_app
 
     gate.request(COST_ACTION, amount_usd=13.2, details={
         "order_id": OID, "order_name": "#1001", "products": ["Laptop Stand"],
@@ -369,7 +369,7 @@ def test_dashboard_renders_cost_approval(gate):
 
 
 def test_store_report_lists_orders_needing_attention(tmp_path, gate):
-    from ecosystem.store_ops import write_store_report
+    from businesses.shopify_store.store_ops import write_store_report
 
     state = _state(tmp_path)
     process_orders(state, FakeShop([_order()]), None, gate, FulfilmentPolicy(), NOW)

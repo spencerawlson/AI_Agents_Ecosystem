@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ecosystem import farelune_growth as fg
+from businesses.farelune import growth as fg
 from ecosystem.runtime import build_runtime
 
 

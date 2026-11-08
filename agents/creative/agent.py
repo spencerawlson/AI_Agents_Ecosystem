@@ -53,7 +53,7 @@ class CreativeAgent(BaseAgent):
         # Ventoryn signature (optional): a callable
         # ``(url, agent) -> (signed_url, tag)`` supplied by the SaaS
         # shell when the agent works for a Ventoryn site (see
-        # core.signature.sign_agent_link). Reply drafts are signed
+        # ventoryn.signature.sign_agent_link). Reply drafts are signed
         # through it; without it drafts stay unsigned and the output
         # says so.
         self._signer = signer

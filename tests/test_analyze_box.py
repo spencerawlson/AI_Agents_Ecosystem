@@ -19,8 +19,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ecosystem.analyze as analyze
-from dashboard.analyze_jobs import validate_country, validate_language, validate_url
-from dashboard.app import create_app
+from ventoryn.analyze_jobs import validate_country, validate_language, validate_url
+from ventoryn.app import create_app
 from fastapi.testclient import TestClient
 
 from core.ledger import Ledger
@@ -181,7 +181,7 @@ def test_analyze_unknown_job_is_404(client):
 # -- Endpoint: job lifecycle (fake runner, no network) ------------------------
 
 def test_analyze_job_lifecycle(client, tmp_path, monkeypatch):
-    from dashboard.reports import reports_dir
+    from ventoryn.reports import reports_dir
 
     report_name = "analyze_example-com_20261108.md"
 
@@ -189,7 +189,7 @@ def test_analyze_job_lifecycle(client, tmp_path, monkeypatch):
         path = reports_dir() / report_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# Site analysis: https://example.com\n\n"
-                        "Site score: **88/100**\n\nGEO score: **71/100**\n")
+                        "Site score: **88/100**\n\nGEO score: **71/100**\n", encoding="utf-8")
         return {
             "site_score": 88, "geo_score": 71, "fetchable": True,
             "unavailable_reason": None,
@@ -252,7 +252,7 @@ def test_analyze_real_pipeline_writes_report(client, tmp_path, monkeypatch):
     reports = list((tmp_path / "reports").glob("analyze_*.md"))
     assert len(reports) == 1
     assert "example-com" in reports[0].name
-    text = reports[0].read_text()
+    text = reports[0].read_text(encoding="utf-8")
     assert "Site score: **" in text
     assert "GEO score: **" in text
     assert "no auto-publish" in text

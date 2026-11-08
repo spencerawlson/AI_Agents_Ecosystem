@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.social_analytics import (  # noqa: E402
     analyze, build_charts, fmt_int, fmt_pct, parse_export,
 )
-from dashboard.reports import reports_dir  # noqa: E402
+from ventoryn.reports import reports_dir  # noqa: E402
 
 CHART_TITLES = {
     "engagement": "Engagement rate by channel",

@@ -19,17 +19,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 from fastapi.testclient import TestClient
 
-import core.saas as saas_module
+import ventoryn.saas as saas_module
 from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
-from core.saas import (
+from ventoryn.saas import (
     SaasConfig,
     SaasStore,
     handle_customer_sale_webhook,
 )
-from core.signature import sign_agent_link
-from dashboard.app import create_app
+from ventoryn.signature import sign_agent_link
+from ventoryn.app import create_app
 from orchestrator.approvals import ApprovalGate
 
 from _signin import (

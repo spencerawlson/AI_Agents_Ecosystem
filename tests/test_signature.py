@@ -16,8 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.community_listening import sign_reply_draft
-from core.saas import SaasStore, handle_customer_sale_webhook
-from core.signature import (
+from ventoryn.saas import SaasStore, handle_customer_sale_webhook
+from ventoryn.signature import (
     make_tag,
     new_action_id,
     parse_tag,

@@ -1,6 +1,6 @@
 """Daily plan: one ordered list of today's marketing moves.
 
-This turns the weekly growth cycle (see ecosystem/road2cissp_growth.py)
+This turns the weekly growth cycle (see businesses/road2cissp/growth.py)
 into the thing HeyCatch sells as a daily plan: wake up, see the moves
 ranked by channel and priority, do them in order.
 
@@ -51,7 +51,7 @@ State shape (kept inside the growth state file, under ``daily_plans``)::
         },
     }
 
-Use it from the growth CLI (``python ecosystem/road2cissp_growth.py
+Use it from the growth CLI (``python businesses/road2cissp/growth.py
 daily-plan``) or from the dashboard (``GET /api/daily-plan``).
 """
 
@@ -244,7 +244,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
                 "title": f"Record outcome: {exp.get('name', slug)}",
                 "detail": "Its duration ended. What happened — visits, "
                           "sign-ins, what worked, what did not?",
-                "action": (f"python ecosystem/road2cissp_growth.py outcome "
+                "action": (f"python businesses/road2cissp/growth.py outcome "
                            f"{slug} --worked \"...\"  (or --failed \"...\")"),
                 "done_when": "The experiment is marked completed with an outcome.",
                 "source": "finished experiment awaiting review",
@@ -296,7 +296,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
                        "metrics": "Pull the latest traffic snapshot.",
                        "strategy": "Weekly strategy: diagnosis, ranked channel "
                                    "bets, new experiments for approval."}[job],
-            "action": "python ecosystem/road2cissp_growth.py run",
+            "action": "python businesses/road2cissp/growth.py run",
             "done_when": f"The {job} job has run in today's growth cycle.",
             "source": "growth cadence",
             "source_key": None,
@@ -316,7 +316,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "channel": exp.get("channel") or "content", "kind": "draft",
             "title": f"Draft content: {exp.get('name', slug)}",
             "detail": f"Needs {needed}. Drafts are files only — you post them.",
-            "action": "python ecosystem/road2cissp_growth.py run",
+            "action": "python businesses/road2cissp/growth.py run",
             "done_when": "Drafts exist under reports/road2cissp_drafts/<experiment>/",
             "source": "active experiment awaiting drafts",
             "source_key": f"exp:{slug}:{exp.get('status')}",
@@ -362,7 +362,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "detail": "One article from the live keyword map. It must pass "
                       "the deterministic quality gate; the draft is never "
                       "published automatically.",
-            "action": "python ecosystem/road2cissp_growth.py seo --count 1",
+            "action": "python businesses/road2cissp/growth.py seo --count 1",
             "done_when": "A new draft exists under reports/seo/road2cissp_com/.",
             "source": "SEO engine (gated article pipeline)",
             "source_key": seo_key,
@@ -378,7 +378,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "title": "Get one measurement on the books",
             "detail": "No traffic numbers yet. Install analytics (see the "
                       "audit) or record yesterday's numbers by hand.",
-            "action": ("python ecosystem/road2cissp_growth.py record-metrics "
+            "action": ("python businesses/road2cissp/growth.py record-metrics "
                        "--visitors 0 --signups 0 --note \"first numbers\""),
             "done_when": "One metrics entry exists in the growth state.",
             "source": "measurement gap",
