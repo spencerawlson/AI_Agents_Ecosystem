@@ -33,6 +33,8 @@ CLI:
     python ecosystem/road2cissp_growth.py record-revenue --amount 190 --note "10 subs, Oct"
     python ecosystem/road2cissp_growth.py record-conversion --amount 19 --touches "community:r/cissp"
     python ecosystem/road2cissp_growth.py attribution [--model linear]
+    python ecosystem/road2cissp_growth.py video --script script.json [--audio voiceover.mp3]
+    python ecosystem/road2cissp_growth.py video --from-experiment reddit-answers
     python ecosystem/road2cissp_growth.py record-cost --amount 12 --label "Domain renewal"
     python ecosystem/road2cissp_growth.py pnl
 
@@ -910,6 +912,149 @@ def run_attribution(rt, state_path: Path | None = None,
     return summary
 
 
+# -- video -----------------------------------------------------------------
+
+def run_video(rt, state_path: Path | None = None,
+              reports_root: Path | None = None,
+              now: datetime | None = None,
+              script_path: Path | None = None,
+              experiment_slug: str | None = None,
+              audio: Path | None = None, size: str = "vertical",
+              llm_enabled: bool | None = None) -> dict:
+    """Render one video: either from a script file (--script) or by
+    drafting a video-script for an active experiment
+    (--from-experiment) and rendering it. Writes
+    reports/videos/<slug>.mp4 + .srt and records it in the state.
+    Drafts only in the sense that matters: the file is rendered, but
+    nothing is posted anywhere — the owner posts it by hand."""
+    from core.llm import LLMGateway
+    from core.video_render import (
+        SIZES, load_script, render_video, validate_script,
+    )
+    from dashboard.reports import reports_dir
+
+    now = now or datetime.now(timezone.utc)
+    state_path = state_path or default_state_path()
+    reports_root = reports_root or reports_dir()
+    state = load_state(state_path)
+    biz_id = _business_id(rt)
+    llm_on = LLMGateway.enabled() if llm_enabled is None else llm_enabled
+    summary: dict = {"ran": [], "errors": [], "spend_usd": 0.0,
+                     "video": None, "report": None}
+    if size not in SIZES:
+        summary["errors"].append(
+            f"unknown size {size!r} (vertical or wide)")
+        return summary
+    audio_path = Path(audio) if audio else None
+    if audio_path is not None and not audio_path.exists():
+        summary["errors"].append(f"audio file not found: {audio_path}")
+        return summary
+
+    script: dict | None = None
+    slug = ""
+    if script_path:
+        try:
+            script = load_script(Path(script_path))
+        except ValueError as exc:
+            summary["errors"].append(str(exc))
+            return summary
+        slug = _slug_file(str(script.get("title", "")))
+    elif experiment_slug:
+        exp = (state.get("experiments") or {}).get(experiment_slug)
+        if exp is None:
+            summary["errors"].append(
+                f"no experiment {experiment_slug!r}; see `status`")
+            return summary
+        if exp.get("status") != "active":
+            summary["errors"].append(
+                f"experiment {experiment_slug} is {exp.get('status')} — "
+                "video drafts are for active experiments only")
+            return summary
+        if not llm_on:
+            summary["errors"].append(
+                "drafting a script needs LLM mode (set an API key)")
+            return summary
+        video_exp = {**exp, "content_needed": ["video-script"]}
+        run = _dispatch(
+            rt, biz_id, "creative", "content_pieces",
+            {"experiment": video_exp, "profile": SITE_PROFILE},
+            "content",
+            ["one video-script draft stored as a creative asset"])
+        if run.cost_usd:
+            summary["spend_usd"] += run.cost_usd
+            rt.ledger.record(business_id=biz_id, kind="ai_spend",
+                             amount_usd=-run.cost_usd,
+                             description="road2cissp video script")
+        if run.status != TaskStatus.COMPLETED:
+            summary["errors"].append(f"script drafting: {run.error}")
+            return summary
+        pieces = [p for p in run.output.get("pieces", [])
+                  if p.get("type") == "video-script"]
+        if not pieces:
+            summary["errors"].append(
+                "the creative agent returned no video-script piece")
+            return summary
+        script = {"title": pieces[0].get("title", exp.get("name", "")),
+                  "scenes": pieces[0].get("scenes", [])}
+        slug = experiment_slug
+        summary["ran"].append(
+            f"drafted video-script for {experiment_slug} "
+            f"(${run.cost_usd:.4f} AI spend)")
+    else:
+        summary["errors"].append("need --script <path> or "
+                                 "--from-experiment <slug>")
+        return summary
+
+    errors = validate_script(script)
+    if errors:
+        summary["errors"].append(
+            "invalid video script: " + "; ".join(errors))
+        return summary
+    videos_root = reports_root / "videos"
+    videos_root.mkdir(parents=True, exist_ok=True)
+    out_path = videos_root / f"{slug}.mp4"
+    try:
+        rendered = render_video(script, out_path, size=SIZES[size],
+                                audio=audio_path)
+    except (ValueError, RuntimeError) as exc:
+        summary["errors"].append(str(exc))
+        return summary
+    state.setdefault("videos", {})[slug] = {
+        "title": script.get("title", ""), "video_path": str(out_path),
+        "srt_path": rendered["srt"], "duration_s": rendered["duration_s"],
+        "scenes": rendered["scenes"], "size": size,
+        "audio": bool(audio_path), "status": "rendered",
+        "rendered_at": now.isoformat(),
+    }
+    state["spend_usd"] = round(
+        state["spend_usd"] + summary["spend_usd"], 6)
+    save_state(state_path, state)
+    summary["video"] = state["videos"][slug]
+    summary["ran"].append(
+        f"rendered {out_path} ({rendered['duration_s']}s, "
+        f"{rendered['scenes']} scenes, {size})")
+
+    path = reports_root / f"video_{now:%Y%m%d}_{slug}.md"
+    lines = [f"# Road to CISSP — video: {script.get('title', slug)}", "",
+             "> **NOT YET POSTED.** The MP4 below is a file — post it by "
+             "hand on the channel it is for.", "",
+             f"- Video: `{out_path}`",
+             f"- Subtitles: `{rendered['srt']}`",
+             f"- Duration: {rendered['duration_s']}s · "
+             f"{rendered['scenes']} scenes · {size} "
+             f"{'x'.join(str(d) for d in rendered['size'])}",
+             f"- Voiceover: {'yes (owner recording)' if audio_path else 'no — silent, SRT carries the words'}",
+             "", "## Scenes", ""]
+    for i, scene in enumerate(script["scenes"], 1):
+        lines.append(f"{i}. **{scene['on_screen_text']}** "
+                     f"({scene.get('duration_s', 5)}s) — "
+                     f"{scene['narration'][:120]}")
+    lines += ["", f"Real AI spend this run: ${summary['spend_usd']:.4f}"]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    summary["report"] = str(path)
+    return summary
+
+
 def _cell(v) -> str:
     return str(v if v is not None else "—").replace("|", "/").replace("\n", " ")
 
@@ -1088,6 +1233,21 @@ def main(argv=None) -> int:
                      action="store_false", default=True,
                      help="use the latest recorded snapshot instead of "
                           "fetching Plausible")
+    p_v = sub.add_parser("video",
+                         help="render a video slideshow from a script file "
+                              "or draft + render one for an active experiment")
+    p_v.add_argument("--script", default="",
+                     help="path to a script JSON file")
+    p_v.add_argument("--from-experiment", default="",
+                     help="experiment slug to draft a video-script for")
+    p_v.add_argument("--audio", default="",
+                     help="voiceover file (mp3/wav) to mux in")
+    p_v.add_argument("--format", default="vertical",
+                     choices=["vertical", "wide"],
+                     help="vertical 1080x1920 (TikTok/Reels/Shorts) or "
+                          "wide 1920x1080 (YouTube)")
+    p_v.add_argument("--llm", dest="llm", action="store_true", default=None)
+    p_v.add_argument("--no-llm", dest="llm", action="store_false")
     p_c = sub.add_parser("record-cost", help="book a real-world cost")
     p_c.add_argument("--amount", type=float, required=True)
     p_c.add_argument("--label", required=True)
@@ -1252,6 +1412,27 @@ def main(argv=None) -> int:
         print_pnl(rt, rt.businesses.get(biz_id))
         return 0
 
+    if args.cmd == "video":
+        from ecosystem.runtime import build_runtime
+
+        rt = build_runtime(use_llm=args.llm, approvals_persist=True)
+        summary = run_video(
+            rt, script_path=args.script or None,
+            experiment_slug=args.from_experiment or None,
+            audio=args.audio or None, size=args.format,
+            llm_enabled=args.llm)
+        for line in summary["ran"]:
+            print(f"ran: {line}")
+        for line in summary["errors"]:
+            print(f"error: {line}")
+        if summary["video"]:
+            print(f"video: {summary['video']['video_path']}")
+            print(f"subtitles: {summary['video']['srt_path']}")
+        print(f"spend: ${summary['spend_usd']:.4f}")
+        if summary["report"]:
+            print(f"report: {summary['report']}")
+        return 1 if summary["errors"] and not summary["video"] else 0
+
     state = load_state(path)
     if args.cmd == "status":
         for job in ("audit", "keywords", "metrics", "strategy"):
@@ -1269,6 +1450,12 @@ def main(argv=None) -> int:
                   f"{totals.get('conversions', 0)} conversions · "
                   f"${totals.get('revenue', 0):.2f} · sessions "
                   f"{last_attr.get('sessions_source')}")
+        videos = state.get("videos", {})
+        if videos:
+            print(f"videos rendered: {len(videos)}")
+            for slug, v in videos.items():
+                print(f"- {slug}: {v.get('duration_s')}s, "
+                      f"{v.get('status')}, {v.get('video_path')}")
         community = state.get("community_threads", {})
         if community:
             by_status: dict[str, int] = {}

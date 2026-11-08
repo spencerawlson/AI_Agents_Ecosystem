@@ -21,7 +21,7 @@ class CreativeAsset(BaseModel):
     id: str
     business_id: str
     campaign_id: str | None = None
-    asset_type: str  # image | ad_concept | social_post | copy | email | video_concept
+    asset_type: str  # image | ad_concept | social_post | copy | email | video_concept | video-script | community
     title: str
     content: str  # copy text, image prompt, or asset reference
     version: int = 1
@@ -417,6 +417,10 @@ class CreativeAgent(BaseAgent):
         "landing": ('{"type": "landing", "route" (suggested URL path), "title", '
                     '"meta_description", "h1", "body_markdown"}',
                     ("route", "title", "body_markdown")),
+        "video-script": ('{"type": "video-script", "title", "scenes": '
+                         '[{"on_screen_text" (<=140 chars), "narration", '
+                         '"duration_s" (3-15)}] (3-8 scenes, 15-90s total)}',
+                         ("title", "scenes")),
     }
 
     def _content_pieces(self, task: Task) -> dict:
@@ -433,7 +437,8 @@ class CreativeAgent(BaseAgent):
         types = [t for t in exp.get("content_needed", []) if t in self.CONTENT_SPECS]
         if not types:
             types = ["social"]
-        per_type = {"blog": 1, "landing": 1, "email": 2, "social": 4, "community": 3}
+        per_type = {"blog": 1, "landing": 1, "email": 2, "social": 4,
+                    "community": 3, "video-script": 1}
         wanted = "\n".join(
             f"- {per_type[t]} x {self.CONTENT_SPECS[t][0]}" for t in types)
         prompt = (
@@ -465,7 +470,15 @@ class CreativeAgent(BaseAgent):
                 continue
             label = p.get("title") or p.get("subject") or p.get("venue") \
                 or p.get("platform") or p["type"]
-            body = p.get("body_markdown") or p.get("text") or p.get("body") or ""
+            body = (p.get("body_markdown") or p.get("text")
+                    or p.get("body") or "")
+            if not body and p.get("scenes"):
+                # Structured pieces (video-script) carry their content
+                # as data, not prose — store the JSON so the renderer
+                # can read the asset back.
+                import json
+
+                body = json.dumps(p, indent=2)
             asset = self.create(business_id, p["type"], f"[{exp.get('slug', '')}] "
                                 f"{label}"[:80], body)
             pieces.append({**p, "asset_id": asset.id})
