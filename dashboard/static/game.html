@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Collegium — Live Ops</title>
+<title>Ventoryn — Live Ops</title>
 <style>
   :root {
     --bg: #fdf6ea;
@@ -374,7 +374,7 @@
 </div>
 <canvas id="confetti"></canvas>
 <header id="hud">
-  <div class="title">Collegium — Live Ops</div>
+  <div class="title">Ventoryn — Live Ops</div>
   <div id="tick-badge">TICK –</div>
   <div class="hud-stat"><span class="label">Revenue</span><span class="value" id="hud-revenue">–</span></div>
   <div class="hud-stat"><span class="label">Costs</span><span class="value" id="hud-costs">–</span></div>
@@ -385,6 +385,29 @@
 </header>
 <div id="error-banner"></div>
 <div id="main">
+  <div class="panel" id="analyze-panel">
+    <h2>🔍 Analyze a site</h2>
+    <p class="ops-sub">Paste a website URL and a market country — the same analysis as the <code>analyze</code> command. Nothing is published; the report is saved locally and shown here.</p>
+    <form id="analyze-form">
+      <div class="analyze-row">
+        <label class="analyze-field analyze-url">
+          <span class="analyze-label">Website URL</span>
+          <input id="analyze-url" type="url" inputmode="url" placeholder="https://example.com" autocomplete="off" required>
+        </label>
+        <label class="analyze-field analyze-country">
+          <span class="analyze-label">Market country</span>
+          <input id="analyze-country" type="text" value="ca" maxlength="2" autocomplete="off" required>
+        </label>
+        <label class="analyze-field analyze-language">
+          <span class="analyze-label">Language (optional)</span>
+          <input id="analyze-language" type="text" placeholder="en" maxlength="5" autocomplete="off">
+        </label>
+        <button type="submit" class="primary" id="analyze-submit">Analyze</button>
+      </div>
+    </form>
+    <div id="analyze-status" class="analyze-status" aria-live="polite"></div>
+    <div id="analyze-result" hidden></div>
+  </div>
   <div class="panel-title">⭐ Your Crew</div>
   <section id="stations"></section>
   <div id="crew-nav" aria-label="Crew carousel">
@@ -419,29 +442,6 @@
     </div>
     <h3 class="ops-feed-title">Live activity feed</h3>
     <div id="ops-feed"></div>
-  </div>
-  <div class="panel" id="analyze-panel">
-    <h2>🔍 Analyze a site</h2>
-    <p class="ops-sub">Paste a website URL and a market country — the same analysis as the <code>analyze</code> command. Nothing is published; the report is saved locally and shown here.</p>
-    <form id="analyze-form">
-      <div class="analyze-row">
-        <label class="analyze-field analyze-url">
-          <span class="analyze-label">Website URL</span>
-          <input id="analyze-url" type="url" inputmode="url" placeholder="https://example.com" autocomplete="off" required>
-        </label>
-        <label class="analyze-field analyze-country">
-          <span class="analyze-label">Market country</span>
-          <input id="analyze-country" type="text" value="ca" maxlength="2" autocomplete="off" required>
-        </label>
-        <label class="analyze-field analyze-language">
-          <span class="analyze-label">Language (optional)</span>
-          <input id="analyze-language" type="text" placeholder="en" maxlength="5" autocomplete="off">
-        </label>
-        <button type="submit" class="primary" id="analyze-submit">Analyze</button>
-      </div>
-    </form>
-    <div id="analyze-status" class="analyze-status" aria-live="polite"></div>
-    <div id="analyze-result" hidden></div>
   </div>
   <div class="panel" id="exp001">
     <h2>🧪 Experiment 001 — Evergreen Planners</h2>

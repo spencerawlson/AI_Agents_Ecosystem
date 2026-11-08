@@ -137,7 +137,7 @@ python launch.py worker                   # headless agent loop (road2cissp grow
 python launch.py all                      # dashboard + worker together
 ```
 
-Open **http://0.0.0.0:8000/ops** for the Collegium — Live Ops view
+Open **http://0.0.0.0:8000/ops** for the Ventoryn — Live Ops view
 (`/game` still works — same page under its old address): the vector crew,
 the live activity feed and graphs, event feed, portfolio HUD, speed
 controls (1×/2×/4×), pause, and reset — every tick runs the real

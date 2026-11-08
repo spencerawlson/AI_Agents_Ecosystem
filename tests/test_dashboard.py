@@ -128,7 +128,7 @@ def test_report_page():
 
 
 def test_game_view_is_live_ops():
-    """/game serves the Collegium — Live Ops page with a vector
+    """/game serves the Ventoryn — Live Ops page with a vector
     cast (one inline SVG per character, no emoji in the roster) and the
     live ops window; /ops is an alias for the same page."""
     app = create_app(registry=BusinessRegistry(), ledger=Ledger())
@@ -136,7 +136,7 @@ def test_game_view_is_live_ops():
     for path in ("/game", "/ops"):
         r = client.get(path)
         assert r.status_code == 200
-        assert "Collegium — Live Ops" in r.text
+        assert "Ventoryn — Live Ops" in r.text
         assert "Live game view" not in r.text
         assert "What the team is doing" in r.text
         assert 'id="ops-feed"' in r.text
@@ -276,8 +276,8 @@ if __name__ == "__main__":
     print("Report tests passed.")
 
 
-def test_live_ops_is_collegium_and_mobile_friendly():
-    """The live-ops page is Collegium now (not Ecosystem Tycoon), and its
+def test_live_ops_is_ventoryn_and_mobile_friendly():
+    """The live-ops page is Ventoryn now (not Ecosystem Tycoon), and its
     phone layout is thumb-friendly: the crew section becomes a
     one-card-at-a-time scroll-snap carousel at <=560px (native swipe,
     prev/next buttons, dots + "n of 8"), the ops charts size their SVG
@@ -288,7 +288,7 @@ def test_live_ops_is_collegium_and_mobile_friendly():
     client = TestClient(app)
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Collegium — Live Ops" in r.text
+    assert "Ventoryn — Live Ops" in r.text
     assert "Ecosystem Tycoon" not in r.text
     # Desktop crew grid untouched; the old single-column rule is gone,
     # replaced by the phone carousel strip.
@@ -311,7 +311,8 @@ def test_live_ops_is_collegium_and_mobile_friendly():
     assert "min-height: 48px" in r.text
     # The live-ops doc moved with the name.
     root = Path(__file__).resolve().parent.parent
-    doc = root / "docs" / "collegium-live-ops.md"
+    doc = root / "docs" / "ventoryn-live-ops.md"
     assert doc.exists()
-    assert doc.read_text().splitlines()[0] == "# Collegium — Live Ops"
+    assert doc.read_text().splitlines()[0] == "# Ventoryn — Live Ops"
     assert not (root / "docs" / "tycoon-live-ops.md").exists()
+    assert not (root / "docs" / "collegium-live-ops.md").exists()

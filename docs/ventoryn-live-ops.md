@@ -1,4 +1,4 @@
-# Collegium — Live Ops
+# Ventoryn — Live Ops
 
 The dashboard's live view of the crew at work:
 **http://localhost:8000/ops** (`/game` still works — the same page

@@ -1,4 +1,4 @@
-"""Background site-analysis jobs for the Collegium dashboard.
+"""Background site-analysis jobs for the Ventoryn dashboard.
 
 The /ops page's "Analyze a site" panel starts a job here; the same
 ``ecosystem.analyze`` pipeline the CLI runs does the work in a
