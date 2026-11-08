@@ -126,6 +126,16 @@ class SharedBusinessRegistry(BusinessRegistry):
             businesses = [b for b in businesses if b.status == status]
         return sorted(businesses, key=lambda b: b.created_at)
 
+    def assign_owner(self, business_id: str, owner_email: str) -> Business:
+        """Bind a business to the account that manages it (persisted)."""
+        biz = self._load(business_id)
+        if biz is None:
+            raise ValueError(f"unknown business: {business_id}")
+        biz.owner_email = owner_email.strip().lower()
+        biz.updated_at = utcnow()
+        self._save(biz)
+        return biz
+
     def transition(self, business_id: str, to: BusinessStatus) -> Business:
         biz = self._load(business_id)
         if biz is None:

@@ -448,7 +448,7 @@ def test_job_analyze_charges_and_reports(client, store, tmp_path, monkeypatch):
     assert "Site 85/100" in jobs[0]["result"]
     reports = list(tmp_path.glob("analyze_road2cissp-com_*.md"))
     assert len(reports) == 1
-    assert "Site score: **85/100**" in reports[0].read_text()
+    assert "Site score: **85/100**" in reports[0].read_text(encoding="utf-8")
 
 
 def test_job_insufficient_credits_refused(client, store):

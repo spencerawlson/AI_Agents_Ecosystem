@@ -301,8 +301,8 @@ def test_listen_mission_drafts_and_records_without_posting(tmp_path):
     thread = state["community_threads"]["a1"]
     assert thread["status"] == "drafted"
     assert Path(thread["draft_path"]).exists()
-    assert "NOTHING WAS POSTED" in Path(summary["report"]).read_text()
-    assert "reddit" in Path(summary["report"]).read_text()
+    assert "NOTHING WAS POSTED" in Path(summary["report"]).read_text(encoding="utf-8")
+    assert "reddit" in Path(summary["report"]).read_text(encoding="utf-8")
 
     # A second run finds the same thread and drafts nothing new.
     with patch("core.community_listening.listen_reddit",
@@ -336,7 +336,7 @@ def test_listen_mission_reports_unavailable_reddit_without_spending(tmp_path):
     assert summary["errors"] == ["reddit: blocked — run from FedServ"]
     assert summary["spend_usd"] == 0
     assert summary["drafted"] == []
-    assert "NOTHING WAS POSTED" in Path(summary["report"]).read_text()
+    assert "NOTHING WAS POSTED" in Path(summary["report"]).read_text(encoding="utf-8")
     state = growth.load_state(tmp_path / "state.json")
     assert state["community_threads"] == {}
 

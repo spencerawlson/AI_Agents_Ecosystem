@@ -1,11 +1,3 @@
-fastapi>=0.110
-uvicorn[standard]>=0.29
-sqlalchemy>=2.0
-alembic>=1.13
-psycopg2-binary>=2.9
-redis>=5.0
-pydantic>=2.6
-pydantic-settings>=2.2
-litellm>=1.60
-pytrends
-Pillow>=11.0  # video slideshow slides (core/video_render.py)
+# Dependencies live in pyproject.toml. This file just installs them all
+# (for hosts that expect `pip install -r requirements.txt`).
+-e .[all]

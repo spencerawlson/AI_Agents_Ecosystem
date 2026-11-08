@@ -28,6 +28,15 @@ class BusinessRegistry:
             businesses = [b for b in businesses if b.status == status]
         return sorted(businesses, key=lambda b: b.created_at)
 
+    def assign_owner(self, business_id: str, owner_email: str) -> Business:
+        """Bind a business to the account that manages it."""
+        biz = self.get(business_id)
+        if biz is None:
+            raise ValueError(f"unknown business: {business_id}")
+        biz.owner_email = owner_email.strip().lower()
+        biz.updated_at = utcnow()
+        return biz
+
     def transition(self, business_id: str, to: BusinessStatus) -> Business:
         biz = self.get(business_id)
         if biz is None:

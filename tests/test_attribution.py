@@ -292,9 +292,20 @@ def test_api_attribution(tmp_path, monkeypatch):
     state["conversions"] = [_conv(19.0, [{"channel": "seo"}])]
     save_state(path, state)
     monkeypatch.setenv("DAILY_PLAN_STATE_PATH", str(path))
-    app = create_app(registry=BusinessRegistry(), ledger=Ledger(),
-                     approvals=ApprovalGate())
-    r = TestClient(app).get("/api/attribution")
+    from _signin import OPERATOR_EMAIL, operator_store_and_config, sign_in
+
+    registry = BusinessRegistry()
+    biz = registry.create(growth.BUSINESS_NAME, "education_website")
+    registry.assign_owner(biz.id, OPERATOR_EMAIL)
+    store, config = operator_store_and_config()
+    app = create_app(registry=registry, ledger=Ledger(),
+                     approvals=ApprovalGate(), saas_store=store,
+                     saas_config=config)
+    client = TestClient(app)
+    # Not signed in: the business's data is not served.
+    assert client.get("/api/attribution").status_code == 401
+    sign_in(client, store)
+    r = client.get("/api/attribution")
     assert r.status_code == 200
     body = r.json()
     assert body["model"] == "last_touch"

@@ -100,7 +100,7 @@ def test_list_reports_parses_metadata_newest_first(tmp_path, monkeypatch):
                   mtime=1000.0)
     _write_report(tmp_path, "marketing_mission_20261004.md", MISSION_MD,
                   mtime=2000.0)
-    (tmp_path / "notes.txt").write_text("ignored")
+    (tmp_path / "notes.txt").write_text("ignored", encoding="utf-8")
     items = list_reports()
     assert [r["name"] for r in items] == [
         "marketing_mission_20261004.md", "marketing_mission_20261003.md"]
@@ -188,7 +188,7 @@ def test_mission_completion_requests_approval(tmp_path):
     rt = SimpleNamespace(approvals=gate)
     biz = SimpleNamespace(id="biz_9", name="Road to CISSP")
     rp = tmp_path / "marketing_mission_20261004.md"
-    rp.write_text("# report")
+    rp.write_text("# report", encoding="utf-8")
     ctx = {"site_url": "https://road2cissp.com",
            "drafts": [{"hook": "h"}] * 10,
            "total_spend_usd": 0.0113, "total_tokens": 3846,

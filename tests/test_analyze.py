@@ -301,7 +301,7 @@ def test_cli_analyze_writes_report(tmp_path, monkeypatch, capsys):
     reports = list((tmp_path / "reports").glob("analyze_*.md"))
     assert len(reports) == 1
     assert "example-com" in reports[0].name
-    assert "Site score: **100/100**" in reports[0].read_text()
+    assert "Site score: **100/100**" in reports[0].read_text(encoding="utf-8")
 
 
 def test_cli_bad_url_fails(capsys):

@@ -65,8 +65,8 @@ def load_credentials() -> dict:
             "no Etsy credentials: set ETSY_* env vars or populate "
             f"{CONFIG_DIR}/{{etsy_config.json,tokens.json}}"
         )
-    cfg = json.loads(cfg_path.read_text())
-    tok = json.loads(tok_path.read_text())
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    tok = json.loads(tok_path.read_text(encoding="utf-8"))
     return {
         "keystring": cfg["keystring"],
         "shared_secret": cfg["shared_secret"],
@@ -80,10 +80,10 @@ def _persist_tokens(access_token: str, refresh_token: str) -> None:
     tok_path = CONFIG_DIR / "tokens.json"
     if not tok_path.exists():
         return  # env-var mode: nothing to persist to
-    tok = json.loads(tok_path.read_text())
+    tok = json.loads(tok_path.read_text(encoding="utf-8"))
     tok["access_token"] = access_token
     tok["refresh_token"] = refresh_token
-    tok_path.write_text(json.dumps(tok))
+    tok_path.write_text(json.dumps(tok), encoding="utf-8")
     tok_path.chmod(0o600)
 
 
@@ -157,7 +157,7 @@ class EtsyMonitor:
             return float(os.environ["ETSY_SPEND_USD"])
         spend_path = CONFIG_DIR / "spend.json"
         if spend_path.exists():
-            data = json.loads(spend_path.read_text())
+            data = json.loads(spend_path.read_text(encoding="utf-8"))
             return float(data.get("cumulative_spend_usd", BASELINE_SPEND_USD))
         return BASELINE_SPEND_USD
 
@@ -167,7 +167,7 @@ class EtsyMonitor:
         spend_path = CONFIG_DIR / "spend.json"
         data = {"cumulative_spend_usd": BASELINE_SPEND_USD, "entries": []}
         if spend_path.exists():
-            data = json.loads(spend_path.read_text())
+            data = json.loads(spend_path.read_text(encoding="utf-8"))
         data["cumulative_spend_usd"] = round(
             float(data.get("cumulative_spend_usd", BASELINE_SPEND_USD))
             + amount_usd, 2)
@@ -176,7 +176,7 @@ class EtsyMonitor:
             "amount_usd": amount_usd,
             "note": note,
         })
-        spend_path.write_text(json.dumps(data, indent=1))
+        spend_path.write_text(json.dumps(data, indent=1), encoding="utf-8")
         return data["cumulative_spend_usd"]
 
     # -- experiment evaluation -------------------------------------------------

@@ -310,7 +310,20 @@ def test_dashboard_daily_plan_endpoint(tmp_path, monkeypatch):
     path = tmp_path / "state.json"
     save_state(path, state)
     monkeypatch.setenv("DAILY_PLAN_STATE_PATH", str(path))
-    client = TestClient(create_app())
+    from core.registry import BusinessRegistry
+    from _signin import OPERATOR_EMAIL, operator_store_and_config, sign_in
+
+    registry = BusinessRegistry()
+    biz = registry.create(growth.BUSINESS_NAME, "education_website")
+    registry.assign_owner(biz.id, OPERATOR_EMAIL)
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(registry=registry, saas_store=store,
+                                   saas_config=config))
+    assert client.get("/api/daily-plan").status_code == 401
+    # Another signed-in account does not manage Road to CISSP.
+    sign_in(client, store, email="someone@example.com", sub="sub-other")
+    assert client.get("/api/daily-plan").status_code == 404
+    sign_in(client, store)
     r = client.get("/api/daily-plan")
     assert r.status_code == 200
     plan = r.json()

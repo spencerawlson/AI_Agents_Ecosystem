@@ -10,16 +10,28 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
-    "sqlalchemy>=2.0",
-    "psycopg2-binary>=2.9",
-    "redis>=5.0",
     "pydantic>=2.6",
-    "pydantic-settings>=2.2",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.9",  # FastAPI form posts (approvals, login)
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+# Real LLM inference (agents fall back to heuristics without it).
+llm = ["litellm>=1.60"]
+# Live market data: Google Trends + Etsy search (pytrends brings requests).
+market = ["pytrends", "requests>=2.31"]
+# Slideshow MP4 rendering (core/video_render.py).
+video = ["Pillow>=11.0"]
+# Durable task store (infra/pg_store.py, launch.py initdb).
+postgres = ["psycopg2-binary>=2.9"]
+all = ["ai-agents-ecosystem[llm,market,video,postgres]"]
+dev = ["ai-agents-ecosystem[all]", "pytest>=8.0", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
-include = ["orchestrator*", "agents*", "core*", "dashboard*", "infra*"]
+include = ["orchestrator*", "agents*", "core*", "dashboard*", "infra*", "ecosystem*"]
+
+[tool.setuptools.package-data]
+dashboard = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

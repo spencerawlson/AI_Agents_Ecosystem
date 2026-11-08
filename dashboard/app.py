@@ -60,6 +60,8 @@ from core.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
                        CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
 from core.totp import provisioning_uri
 from dashboard.nav import HEADER_CSS, header_html
+from dashboard import ui
+from dashboard.ui import money
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 
@@ -196,28 +198,8 @@ def agent_stats_from_audit(audit: AuditLog, agent_types: list) -> list[dict]:
 
 # Light, clean styling shared by the /reports and /approvals pages —
 # matches the /report page. Mobile-friendly, no dark ops-room styling.
-_PAGE_CSS = """
-body { font-family: sans-serif; margin: 0 auto; max-width: 960px;
-       padding: 16px; color: #222; }
-.muted { color: #666; font-size: 14px; }
-.table-wrap { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; margin: 8px 0 20px; }
-th, td { border: 1px solid #ddd; padding: 8px; text-align: left;
-         font-size: 14px; vertical-align: top; }
-th { background: #f0f0f0; }
-button { padding: 8px 14px; margin: 2px; border-radius: 6px;
-         border: 1px solid #ccc; background: #fff; cursor: pointer;
-         font-size: 14px; }
-button[name="approved"][value="true"] { background: #e6f4ea;
-         border-color: #34a853; }
-button[name="approved"][value="false"] { background: #fce8e6;
-         border-color: #ea4335; }
-blockquote { border-left: 4px solid #f59e0b; margin: 12px 0;
-             padding: 8px 12px; background: #fffbe6; }
-code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px;
-       font-size: 13px; }
-@media (max-width: 560px) { th, td { font-size: 13px; padding: 6px; } }
-"""
+# Shared base styles for every server-rendered page (dashboard/ui.py).
+_PAGE_CSS = ui.BASE_CSS
 
 
 def _approval_summary(a, registry) -> str:
@@ -360,8 +342,13 @@ def create_app(
     audit: AuditLog | None = None,
     saas_store=None,
     saas_config=None,
+    runtime=None,
 ) -> FastAPI:
     app = FastAPI(title="AI Business Ecosystem")
+    # The live Runtime behind /api/tick and /api/reset. Callers that
+    # already built one (ecosystem.runtime.create_dashboard_app) pass it
+    # in, so the app never builds a second, throwaway runtime.
+    app.state.runtime_holder = {"rt": runtime} if runtime is not None else None
     state = {
         "orchestrator": orchestrator or Orchestrator(),
         "registry": registry or BusinessRegistry(),
@@ -427,16 +414,52 @@ def create_app(
             return None, RedirectResponse("/", status_code=303)
         return account, None
 
+    def _is_unclaimed_visible(account, biz) -> bool:
+        """An unclaimed business (no owner yet) is shown to the
+        operator only — so it can be claimed into an account."""
+        return (not biz.owner_email and
+                _saas_config.is_operator(account["email"]))
+
+    def _visible_businesses(account) -> list:
+        """Registry businesses this account manages: the ones whose
+        owner_email is this account's email, plus — for the operator
+        only — unclaimed ones, so they can be claimed from
+        /businesses. No business is tied to an account by name or by
+        config: ownership is recorded on the business itself, and a
+        business owned by another account is never visible."""
+        email = (account["email"] or "").strip().lower()
+        return [b for b in state["registry"].list()
+                if (b.owner_email or "") == email
+                or _is_unclaimed_visible(account, b)]
+
     def _owned_business_ids(account) -> set:
-        """Registry businesses the account owns. The operator's
-        businesses (Farelune, Road to CISSP, the Notion templates —
-        the businesses already in the ecosystem state) are linked to
-        the operator account by the SAAS_OPERATOR_EMAIL config; a
-        regular customer owns no registry business, only the sites
-        they added through the shell."""
-        if _saas_config.is_operator(account["email"]):
-            return {b.id for b in state["registry"].list()}
-        return set()
+        """Ids of the registry businesses this account manages."""
+        return {b.id for b in _visible_businesses(account)}
+
+    def _approval_visible(account, approval, owned=None) -> bool:
+        """Whose approval is this? The owner of its business decides
+        it. With no business, or a business this runtime's registry
+        does not know (written by another process), there is no owner
+        to ask — it is operator oversight."""
+        owned = _owned_business_ids(account) if owned is None else owned
+        if approval.business_id in owned:
+            return True
+        if (approval.business_id is None or
+                state["registry"].get(approval.business_id) is None):
+            return _saas_config.is_operator(account["email"])
+        return False
+
+    def _biz_row(b) -> dict:
+        pnl = state["ledger"].pnl(b.id)
+        return {
+            "id": b.id, "name": b.name,
+            "business_type": b.business_type,
+            "status": b.status.value,
+            "owner_email": b.owner_email,
+            "revenue": round(pnl.revenue, 2),
+            "total_costs": round(pnl.total_costs, 2),
+            "net_profit": round(pnl.net_profit, 2),
+        }
 
     def _site_business_rows(account) -> list[dict]:
         """The account's own SaaS sites as business rows, so the
@@ -499,28 +522,29 @@ def create_app(
         "<a href='/account/subscribe'>Subscribe</a>"
         "<a href='/account/logout'>Sign out</a></nav>")
     _NAV_CSS = """
+/* Operator Agent & Financial report: its own pill row of links
+   (kept by design), styled in the platform palette. */
 .customer-nav, .admin-nav { display: flex; flex-wrap: wrap; gap: 6px;
-  margin: 0 0 16px; }
-.customer-nav a, .admin-nav a { display: inline-block; min-height: 44px;
-  line-height: 44px; padding: 0 14px; border-radius: 8px;
-  background: #f3efff; border: 1px solid #c4b5fd; color: #111;
-  text-decoration: none; font-size: 15px; }
-.admin-nav a { background: #fff7ed; border-color: #fdba74; }
-.customer-nav a:hover, .admin-nav a:hover { background: #e9e2ff; }
-/* Portfolio: stat cards + styled business cards, like Live Ops —
-   not a bare table. */
-.stat-cards { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
-.stat-card { flex: 1 1 140px; border: 1px solid #ddd; border-radius: 8px;
-  padding: 12px; background: #fafafa; }
-.stat-card .label { font-size: 12px; color: #666; text-transform: uppercase; }
-.stat-card .value { font-size: 22px; font-weight: bold; margin-top: 4px; }
-.biz-card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
-  margin: 12px 0; background: #fff; }
-.biz-name { font-size: 18px; font-weight: bold; }
-.biz-sub { color: #666; font-size: 14px; margin: 4px 0 8px; }
+  margin: 0; padding: 10px 20px; background: var(--v-navy);
+  justify-content: center; }
+.customer-nav a, .admin-nav a { display: inline-flex; align-items: center;
+  min-height: 44px; padding: 0 14px; border-radius: 10px;
+  color: #d9d4f5; text-decoration: none; font-size: 15px; font-weight: 500; }
+.customer-nav a:hover, .admin-nav a:hover { color: #fff;
+  background: rgba(255, 255, 255, .1); }
+.stat-cards, .cards { display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;
+  margin: 14px 0; }
+.stat-card, .cards .card { margin: 0; }
+.stat-card .label, .cards .card .label { font-size: 12px; font-weight: 700;
+  color: var(--v-muted); text-transform: uppercase; letter-spacing: .05em; }
+.stat-card .value, .cards .card .value { font-size: 24px; font-weight: 800;
+  margin-top: 4px; font-variant-numeric: tabular-nums; }
+.biz-card { background: var(--v-card); border: 1px solid var(--v-line);
+  border-radius: var(--v-radius); padding: 16px; margin: 12px 0; }
+.biz-name { font-size: 18px; font-weight: 700; }
+.biz-sub { color: var(--v-muted); font-size: 14px; margin: 4px 0 8px; }
 .biz-nums { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
-.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
-  margin: 12px 0; background: #fff; }
 """
     # Portfolio color — the Live Ops visual language, not the plain
     # grey stat cards above (those stay exactly as they are: /report
@@ -528,34 +552,44 @@ def create_app(
     # the three stat cards, a per-business accent top border on the
     # business cards, same typography and spacing as Live Ops.
     _PORTFOLIO_CSS = """
+/* Portfolio: KPI cards + business cards in the platform palette.
+   The accent strip is the landing page's violet -> blue gradient. */
 .v-stats { display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 12px; margin: 16px 0; }
-@media (max-width: 560px) { .v-stats { grid-template-columns: 1fr; } }
-.v-stat { border-radius: 16px; padding: 18px; color: #fff;
-  box-shadow: 0 2px 10px rgba(109, 40, 217, 0.12); }
-.v-stat-1 { background: linear-gradient(135deg, #6d28d9, #8b5cf6); }
-.v-stat-2 { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
-.v-stat-3 { background: linear-gradient(135deg, #059669, #10b981); }
-.v-stat-label { display: block; font-size: 13px; text-transform: uppercase;
-  letter-spacing: 1px; opacity: .85; }
-.v-stat-value { display: block; font-size: 28px; font-weight: 900;
-  margin-top: 4px; }
+  gap: 14px; margin: 18px 0 10px; }
+@media (max-width: 640px) { .v-stats { grid-template-columns: 1fr; } }
+.v-stat { position: relative; overflow: hidden; border-radius: var(--v-radius);
+  padding: 20px 20px 18px; background: var(--v-card);
+  border: 1px solid var(--v-line); box-shadow: var(--v-shadow); }
+.v-stat::before { content: ""; position: absolute; inset: 0 0 auto 0;
+  height: 4px; }
+.v-stat-1 { background: linear-gradient(135deg, var(--v-navy), #2a1f5c);
+  border-color: transparent; color: #fff; }
+.v-stat-1 .v-stat-label { color: var(--v-violet-line); }
+.v-stat-2::before { background: linear-gradient(90deg, var(--v-violet), var(--v-blue)); }
+.v-stat-3::before { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.v-stat-label { display: block; font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--v-muted); }
+.v-stat-value { display: block; font-size: 30px; font-weight: 800;
+  margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .v-biz-grid { display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px; margin: 16px 0; }
-.v-biz { border-radius: 16px; padding: 18px; background: #fff;
-  border: 1px solid #e5e0f5; border-top: 6px solid #6d28d9;
-  box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
-.v-accent-0 { border-top-color: #6d28d9; }
-.v-accent-1 { border-top-color: #0ea5e9; }
-.v-accent-2 { border-top-color: #059669; }
-.v-accent-3 { border-top-color: #f59e0b; }
-.v-biz h3 { margin: 0 0 2px; font-size: 20px; color: #1a1a2e; }
-.v-biz-url { color: #666; margin: 0 0 10px; font-size: 14px; }
-.v-biz dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
-  margin: 0 0 12px; font-size: 15px; }
-.v-biz dt { color: #666; }
-.v-biz dd { margin: 0; font-weight: bold; text-align: right; }
+  gap: 14px; margin: 18px 0; }
+.v-biz { border-radius: var(--v-radius); padding: 18px 20px;
+  background: var(--v-card); border: 1px solid var(--v-line);
+  border-top: 4px solid var(--v-violet-deep); box-shadow: var(--v-shadow); }
+.v-accent-0 { border-top-color: var(--v-violet-deep); }
+.v-accent-1 { border-top-color: var(--v-blue); }
+.v-accent-2 { border-top-color: var(--v-violet); }
+.v-accent-3 { border-top-color: var(--v-navy); }
+.v-biz h3 { margin: 0 0 4px; font-size: 18px; }
+.v-biz-url { color: var(--v-muted); margin: 0 0 12px; font-size: 13px; }
+.v-biz-url .pill { text-decoration: none; margin-left: 4px; }
+.v-biz dl { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px;
+  margin: 0; font-size: 14px; padding-top: 12px;
+  border-top: 1px solid var(--v-line); }
+.v-biz dt { color: var(--v-muted); }
+.v-biz dd { margin: 0; font-weight: 700; text-align: right;
+  font-variant-numeric: tabular-nums; }
 """
     # Admin look — a blend of the Kay Ayiti and ShipItAyiti admin
     # boards: Kay Ayiti's light board (pale blue-grey background,
@@ -564,26 +598,27 @@ def create_app(
     # Kay Ayiti / ShipItAyiti boards: counts and tables only, never
     # a customer's portfolio or approvals.
     _REPORT_CSS = """
-/* Customer Acquisition & Attribution report (reference image 3):
-   progress ring, status donut, flow steps, trend chart. All SVG is
-   hand-built; every figure comes from real store data. */
+/* Customer Acquisition & Attribution report: progress ring, status
+   donut, flow steps, trend chart. All SVG is hand-built; every
+   figure comes from real store data. Base cards/buttons/forms come
+   from dashboard/ui.py. */
 .v-report-grid { display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 16px; margin: 16px 0; }
 .v-report-grid .card { margin: 0; }
 .v-progress { text-align: center; }
-.v-bar-track { height: 12px; background: #e9e4fb; border-radius: 999px;
-  overflow: hidden; margin: 12px 0; }
-.v-bar-fill { height: 100%; background: linear-gradient(90deg, #8b5cf6,
-  #6d28d9); border-radius: 999px; }
+.v-bar-track { height: 12px; background: var(--v-violet-soft);
+  border-radius: 999px; overflow: hidden; margin: 12px 0; }
+.v-bar-fill { height: 100%; background: linear-gradient(90deg,
+  var(--v-violet), var(--v-violet-deep)); border-radius: 999px; }
 .v-flow { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch;
   margin: 12px 0; }
-.v-flow-step { flex: 1 1 140px; border: 1px solid #e5e0f5;
-  border-radius: 10px; padding: 10px 12px; background: #faf8ff; }
-.v-flow-step.done { border-color: #16a34a; background: #f0fdf4; }
+.v-flow-step { flex: 1 1 140px; border: 1px solid var(--v-line);
+  border-radius: 10px; padding: 10px 12px; background: #faf9fe; }
+.v-flow-step.done { border-color: #86efac; background: var(--v-green-soft); }
 .v-flow-step strong { display: block; font-size: 14px; }
-.v-flow-step span { font-size: 13px; color: #666; }
-.v-flow-check { font-weight: bold; color: #16a34a; }
-.v-flow-arrow { align-self: center; color: #6d28d9; font-weight: bold; }
+.v-flow-step span { font-size: 13px; color: var(--v-muted); }
+.v-flow-check { font-weight: bold; color: var(--v-green); }
+.v-flow-arrow { align-self: center; color: var(--v-violet-deep); font-weight: bold; }
 .v-donut-wrap { display: flex; gap: 16px; align-items: center;
   flex-wrap: wrap; }
 .v-legend { list-style: none; padding: 0; margin: 0; }
@@ -594,68 +629,47 @@ def create_app(
 .v-bbar { display: flex; align-items: center; gap: 8px; margin: 8px 0;
   font-size: 14px; }
 .v-bbar-label { flex: 0 0 110px; }
-.v-bbar-track { flex: 1; height: 14px; background: #f3f4f6;
+.v-bbar-track { flex: 1; height: 14px; background: #f1f0f7;
   border-radius: 999px; overflow: hidden; }
 .v-bbar-fill { display: block; height: 100%; border-radius: 999px; }
 .v-bbar-num { flex: 0 0 32px; text-align: right; font-weight: bold; }
-.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
-  margin: 12px 0; background: #fff; }
-.card h2, .card h3 { margin-top: 0; }
-.big { font-size: 32px; font-weight: bold; color: #6d28d9; }
-.btn { display: inline-block; min-height: 44px; line-height: 44px;
-  padding: 0 20px; margin: 4px 4px 4px 0; border-radius: 8px;
-  border: 1px solid #ccc; background: #fff; color: #222; font-size: 16px;
-  cursor: pointer; text-decoration: none; text-align: center;
-  box-sizing: border-box; }
-.pill { display: inline-block; font-size: 12px; font-weight: bold;
-  border-radius: 999px; padding: 3px 10px; background: #ede9fe;
-  color: #6d28d9; white-space: nowrap; }
-.pill.green { background: #dcfce7; color: #166534; }
-.card form label { display: block; margin: 12px 0 4px; font-weight: bold; }
-.card form input[type=text] { width: 100%; min-height: 44px;
-  padding: 8px 10px; font-size: 16px; border: 1px solid #ccc;
-  border-radius: 8px; box-sizing: border-box; }
-@media (max-width: 560px) {
+.card form label { display: block; margin: 12px 0 4px; font-weight: 600; }
+@media (max-width: 640px) {
   .v-report-grid { grid-template-columns: 1fr; }
 }
 """
 
     _ADMIN_CSS = """
-body.v-admin { background: #f1f5f9; }
-.v-admin .v-title { color: #0f172a; }
-.v-admin-card { background: #fff; border: 1px solid #e2e8f0;
-  border-radius: 16px; padding: 18px; margin: 14px 0;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }
-.v-admin-card h2 { margin: 0 0 10px; color: #0f172a; font-size: 20px; }
-.v-admin-card h2 .v-count { color: #dc2626; }
+/* Admin board: same platform palette as every other page. */
+.v-admin-card { background: var(--v-card); border: 1px solid var(--v-line);
+  border-radius: var(--v-radius); padding: 18px 20px; margin: 14px 0;
+  box-shadow: var(--v-shadow); }
+.v-admin-card h2 { margin: 0 0 10px; font-size: 18px; }
+.v-admin-card h2 .v-count { color: var(--v-violet-deep); }
 .v-admin-card .v-live-dot { display: inline-block; width: 9px; height: 9px;
-  border-radius: 50%; background: #16a34a; margin-right: 6px; }
-.v-admin-card th { background: #f8fafc; color: #0f172a;
-  border-bottom: 2px solid #0f172a; font-size: 13px;
-  text-transform: uppercase; letter-spacing: .5px; }
-.v-admin-card td { border-bottom: 1px solid #e2e8f0; }
-.v-admin .v-error { color: #dc2626; font-weight: bold; }
-.v-auth-card { max-width: 420px; margin: 60px auto; background: #fff;
-  border: 1px solid #e2e8f0; border-radius: 20px; padding: 28px;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08); }
-.v-auth-card h1 { margin-top: 0; color: #0f172a; }
-.v-auth-card label { display: block; margin: 12px 0 4px; font-weight: bold; }
-.v-auth-card input[type=password] { width: 100%; min-height: 52px;
-  padding: 8px 14px; font-size: 18px; border: 2px solid #c4b5fd;
-  border-radius: 10px; box-sizing: border-box; background: #fff; }
-.v-auth-card input[type=text] { width: 100%; min-height: 52px;
-  padding: 8px 14px; font-size: 18px; border: 2px solid #c4b5fd;
-  border-radius: 10px; box-sizing: border-box; background: #fff; }
-.v-admin-card .qr { background: #fff; border: 1px solid #e2e8f0;
+  border-radius: 50%; background: #16a34a; margin-right: 6px;
+  box-shadow: 0 0 0 3px var(--v-green-soft); }
+.v-admin-card table { margin: 6px 0 4px; }
+.v-admin .v-error { color: var(--v-red); font-weight: 700; }
+.v-auth-card { max-width: 420px; margin: 56px auto; background: var(--v-card);
+  border: 1px solid var(--v-line); border-radius: 18px; padding: 28px;
+  box-shadow: 0 10px 40px rgba(11, 14, 30, .10); }
+.v-auth-brand { font-size: 20px; font-weight: 800; color: var(--v-navy);
+  margin-bottom: 8px; }
+.v-auth-brand::after { content: "."; color: var(--v-violet); }
+.v-auth-card h1 { margin: 0 0 6px; font-size: 22px; }
+.v-auth-card input[type=password], .v-auth-card input[type=text] {
+  min-height: 48px; font-size: 17px; }
+.v-auth-card button { width: 100%; margin-top: 16px; }
+.v-admin-card .qr { background: #fff; border: 1px solid var(--v-line);
   border-radius: 12px; padding: 12px; display: inline-block;
   margin: 12px 0; }
-.v-admin-card .codes { font-family: monospace; font-size: 17px;
-  line-height: 1.9; background: #fafafa; border: 1px solid #e2e8f0;
-  border-radius: 8px; padding: 12px 16px; }
-.v-auth-card input[type=password]:focus { outline: none;
-  border-color: #6d28d9; }
-.v-admin-foot { text-align: center; margin: 24px 0 8px; font-size: 14px; }
-.v-admin-foot a { color: #64748b; }
+.v-admin-card .codes { font-family: ui-monospace, Consolas, monospace;
+  font-size: 17px; line-height: 1.9; background: #faf9fe;
+  border: 1px solid var(--v-line); border-radius: 10px; padding: 12px 16px; }
+.v-admin-foot { text-align: center; margin: 28px 0 8px; font-size: 14px;
+  color: var(--v-muted); }
+.v-admin-foot a { color: var(--v-muted); }
 """
 
     def _operator_page(title: str, inner: str, account=None,
@@ -665,12 +679,9 @@ body.v-admin { background: #f1f5f9; }
         """Shell for the signed-in pages: the shared centered header
         (brand + page title + hamburger menu) + content, mobile-first,
         the same light styling as the Live Ops page."""
-        return (f"<html><head><title>{esc(title)} — Ventoryn</title>"
-                f"<meta name='viewport' content='width=device-width,"
-                f" initial-scale=1'><style>{_PAGE_CSS}{HEADER_CSS}"
-                f"{extra_css}</style>"
-                f"</head><body>{header_html(current, is_operator, title)}"
-                f"{inner}</body></html>")
+        return ui.page(title, inner,
+                       header=header_html(current, is_operator, title),
+                       extra_css=extra_css)
 
     # -- public landing page ----------------------------------------------
     # GET / is the front door: what Ventoryn is, the URL box + free
@@ -890,7 +901,7 @@ section.alt { background: var(--bg-tint); }
   grid-template-columns: repeat(5, 1fr); gap: 16px; }
 .steps li { background: #fff; border: 1px solid var(--line); border-radius: 14px;
   padding: 18px 16px; position: relative; }
-.steps li:not(:last-child)::after { content: "\2192"; position: absolute;
+.steps li:not(:last-child)::after { content: "\\2192"; position: absolute;
   right: -14px; top: 50%; transform: translateY(-50%); color: var(--violet-deep);
   font-weight: bold; font-size: 18px; z-index: 1; }
 .step-icon { display: block; margin-bottom: 10px; }
@@ -1565,24 +1576,11 @@ if (demoToggle && demoValue) {{
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
-        led: Ledger = state["ledger"]
-        if _saas_config.is_operator(account["email"]):
-            biz_rows = []
-            for b in state["registry"].list():
-                pnl = led.pnl(b.id)
-                biz_rows.append({
-                    "id": b.id, "name": b.name,
-                    "business_type": b.business_type,
-                    "status": b.status.value,
-                    "revenue": round(pnl.revenue, 2),
-                    "total_costs": round(pnl.total_costs, 2),
-                    "net_profit": round(pnl.net_profit, 2),
-                })
-            biz_rows += _site_business_rows(account)
-        else:
-            biz_rows = _site_business_rows(account)
+        biz_rows = ([_biz_row(b) for b in _visible_businesses(account)]
+                    + _site_business_rows(account))
+
         def _money(value):
-            return "hidden" if value is None else f"${value:,.2f}"
+            return "hidden" if value is None else money(value)
         any_hidden = any(r["revenue"] is None for r in biz_rows)
         total_revenue = sum(r["revenue"] for r in biz_rows
                             if r["revenue"] is not None)
@@ -1592,9 +1590,12 @@ if (demoToggle && demoValue) {{
             f"<article class='v-biz v-accent-{i % 4}'>"
             f"<h3>{esc(r['name'])}</h3>"
             f"<p class='v-biz-url'>{esc(r['business_type'])} · "
-            f"{esc(r['status'])}</p>"
+            f"{esc(r['status'])}"
+            + (" · <a class='pill' href='/businesses'>Unclaimed — claim"
+               "</a>" if r.get("owner_email", "x") is None else "")
+            + f"</p>"
             f"<dl><dt>Revenue</dt><dd>{_money(r['revenue'])}</dd>"
-            f"<dt>Costs</dt><dd>${r['total_costs']:,.2f}</dd>"
+            f"<dt>Costs</dt><dd>{money(r['total_costs'])}</dd>"
             f"<dt>Net profit</dt><dd>{_money(r['net_profit'])}</dd></dl>"
             f"</article>"
             for i, r in enumerate(biz_rows)) or (
@@ -1624,46 +1625,83 @@ sum of recorded paying customers per site.</p>{hidden_note}
 
     @app.get("/businesses", response_class=HTMLResponse)
     def business_list(request: Request):
-        _, redirect = _need_operator(request)
+        account, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
-        reg: BusinessRegistry = state["registry"]
         led: Ledger = state["ledger"]
-        businesses = reg.list()
+        businesses = _visible_businesses(account)
+
+        def _owner_cell(b) -> str:
+            if b.owner_email:
+                return "<span class='pill green'>Yours</span>"
+            return (f"<form method='post' action='/businesses/"
+                    f"{esc(b.id)}/claim' style='margin:0'>"
+                    f"<button type='submit' class='primary'>Claim</button>"
+                    f"</form>")
         rows = "".join(
             f"<tr><td><a href='/businesses/{esc(b.id)}'>{esc(b.name)}</a></td>"
-            f"<td>{esc(b.business_type)}</td><td>{esc(b.status.value)}</td>"
-            f"<td>${led.pnl(b.id).net_profit:,.2f}</td></tr>"
+            f"<td>{esc(b.business_type)}</td>"
+            f"<td><span class='pill'>{esc(b.status.value)}</span></td>"
+            f"<td class='num'>{money(led.pnl(b.id).net_profit)}</td>"
+            f"<td>{_owner_cell(b)}</td></tr>"
             for b in businesses
-        )
-        return f"""<html><head><title>Businesses</title></head><body>
-<h1>Businesses ({len(businesses)})</h1>
-<table border="1"><tr><th>Name</th><th>Type</th><th>Status</th><th>Net profit</th></tr>{rows}</table>
-<p><a href="/portfolio">My Portfolio</a></p>
-</body></html>"""
+        ) or "<tr><td colspan='5' class='muted'>No businesses yet.</td></tr>"
+        unclaimed = sum(1 for b in businesses if not b.owner_email)
+        note = (f"<div class='v-notice v-notice-warn'>{unclaimed} "
+                f"unclaimed — claim them to manage them from your "
+                f"account ({esc(account['email'])}). Only the owning "
+                f"account sees a business, its approvals and its "
+                f"data.</div>" if unclaimed else "")
+        inner = f"""{note}<div class="table-wrap"><table>
+<tr><th>Name</th><th>Type</th><th>Status</th><th class="num">Net profit</th><th>Owner</th></tr>{rows}</table></div>
+<a class="v-back" href="/portfolio">&larr; My Portfolio</a>"""
+        return _operator_page(f"Businesses ({len(businesses)})", inner,
+                              current=None, is_operator=True)
+
+    @app.post("/businesses/{business_id}/claim")
+    def business_claim(request: Request, business_id: str):
+        """Bind an unclaimed business to the signed-in operator's own
+        account. A business that already has an owner cannot be
+        claimed (or re-claimed) here."""
+        account, redirect = _need_operator(request)
+        if redirect is not None:
+            return redirect
+        biz = state["registry"].get(business_id)
+        if biz is None or biz.owner_email:
+            raise HTTPException(404, "business not found")
+        state["registry"].assign_owner(business_id, account["email"])
+        state["audit"].record(
+            agent_type="owner", event="business_claimed",
+            business_id=business_id,
+            result={"owner_email": account["email"].strip().lower()})
+        return RedirectResponse("/businesses", status_code=303)
 
     @app.get("/businesses/{business_id}", response_class=HTMLResponse)
     def business_detail(request: Request, business_id: str):
-        _, redirect = _need_operator(request)
+        account, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
         reg: BusinessRegistry = state["registry"]
         led: Ledger = state["ledger"]
         aud: AuditLog = state["audit"]
         biz = reg.get(business_id)
-        if biz is None:
+        if biz is None or business_id not in _owned_business_ids(account):
             raise HTTPException(404, "business not found")
         pnl = led.pnl(business_id)
         events = aud.for_business(business_id)
-        return f"""<html><head><title>{esc(biz.name)}</title></head><body>
-<h1>{esc(biz.name)}</h1>
-<p>Type: {esc(biz.business_type)} | Status: {esc(biz.status.value)}</p>
-<h2>P&L</h2>
-<p>Revenue: ${pnl.revenue:,.2f} | Costs: ${pnl.total_costs:,.2f} |
-Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
-<h2>Audit events ({len(events)})</h2>
-<p><a href="/portfolio">My Portfolio</a></p>
-</body></html>"""
+        net_cls = "pos" if pnl.net_profit >= 0 else "neg"
+        inner = f"""<p class="muted">{esc(biz.business_type)} ·
+<span class="pill">{esc(biz.status.value)}</span></p>
+<div class="v-kpis">
+<div class="v-kpi"><span class="label">Revenue</span><span class="value">{money(pnl.revenue)}</span></div>
+<div class="v-kpi"><span class="label">Costs</span><span class="value">{money(pnl.total_costs)}</span></div>
+<div class="v-kpi"><span class="label">Net profit</span><span class="value {net_cls}">{money(pnl.net_profit)}</span></div>
+<div class="v-kpi"><span class="label">Net margin</span><span class="value">{pnl.net_margin:.1%}</span></div>
+</div>
+<p class="muted">P&amp;L · {len(events)} audit events</p>
+<a class="v-back" href="/businesses">&larr; All businesses</a>"""
+        return _operator_page(biz.name, inner, current=None,
+                              is_operator=True)
 
     @app.get("/experiments", response_class=HTMLResponse)
     def experiment_list(request: Request):
@@ -1672,13 +1710,16 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
             return redirect
         exp: ExperimentEngine = state["experiments"]
         rows = "".join(
-            f"<tr><td>{esc(e.id)}</td><td>{esc(e.business_id)}</td>"
-            f"<td>{esc(e.status.value)}</td><td>{esc(e.recommendation or '-')}</td></tr>"
+            f"<tr><td><code>{esc(e.id)}</code></td><td>{esc(e.business_id)}</td>"
+            f"<td><span class='pill'>{esc(e.status.value)}</span></td>"
+            f"<td>{esc(e.recommendation or '—')}</td></tr>"
             for e in exp._experiments.values()
-        )
-        return f"""<html><body><h1>Experiments</h1>
-<table border="1"><tr><th>ID</th><th>Business</th><th>Status</th><th>Recommendation</th></tr>
-{rows}</table><p><a href="/ops">Live Ops</a></p></body></html>"""
+        ) or "<tr><td colspan='4' class='muted'>No experiments yet.</td></tr>"
+        inner = f"""<div class="table-wrap"><table>
+<tr><th>ID</th><th>Business</th><th>Status</th><th>Recommendation</th></tr>
+{rows}</table></div><a class="v-back" href="/ops">&larr; Live Ops</a>"""
+        return _operator_page("Experiments", inner, current=None,
+                              is_operator=True)
 
     @app.get("/approvals", response_class=HTMLResponse)
     def approval_queue(request: Request, decided: str = ""):
@@ -1695,9 +1736,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
         owned = _owned_business_ids(account)
 
         def _sees(a) -> bool:
-            if _saas_config.is_operator(account["email"]):
-                return True
-            return a.business_id in owned
+            return _approval_visible(account, a, owned)
         pending = [a for a in gate.pending() if _sees(a)]
         decided_list = [a for a in gate.decided(20) if _sees(a)]
         pend_rows = "".join(
@@ -1730,14 +1769,11 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
                                                           "rejected"):
                 verb = ("Approved" if item.status.value == "approved"
                         else "Rejected")
-                color = ("#e6f4ea; border-color: #34a853" if
-                         item.status.value == "approved" else
-                         "#fce8e6; border-color: #ea4335")
+                kind = ("ok" if item.status.value == "approved"
+                        else "bad")
                 banner = (
-                    f"<div style='background: {color}; border: 1px solid;"
-                    f" border-radius: 10px; padding: 12px 16px;"
-                    f" margin: 12px 0; font-weight: bold;'>{verb} — "
-                    f"nothing ships without your say-so.</div>")
+                    f"<div class='v-notice v-notice-{kind}' role='status'>"
+                    f"{verb} — nothing ships without your say-so.</div>")
         inner = f"""{banner}<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p>
 <h2>Pending ({len(pending)})</h2>
 <div class="table-wrap"><table>
@@ -1746,7 +1782,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
 <div class="table-wrap"><table>
 <tr><th>Request</th><th>Decision</th><th>Decided</th><th>By</th></tr>{dec_rows}</table></div>"""
         return _operator_page(
-            "✅ Approvals", inner, account=account, current="approvals",
+            "Approvals", inner, account=account, current="approvals",
             is_operator=_saas_config.is_operator(account["email"]))
 
     @app.post("/approvals/{approval_id}/decide")
@@ -1765,12 +1801,10 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
                           if a.id == approval_id)
         except StopIteration:
             target = None
-        if target is not None and not (
-                _saas_config.is_operator(account["email"]) or
-                target.business_id in _owned_business_ids(account)):
+        if target is not None and not _approval_visible(account, target):
             return HTMLResponse(
                 _operator_page(
-                    "✅ Approvals",
+                    "Approvals",
                     "<p>This approval is not yours to decide.</p>"
                     "<p><a href='/approvals'>Back</a></p>",
                     account=account, current="approvals",
@@ -1782,7 +1816,7 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
         except ValueError as exc:
             return HTMLResponse(
                 _operator_page(
-                    "✅ Approvals",
+                    "Approvals",
                     f"<p>Could not record decision: {esc(exc)}</p>"
                     "<p><a href='/approvals'>Back</a></p>",
                     account=account, current="approvals",
@@ -1807,22 +1841,19 @@ Net: ${pnl.net_profit:,.2f} | Net margin: {pnl.net_margin:.1%}</p>
             f"<tr><td><a href='/reports/{esc(r['name'])}'>{esc(r['title'])}</a></td>"
             f"<td>{esc(r['mission'])}</td>"
             f"<td>{esc(r['date'] or r['generated_at'] or '—')}</td>"
-            f"<td>{('$%.4f' % r['spend_usd']) if r['spend_usd'] is not None else '—'}</td></tr>"
+            f"<td class='num'>{('$%.4f' % r['spend_usd']) if r['spend_usd'] is not None else '—'}</td></tr>"
             for r in items
         ) or ("<tr><td colspan='4'>No mission reports yet. Run a mission "
                 "(e.g. <code>python3 ecosystem/marketing_mission.py --llm</code>) "
                 "to produce one.</td></tr>")
-        return f"""<html><head><title>Mission reports</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>{_PAGE_CSS}</style></head><body>
-<h1>📄 Mission reports</h1>
-<p class="muted">Agent mission outputs, newest first. Reports are drafts —
+        inner = f"""<p class="muted">Agent mission outputs, newest first. Reports are drafts —
 nothing in them was published.</p>
 <div class="table-wrap"><table>
-<tr><th>Report</th><th>Mission</th><th>Date</th><th>AI spend</th></tr>
+<tr><th>Report</th><th>Mission</th><th>Date</th><th class="num">AI spend</th></tr>
 {rows}</table></div>
-<p><a href="/approvals">✅ Approvals</a></p>
-</body></html>"""
+<a class="v-back" href="/approvals">Go to Approvals &rarr;</a>"""
+        return _operator_page("Mission reports", inner, current=None,
+                              is_operator=True)
 
     @app.get("/reports/{name}", response_class=HTMLResponse)
     def report_view(request: Request, name: str):
@@ -1836,12 +1867,10 @@ nothing in them was published.</p>
         if result is None:
             raise HTTPException(404, "report not found")
         title, body = result
-        return f"""<html><head><title>{esc(title)}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>{_PAGE_CSS}</style></head><body>
-{body}
-<p><a href="/reports">Back to reports</a></p>
-</body></html>"""
+        return ui.page(title, f"""<article class="card v-doc">{body}</article>
+<a class="v-back" href="/reports">&larr; Back to reports</a>""",
+                       header=header_html(None, True, ""),
+                       extra_css=ui.DOC_CSS)
 
     @app.get("/experiment-001", response_class=HTMLResponse)
     def experiment_001(request: Request):
@@ -1857,27 +1886,29 @@ nothing in them was published.</p>
 
             snapshot = check_experiment_001()
         except EtsyCredentialsError as exc:
-            return (
-                f"<html><body><h1>Experiment 001</h1>"
-                f"<p>Etsy not configured: {esc(exc)}</p>"
-                f"<p><a href='/ops'>Live Ops</a></p></body></html>"
-            )
+            return _operator_page(
+                "Experiment 001",
+                f"<div class='v-notice v-notice-warn'>Etsy is not "
+                f"configured on this server.</div>"
+                f"<p class='muted'>{esc(exc)}</p>"
+                f"<a class='v-back' href='/ops'>&larr; Live Ops</a>",
+                current=None, is_operator=True)
         except Exception as exc:  # noqa: BLE001 - dashboard must stay up
-            return (
-                f"<html><body><h1>Experiment 001</h1>"
-                f"<p>Monitor error: {esc(exc)}</p>"
-                f"<p><a href='/ops'>Live Ops</a></p></body></html>"
-            )
+            return _operator_page(
+                "Experiment 001",
+                f"<div class='v-notice v-notice-bad'>Monitor error: "
+                f"{esc(exc)}</div>"
+                f"<a class='v-back' href='/ops'>&larr; Live Ops</a>",
+                current=None, is_operator=True)
         triggers = "".join(
             f"<li>{esc(t)}</li>" for t in snapshot["stop_loss_triggers"]
         ) or "<li>none</li>"
-        color = {"ON_TRACK": "green", "BEHIND": "orange",
-                 "STOP_LOSS": "red"}[snapshot["verdict"]]
-        return f"""<html><body><h1>Experiment 001 — Evergreen Planners</h1>
-<p>Checked: {esc(snapshot["checked_at"])}</p>
-<p>Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
-<h2 style="color:{color}">{snapshot["verdict"]}</h2>
-<table border="1">
+        kind = {"ON_TRACK": "ok", "BEHIND": "warn",
+                "STOP_LOSS": "bad"}[snapshot["verdict"]]
+        inner = f"""<p class="muted">Checked {esc(snapshot["checked_at"])} ·
+Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
+<div class="v-notice v-notice-{kind}">{snapshot["verdict"]}</div>
+<div class="table-wrap"><table>
 <tr><th>Metric</th><th>Actual</th><th>Target</th></tr>
 <tr><td>Revenue</td><td>${snapshot["revenue_usd"]:,.2f}</td>
     <td>${snapshot["target_revenue_usd"]:,.2f}</td></tr>
@@ -1887,12 +1918,14 @@ nothing in them was published.</p>
 <tr><td>Spend</td><td>${snapshot["spend_usd"]:,.2f}</td><td>$91.00</td></tr>
 <tr><td>Contribution margin</td><td>${snapshot["contribution_margin_usd"]:,.2f}</td><td>&gt; $0</td></tr>
 <tr><td>Pace vs target</td><td>{snapshot["pace_pct"]}%</td><td>100%</td></tr>
-</table>
+</table></div>
 <h2>Stop-loss triggers</h2>
 <ul>{triggers}</ul>
 <h2>Weekly revenue (last 3 weeks)</h2>
-<p>{", ".join(f"${w:,.2f}" for w in snapshot["weekly_revenue_usd"])}</p>
-<p><a href="/ops">Live Ops</a></p></body></html>"""
+<p>{", ".join(money(w) for w in snapshot["weekly_revenue_usd"])}</p>
+<a class="v-back" href="/ops">&larr; Live Ops</a>"""
+        return _operator_page("Experiment 001 — Evergreen Planners", inner,
+                              current=None, is_operator=True)
 
     # -- Live Ops API (powers the /ops live view; /game is the old address) ---
     # All state transitions go through the real runtime components; these
@@ -1925,6 +1958,13 @@ nothing in them was published.</p>
                 "live-ops",
                 _saas_config.is_operator(account["email"]), "")
             text = text.replace("<!--VENTORYN_HEADER-->", header)
+            # The platform tokens + app bar styles, so Live Ops wears
+            # the same navy/violet as the landing page and every
+            # other page (one source: dashboard/ui.py + nav.py).
+            text = text.replace(
+                "</head>",
+                f"<meta name='theme-color' content='#0b0e1e'>"
+                f"<style>{ui.TOKENS_CSS}{HEADER_CSS}</style></head>", 1)
             # The market-country selector: every ISO country, ca
             # selected by default (core.countries.country_options).
             text = text.replace("<!--VENTORYN_COUNTRY_OPTIONS-->",
@@ -1967,18 +2007,13 @@ nothing in them was published.</p>
         operator = account is None or _saas_config.is_operator(
             account["email"])
         if operator:
-            businesses = reg.list()
-            biz_rows = []
-            for b in businesses:
-                pnl = led.pnl(b.id)
-                biz_rows.append({
-                    "id": b.id, "name": b.name,
-                    "business_type": b.business_type,
-                    "status": b.status.value,
-                    "revenue": round(pnl.revenue, 2),
-                    "total_costs": round(pnl.total_costs, 2),
-                    "net_profit": round(pnl.net_profit, 2),
-                })
+            # Tick/reset internals (account None) see the whole
+            # runtime; a signed-in operator sees the businesses their
+            # account owns plus unclaimed ones — never another
+            # account's.
+            businesses = (reg.list() if account is None
+                          else _visible_businesses(account))
+            biz_rows = [_biz_row(b) for b in businesses]
             if account is not None:
                 # The operator's own SaaS sites ride along with his
                 # businesses — his account sees everything of his.
@@ -2100,8 +2135,23 @@ nothing in them was published.</p>
             } if exp else None,
         })
 
+    def _growth_api_gate(request: Request):
+        """The Road to CISSP growth APIs expose that business's data:
+        only the account that manages it may read them. Returns a
+        JSONResponse to send back, or None when allowed."""
+        from ecosystem.road2cissp_growth import BUSINESS_NAME
+
+        account = _current_account(request)
+        if account is None:
+            return JSONResponse({"detail": "sign-in required"},
+                                status_code=401)
+        if not any(b.name == BUSINESS_NAME
+                   for b in _visible_businesses(account)):
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        return None
+
     @app.get("/api/daily-plan")
-    def api_daily_plan():
+    def api_daily_plan(request: Request):
         """Today's ordered marketing moves for Road to CISSP, as JSON.
 
         Pure read + build from the growth state file — no agent is
@@ -2111,6 +2161,9 @@ nothing in them was published.</p>
         Building the plan here does not persist it; the CLI
         (``daily-plan``) records it so tomorrow can carry items over.
         """
+        denied = _growth_api_gate(request)
+        if denied is not None:
+            return denied
         from ecosystem import daily_plan
         from ecosystem.road2cissp_growth import (
             CADENCE, RETRY_AFTER, default_state_path, load_state,
@@ -2128,7 +2181,7 @@ nothing in them was published.</p>
         return JSONResponse(plan)
 
     @app.get("/api/attribution")
-    def api_attribution():
+    def api_attribution(request: Request):
         """Per-channel funnel attribution for Road to CISSP, as JSON.
 
         Pure read from the growth state file (same file the daily
@@ -2138,6 +2191,9 @@ nothing in them was published.</p>
         dispatched, no money spent. The CLI (``attribution``) is the
         one that fetches fresh Plausible data and writes the report.
         """
+        denied = _growth_api_gate(request)
+        if denied is not None:
+            return denied
         from core.attribution import build_attribution
         from ecosystem.road2cissp_growth import (
             default_state_path, load_state,
@@ -2225,7 +2281,7 @@ nothing in them was published.</p>
             "net_profit": snap["totals"]["net_profit"],
         }
         def _money(value):
-            return "hidden" if value is None else f"${value:,.2f}"
+            return "hidden" if value is None else money(value)
 
         if not _saas_config.is_operator(account["email"]):
             # Acquisition & Attribution (reference image 3): the
@@ -2581,33 +2637,22 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
         )
         # Net profit is None when any site's revenue is hidden — the
         # card reads "hidden" and the color stays neutral.
-        net_color = ("#666" if fin["net_profit"] is None else
-                     "green" if fin["net_profit"] >= 0 else "red")
-        return f"""<html><head><title>Agent &amp; Financial Report</title>
+        net_color = ("var(--v-muted)" if fin["net_profit"] is None else
+                     "var(--v-green)" if fin["net_profit"] >= 0 else
+                     "var(--v-red)")
+        return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>Agent &amp; Financial Report — Ventoryn</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body {{ font-family: sans-serif; margin: 0 auto; max-width: 960px;
-       padding: 16px; color: #222; }}
-.cards {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }}
-.card {{ flex: 1 1 140px; border: 1px solid #ddd; border-radius: 8px;
-        padding: 12px; background: #fafafa; }}
-.card .label {{ font-size: 12px; color: #666; text-transform: uppercase; }}
-.card .value {{ font-size: 22px; font-weight: bold; margin-top: 4px; }}
-.table-wrap {{ overflow-x: auto; }}
-table {{ border-collapse: collapse; width: 100%; margin: 8px 0 20px; }}
-th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left;
-         font-size: 14px; }}
-th {{ background: #f0f0f0; }}
-@media (max-width: 560px) {{ th, td {{ font-size: 13px; padding: 6px; }} }}
-</style><style>{_NAV_CSS}</style></head><body>{_CUSTOMER_NAV}
-<h1>📊 Agent &amp; Financial Report</h1>
+<meta name="theme-color" content="#0b0e1e">
+<style>{ui.BASE_CSS}{_NAV_CSS}</style></head><body>{_CUSTOMER_NAV}<main class="v-main">
+<h1>Agent &amp; Financial Report</h1>
 <p>Generated: {esc(utcnow().isoformat())} · Tick: {snap["tick"]}</p>
 <h2>Financials</h2>
 <div class="cards">
 <div class="card"><div class="label">Revenue</div>
 <div class="value">{_money(fin["revenue"])}</div></div>
 <div class="card"><div class="label">Total costs</div>
-<div class="value">${fin["total_costs"]:,.2f}</div></div>
+<div class="value">{money(fin["total_costs"])}</div></div>
 <div class="card"><div class="label">Net profit</div>
 <div class="value" style="color:{net_color}">{_money(fin["net_profit"])}</div></div>
 </div>
@@ -2620,7 +2665,7 @@ th {{ background: #f0f0f0; }}
 <tr><th>Name</th><th>Type</th><th>Status</th><th>Revenue</th><th>Costs</th>
 <th>Net profit</th></tr>{biz_rows}</table></div>
 {exp_block}
-</body></html>"""
+</main></body></html>"""
 
     @app.post("/api/tick")
     def api_tick(request: Request):
@@ -2676,7 +2721,7 @@ th {{ background: #f0f0f0; }}
     # Holds the live Runtime so /api/tick and /api/reset share it with the
     # dashboard. ecosystem.runtime.create_dashboard_app stashes the real one;
     # direct create_app() usage falls back to a fresh runtime here.
-    if not getattr(app.state, "runtime_holder", None):
+    if not app.state.runtime_holder:
         from ecosystem.runtime import build_runtime as _br
 
         app.state.runtime_holder = {"rt": _br(
@@ -2718,25 +2763,20 @@ th {{ background: #f0f0f0; }}
         """Admin shell: the shared centered header (operator menu,
         with the Admin group) + the admin board look — Kay Ayiti's
         light board blended with ShipItAyiti's slate/navy headers."""
-        return (f"<html><head><title>{esc(title)} — Ventoryn admin</title>"
-                f"<meta name='viewport' content='width=device-width,"
-                f" initial-scale=1'><style>{_PAGE_CSS}{HEADER_CSS}"
-                f"{_ADMIN_CSS}</style>"
-                f"</head><body class='v-admin'>"
-                f"{header_html(current, True, title)}{inner}"
-                f"<p class='v-admin-foot'>Signed in as admin · "
-                f"<a href='/admin/logout'>Admin sign out</a></p>"
-                f"</body></html>")
+        return ui.page(f"{title} (admin)", inner +
+                       "<p class='v-admin-foot'>Signed in as admin · "
+                       "<a href='/admin/logout'>Admin sign out</a></p>",
+                       header=header_html(current, True, title),
+                       extra_css=_ADMIN_CSS, body_class="v-admin")
 
     def _admin_auth_page(title: str, inner: str) -> str:
         """Password-only login page: no header, no menu, no Google
         button — just the password field."""
-        return (f"<html><head><title>{esc(title)} — Ventoryn admin</title>"
-                f"<meta name='viewport' content='width=device-width,"
-                f" initial-scale=1'><style>{_PAGE_CSS}{_ADMIN_CSS}</style>"
-                f"</head><body class='v-admin'>"
-                f"<div class='v-auth-card'><h1>{esc(title)}</h1>"
-                f"{inner}</div></body></html>")
+        return ui.page(f"{title} (admin)",
+                       f"<div class='v-auth-card'>"
+                       f"<div class='v-auth-brand'>Ventoryn</div>"
+                       f"<h1>{esc(title)}</h1>{inner}</div>",
+                       extra_css=_ADMIN_CSS, body_class="v-admin")
 
     @app.get("/admin/login", response_class=HTMLResponse)
     def admin_login_page(request: Request, error: str = ""):
@@ -3173,4 +3213,11 @@ th {{ background: #f0f0f0; }}
     return app
 
 
-app = create_app()
+
+def __getattr__(name: str):
+    """`uvicorn dashboard.app:app` still works, but importing this module
+    no longer builds a whole runtime as a side effect."""
+    if name == "app":
+        globals()["app"] = create_app()
+        return globals()["app"]
+    raise AttributeError(name)

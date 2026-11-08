@@ -333,6 +333,6 @@ def test_live_ops_is_ventoryn_and_mobile_friendly():
     root = Path(__file__).resolve().parent.parent
     doc = root / "docs" / "ventoryn-live-ops.md"
     assert doc.exists()
-    assert doc.read_text().splitlines()[0] == "# Ventoryn — Live Ops"
+    assert doc.read_text(encoding="utf-8").splitlines()[0] == "# Ventoryn — Live Ops"
     assert not (root / "docs" / "tycoon-live-ops.md").exists()
     assert not (root / "docs" / "collegium-live-ops.md").exists()

@@ -57,7 +57,7 @@ def test_impossible_margin_rejected():
 # -- sourcing ------------------------------------------------------------------
 
 def _brief(**kw) -> ProductBrief:
-    return ProductBrief.model_validate_json(EXAMPLE.read_text()).model_copy(update=kw)
+    return ProductBrief.model_validate_json(EXAMPLE.read_text(encoding="utf-8")).model_copy(update=kw)
 
 
 def test_reliable_supplier_ranks_first_and_risks_flagged():

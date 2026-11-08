@@ -13,13 +13,20 @@ Discover → Research → Validate → Build → Launch → Market →
 Operate → Measure → Optimize → Scale or Shut Down → Reinvest
 ```
 
-## Current focus: road2cissp.com
+## What's in this repo today
 
-The agents' main job is marketing **[road2cissp.com](https://road2cissp.com)**.
-They audit the live site, research keywords, measure traffic, write a weekly
-growth strategy with experiments you approve, and draft the content each
-experiment needs. Nothing is published or spent without you. See
-[docs/road2cissp-growth.md](docs/road2cissp-growth.md).
+The repo holds three kinds of thing that share one runtime:
+
+| Part | Where | Status |
+|------|-------|--------|
+| **Engine** — orchestrator, agents, ledger, experiments, approvals | `orchestrator/`, `agents/`, `core/` | Working; runs every worker tick |
+| **Ventoryn** — the SaaS web app (landing, Live Ops, admin; Google sign-in, Stripe, 2FA) | `dashboard/`, `core/saas.py` | Working; needs Google OAuth env vars to sign in |
+| **Businesses** — growth programs and assets for road2cissp, Etsy Experiment 001, Shopify, Notion templates, Farelune, ProofFlow | `ecosystem/`, `products/`, `docs/` | Mixed; road2cissp growth runs in the worker by default |
+
+The road2cissp growth program audits the live site, researches keywords,
+measures traffic, writes a weekly strategy with experiments you approve, and
+drafts the content each experiment needs. Nothing is published or spent
+without you. See [docs/road2cissp-growth.md](docs/road2cissp-growth.md).
 
 ```bash
 python launch.py worker                                  # growth program runs every tick
@@ -92,7 +99,7 @@ The orchestrator is an internal privileged decision layer. Stores, customers, an
 │                     SQLAlchemy models, Postgres task store
 ├── docs/             Architecture, roadmap
 ├── examples/         End-to-end pipeline demos
-└── tests/            36 tests, all passing
+└── tests/            pytest suite (python -m pytest -q)
 ```
 
 ## Development phases
@@ -101,8 +108,8 @@ The orchestrator is an internal privileged decision layer. Stores, customers, an
 |-------|-------|--------|--------------|
 | 1 | Business Factory MVP | ✅ Scaffolded + hardened | Orchestrator, agent framework, registry, experiments, ledger, approvals, dashboard, audit, PostgreSQL layer, XSS fix, structured logging, budget enforcement, `pyproject.toml` |
 | 2 | Operations | ✅ Built | Marketing (budget-capped campaigns), support (triage + escalation), creative (versioned assets), operations (incidents), analytics (funnels, cohorts), reporting (P&L, cash flow), integrations (commerce adapter) |
-| 3 | Portfolio Management | ✅ Built | Capital allocator (efficiency-ranked, beats equal-split), cross-business benchmarks, portfolio experiments (global cap), shutdown workflows |
-| 4 | Advanced Intelligence | ✅ Built | Agent memory, predictive opportunity ranking, dynamic pricing, ROAS reallocation, anomaly detection, model routing/cost optimization |
+| 3 | Portfolio Management | 🟡 Library only — tested, not yet wired into the worker or dashboard | Capital allocator (efficiency-ranked, beats equal-split), cross-business benchmarks, portfolio experiments (global cap), shutdown workflows |
+| 4 | Advanced Intelligence | 🟡 Library only — tested, not yet wired into the worker or dashboard | Agent memory, predictive opportunity ranking, dynamic pricing, ROAS reallocation, anomaly detection, model routing/cost optimization |
 | 5 | Scale | ⬜ Not started | Infrastructure scale-out only when demand requires it |
 
 See [docs/roadmap.md](docs/roadmap.md) for the detailed build plan.
@@ -130,14 +137,27 @@ Failed experiments are documented and terminated; their data stays available so 
 ## Quick start
 
 ```bash
-pip install -e .
-python -m pytest tests/ -q                # 39/39 passing
+pip install -e ".[dev]"                   # everything + test tools
+python -m pytest -q
 python launch.py                          # dashboard → http://0.0.0.0:8000
 python launch.py worker                   # headless agent loop (road2cissp growth)
 python launch.py all                      # dashboard + worker together
 ```
 
-Open **http://0.0.0.0:8000/ops** for the Ventoryn — Live Ops view
+Open **http://localhost:8000/** for the landing page. Everything past it
+needs a signed-in account: set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+(and `SAAS_OPERATOR_EMAIL` for the operator menu) — see
+[docs/ventoryn-saas-shell.md](docs/ventoryn-saas-shell.md). `/admin` also needs
+`VENTORYN_ADMIN_PASSWORD`.
+
+**Business ownership.** Every business records the account that owns it
+(`owner_email`). Only that account sees it — portfolio, Live Ops, approvals,
+`/api/daily-plan`, `/api/attribution`. Businesses created by the growth
+programs start *unclaimed*: sign in as the operator, open **/businesses**, and
+click **Claim** to bind each one to your account. Nothing is tied to an
+account by name or config.
+
+**/ops** is the Ventoryn — Live Ops view
 (`/game` still works — same page under its old address): the vector crew,
 the live activity feed and graphs, event feed, portfolio HUD, speed
 controls (1×/2×/4×), pause, and reset — every tick runs the real
@@ -158,7 +178,7 @@ sudo dnf install -y python3.12 python3-pip git
 git clone https://github.com/spencerawlson/AI_Agents_Ecosystem.git
 cd AI_Agents_Ecosystem
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e . "uvicorn[standard]" pytest
+pip install -e ".[all]" pytest
 python launch.py all                      # dashboard + worker
 ```
 
@@ -232,7 +252,7 @@ degrades to heuristics, never crashes a tick):
 # 1. Key: OpenAI dashboard (https://platform.openai.com/api-keys) → Create key
 # 2. On the VM:
 export OPENAI_API_KEY="sk-..."         # also in ~/.bashrc or the systemd unit
-pip install -r requirements.txt      # pulls litellm
+pip install -e ".[llm,market]"       # pulls litellm + pytrends
 python launch.py worker -- --llm     # force LLM mode
 python launch.py worker -- --no-llm  # force heuristics (default when no key)
 ```
@@ -273,4 +293,5 @@ python launch.py worker -- --no-market  # disable (default: ON with LLM)
 
 ## Status
 
-Phases 1–4 scaffolded and tested (36/36 passing). Next: pick the first real experiment — one low-capital business, defined budget, KPIs, duration, stop-loss — and run it toward the $1,000 revenue / positive-unit-economics milestone. See [docs/roadmap.md](docs/roadmap.md).
+Phases 1–2 run in the worker; Phases 3–4 exist as tested libraries that
+nothing calls yet. Next: pick the first real experiment — one low-capital business, defined budget, KPIs, duration, stop-loss — and run it toward the $1,000 revenue / positive-unit-economics milestone. See [docs/roadmap.md](docs/roadmap.md).

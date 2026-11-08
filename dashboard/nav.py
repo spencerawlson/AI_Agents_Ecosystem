@@ -49,37 +49,56 @@ def esc(value: object) -> str:
 
 
 HEADER_CSS = """
-/* Ventoryn shared header: centered brand + page title, hamburger
-   menu. One navigation for every signed-in page. */
-.v-header { position: relative; width: 100%; margin: 0 auto 8px; }
-.v-bar { display: flex; align-items: center; gap: 12px; }
-/* Hamburger at the FAR RIGHT; the 44px spacer on the left balances
-   it so the centered brand stays centered. */
+/* Ventoryn app bar: navy, full width, sticky — the same bar as the
+   public landing nav. Brand centered, hamburger far right; the 44px
+   spacer on the left balances the burger. One navigation for every
+   signed-in page. Colors come from dashboard.ui tokens. */
+.v-header { position: sticky; top: 0; z-index: 40; width: 100%;
+  margin: 0; background: var(--v-navy, #0b0e1e);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 6px 20px rgba(11, 14, 30, .18); }
+.v-bar { position: relative; max-width: 1120px; margin: 0 auto;
+  padding: 8px 20px; min-height: 60px; display: flex; align-items: center;
+  gap: 12px; }
 .v-burger { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px;
-  padding: 0; font-size: 22px; line-height: 1; border-radius: 10px;
-  border: 1px solid #c4b5fd; background: #f3efff; color: #111;
-  cursor: pointer; }
-.v-burger:hover { background: #e9e2ff; }
-.v-brand { flex: 1; text-align: center; font-size: 24px; font-weight: 900;
-  color: #6d28d9; text-decoration: none; letter-spacing: .3px; }
+  margin: 0; padding: 0; font-size: 20px; line-height: 1;
+  border-radius: 10px; border: 1px solid rgba(255, 255, 255, .28);
+  background: transparent; color: #fff; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; }
+.v-burger:hover, .v-burger[aria-expanded='true'] {
+  background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .5);
+  color: #fff; }
+.v-brand { flex: 1; text-align: center; font-size: 22px; font-weight: 800;
+  color: #fff; text-decoration: none; letter-spacing: .02em; }
+.v-brand::after { content: "."; color: var(--v-violet-line, #c4b5fd); }
+.v-brand:hover { color: #fff; }
 .v-bar-spacer { flex: 0 0 44px; width: 44px; }
-.v-title { text-align: center; font-size: 26px; font-weight: 800;
-  margin: 10px 0 4px; color: #1a1a2e; }
-.v-menu { position: absolute; left: 0; right: 0; top: 100%; z-index: 50;
-  background: #fff; border: 1px solid #e5e0f5; border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(109, 40, 217, 0.16); padding: 8px;
-  margin-top: 4px; }
+.v-title { max-width: 1120px; margin: 26px auto 6px; padding: 0 20px;
+  font-size: 26px; font-weight: 800; color: var(--v-ink, #1a1a2e);
+  letter-spacing: -.01em; line-height: 1.25; }
+.v-menu { position: absolute; right: 20px; top: calc(100% + 6px);
+  z-index: 50; width: 300px; max-height: calc(100vh - 90px);
+  overflow-y: auto; background: #fff; border: 1px solid var(--v-line, #e7e3f3);
+  border-radius: 14px; box-shadow: 0 18px 48px rgba(11, 14, 30, .22);
+  padding: 8px; }
 .v-menu a { display: block; min-height: 44px; line-height: 44px;
-  padding: 0 14px; border-radius: 8px; color: #1a1a2e;
-  text-decoration: none; font-size: 16px; }
-.v-menu a:hover { background: #f3efff; }
+  padding: 0 14px; border-radius: 8px; color: var(--v-ink, #1a1a2e);
+  text-decoration: none; font-size: 15px; font-weight: 500; }
+.v-menu a:hover { background: var(--v-violet-soft, #ede9fe);
+  color: var(--v-violet-deep, #6d28d9); }
 .v-current { display: block; min-height: 44px; line-height: 44px;
-  padding: 0 14px; border-radius: 8px; color: #666; font-size: 16px;
-  background: #faf8ff; }
-.v-current em { font-style: normal; color: #6d28d9; font-weight: bold; }
-.v-group { display: block; padding: 10px 14px 4px; font-size: 12px;
-  font-weight: bold; text-transform: uppercase; letter-spacing: 1px;
-  color: #888; }
+  padding: 0 14px; border-radius: 8px; color: var(--v-violet-deep, #6d28d9);
+  font-size: 15px; font-weight: 700; background: var(--v-violet-soft, #ede9fe); }
+.v-current em { font-style: normal; font-weight: 500; font-size: 13px;
+  color: var(--v-muted, #5d5d78); }
+.v-group { display: block; margin-top: 6px; padding: 12px 14px 4px;
+  border-top: 1px solid var(--v-line, #e7e3f3); font-size: 11px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--v-faint, #8b8ba3); }
+@media (max-width: 560px) {
+  .v-bar { padding: 8px 16px; min-height: 56px; }
+  .v-title { font-size: 22px; margin-top: 20px; padding: 0 16px; }
+  .v-menu { left: 12px; right: 12px; width: auto; }
+}
 """
 
 HEADER_JS = """
@@ -143,8 +162,7 @@ def header_html(current: str | None, is_operator: bool,
         f"<a class='v-brand' href='/ops'>Ventoryn</a>"
         f"<button class='v-burger' type='button' aria-expanded='false' "
         f"aria-controls='v-menu' aria-label='Menu'>&#9776;</button>"
-        f"</div>"
-        f"{title_html}"
         f"<nav class='v-menu' id='v-menu' aria-label='Ventoryn' hidden>"
         f"{items}{admin}</nav>"
-        f"</header>{HEADER_JS}")
+        f"</div>"
+        f"</header>{title_html}{HEADER_JS}")

@@ -266,6 +266,6 @@ def create_dashboard_app(rt: Runtime | None = None):
         audit=rt.audit,
         saas_store=SaasStore(saas_db) if saas_db else SaasStore(":memory:"),
         saas_config=SaasConfig.from_env(),
+        runtime=rt,
     )
-    app.state.runtime_holder = {"rt": rt}
     return app

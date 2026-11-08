@@ -104,47 +104,15 @@ REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 PENDING_SITE_COOKIE = "ventoryn_pending_site"
 PENDING_SITE_TTL_SECONDS = 30 * 60
 
+# Account pages share the platform shell (dashboard/ui.py); only the
+# 2FA bits below are specific to them.
 _SAAS_CSS = """
-body { font-family: sans-serif; margin: 0 auto; max-width: 720px;
-       padding: 16px; color: #222; background: #fff; }
-h1 { font-size: 24px; } h2 { font-size: 19px; margin-top: 28px; }
-.muted { color: #666; font-size: 14px; }
-.unavailable { color: #666; font-style: italic; }
-.card { border: 1px solid #ddd; border-radius: 12px; padding: 16px;
-        margin: 12px 0; background: #fff; }
-.card h2, .card h3 { margin-top: 0; }
-.big { font-size: 28px; font-weight: bold; }
-.btn { display: inline-block; min-height: 44px; line-height: 44px;
-       padding: 0 20px; margin: 4px 4px 4px 0; border-radius: 8px;
-       border: 1px solid #ccc; background: #fff; color: #222;
-       font-size: 16px; cursor: pointer; text-decoration: none;
-       text-align: center; box-sizing: border-box; }
-.btn-primary { background: #c4b5fd; border-color: #c4b5fd; color: #111;
-               font-weight: bold; }
-.btn-google { background: #fff; border-color: #888; }
-label { display: block; margin: 12px 0 4px; font-weight: bold; }
-input[type=text], input[type=url], select {
-       width: 100%; min-height: 44px; padding: 8px 10px; font-size: 16px;
-       border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
-table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; }
-th, td { border: 1px solid #ddd; padding: 8px; text-align: left;
-         font-size: 14px; vertical-align: top; }
-th { background: #f0f0f0; }
-.table-wrap { overflow-x: auto; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
-         font-size: 12px; background: #eef2ff; border: 1px solid #c7d2fe; }
-.badge-off { background: #f3f4f6; border-color: #d1d5db; color: #666; }
-.badge-ok { background: #e6f4ea; border-color: #34a853; }
-@media (max-width: 560px) {
-  body { padding: 12px; } h1 { font-size: 21px; }
-  th, td { font-size: 13px; padding: 6px; }
-  .btn { width: 100%; margin: 4px 0; }
-}
-.qr { background: #fff; border: 1px solid #ddd; border-radius: 12px;
+.qr { background: #fff; border: 1px solid var(--v-line); border-radius: 12px;
       padding: 12px; display: inline-block; margin: 12px 0; }
-.codes { font-family: monospace; font-size: 17px; line-height: 1.9;
-         background: #fafafa; border: 1px solid #ddd; border-radius: 8px;
-         padding: 12px 16px; }
+.codes { font-family: ui-monospace, Consolas, monospace; font-size: 17px;
+         line-height: 1.9; background: #faf9fe; border: 1px solid var(--v-line);
+         border-radius: 10px; padding: 12px 16px; }
+.v-main { max-width: 820px; }
 """
 
 
@@ -161,14 +129,14 @@ def _page(title: str, inner: str, account: dict | None = None,
     "for website owners" — those stay reachable by direct URL only.
     Unsigned error pages get no header — the menu belongs to
     signed-in pages only."""
+    from dashboard import ui
+
     if account is None:
-        header = f"<h1>{esc(title)}</h1>"
-    else:
-        header = header_html(current, is_operator, title)
-    return (f"<html><head><title>{esc(title)} — Ventoryn</title>"
-            f"<meta name='viewport' content='width=device-width,"
-            f" initial-scale=1'><style>{_SAAS_CSS}{HEADER_CSS}</style>"
-            f"</head><body>{header}{inner}</body></html>")
+        return ui.page(title, f"<h1>{esc(title)}</h1>{inner}",
+                       extra_css=_SAAS_CSS)
+    return ui.page(title, inner,
+                   header=header_html(current, is_operator, title),
+                   extra_css=_SAAS_CSS)
 
 
 def _credit_table() -> str:

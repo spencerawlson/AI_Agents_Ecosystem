@@ -52,6 +52,11 @@ class Business(BaseModel):
     status: BusinessStatus = BusinessStatus.DISCOVERED
     marketplace: str | None = None
     domain: str | None = None
+    #: The Ventoryn account (Google email, lower-case) that owns and
+    #: manages this business. Only that account sees it, decides its
+    #: approvals, and reads its data. None = unclaimed: visible to the
+    #: operator only, until claimed from /businesses.
+    owner_email: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

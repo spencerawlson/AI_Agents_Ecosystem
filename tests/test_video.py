@@ -230,7 +230,7 @@ def test_run_video_from_script_file(tmp_path, monkeypatch):
     info = _probe(video["video_path"])
     assert abs(float(info["format"]["duration"]) - 15) < 0.6
     assert Path(summary["report"]).exists()
-    assert "NOT YET POSTED" in Path(summary["report"]).read_text()
+    assert "NOT YET POSTED" in Path(summary["report"]).read_text(encoding="utf-8")
     saved = load_state(tmp_path / "state.json")
     assert saved["videos"]["cissp-in-60-seconds"]["status"] == "rendered"
 

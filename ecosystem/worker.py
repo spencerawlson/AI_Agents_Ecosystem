@@ -36,13 +36,13 @@ MONITOR_STATE_PATH = Path.home() / ".config" / "evergreen-etsy" / "monitor_state
 
 def _load_monitor_state() -> dict:
     if MONITOR_STATE_PATH.exists():
-        return json.loads(MONITOR_STATE_PATH.read_text())
+        return json.loads(MONITOR_STATE_PATH.read_text(encoding="utf-8"))
     return {"last_revenue_usd": 0.0}
 
 
 def _save_monitor_state(state: dict) -> None:
     MONITOR_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MONITOR_STATE_PATH.write_text(json.dumps(state, indent=1))
+    MONITOR_STATE_PATH.write_text(json.dumps(state, indent=1), encoding="utf-8")
 
 
 def run_etsy_monitor_tick(rt, tick: int) -> dict | None:
