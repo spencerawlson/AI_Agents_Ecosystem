@@ -128,7 +128,7 @@ def test_report_page():
 
 
 def test_game_view_is_live_ops():
-    """/game serves the Ecosystem Tycoon — Live Ops page with a vector
+    """/game serves the Collegium — Live Ops page with a vector
     cast (one inline SVG per character, no emoji in the roster) and the
     live ops window; /ops is an alias for the same page."""
     app = create_app(registry=BusinessRegistry(), ledger=Ledger())
@@ -136,7 +136,7 @@ def test_game_view_is_live_ops():
     for path in ("/game", "/ops"):
         r = client.get(path)
         assert r.status_code == 200
-        assert "Ecosystem Tycoon — Live Ops" in r.text
+        assert "Collegium — Live Ops" in r.text
         assert "Live game view" not in r.text
         assert "What the team is doing" in r.text
         assert 'id="ops-feed"' in r.text
@@ -274,3 +274,29 @@ if __name__ == "__main__":
     test_api_snapshot_includes_event_cost()
     test_create_app_keeps_empty_audit_log()
     print("Report tests passed.")
+
+
+def test_live_ops_is_collegium_and_mobile_friendly():
+    """The live-ops page is Collegium now (not Ecosystem Tycoon), and its
+    phone layout is single-column with readable charts: crew cards stack
+    at <=560px, the ops charts size their SVG viewBox to the panel on
+    screen (so labels don't shrink to ~6px on a phone), and the footer
+    controls keep 44px+ tap targets."""
+    app = create_app(registry=BusinessRegistry(), ledger=Ledger())
+    client = TestClient(app)
+    r = client.get("/ops")
+    assert r.status_code == 200
+    assert "Collegium — Live Ops" in r.text
+    assert "Ecosystem Tycoon" not in r.text
+    # Crew cards go single-column on phones.
+    assert "#stations { grid-template-columns: 1fr; }" in r.text
+    # Ops charts measure the panel instead of a fixed 560-unit viewBox.
+    assert "wrap.clientWidth" in r.text
+    # Footer controls stay thumb-friendly.
+    assert "min-height: 48px" in r.text
+    # The live-ops doc moved with the name.
+    root = Path(__file__).resolve().parent.parent
+    doc = root / "docs" / "collegium-live-ops.md"
+    assert doc.exists()
+    assert doc.read_text().splitlines()[0] == "# Collegium — Live Ops"
+    assert not (root / "docs" / "tycoon-live-ops.md").exists()

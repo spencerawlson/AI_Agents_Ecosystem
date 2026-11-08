@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ecosystem Tycoon — Live Ops</title>
+<title>Collegium — Live Ops</title>
 <style>
   :root {
     --bg: #fdf6ea;
@@ -110,7 +110,7 @@
   /* ---------- crew cards ---------- */
   #stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
   @media (max-width: 1100px) { #stations { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 560px) { #stations { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { #stations { grid-template-columns: 1fr; } }
   .char-card {
     --c1: var(--accent-soft); --c2: #fff; --c-ink: var(--accent);
     background: linear-gradient(180deg, #ffffff 0%, var(--c1) 130%);
@@ -302,6 +302,12 @@
     #controls > button, #controls > select, #controls > a.pill { flex: 1 1 44%; min-height: 48px; font-size: 15px; }
     #controls .spacer { display: none; }
     #controls .hint { flex-basis: 100%; text-align: center; }
+    /* Phone: give the content room — tighter panel padding, and rows
+       that wrap instead of squeezing the text to nothing. */
+    .panel { padding: 14px; }
+    .ops-graph { padding: 10px 12px; }
+    .biz-row { flex-wrap: wrap; }
+    .ops-legend { flex-wrap: wrap; }
   }
   @media (prefers-reduced-motion: reduce) {
     .blob, .floater, .char-card.working .avatar, .char-card.working .char-svg { animation: none !important; }
@@ -318,7 +324,7 @@
 </div>
 <canvas id="confetti"></canvas>
 <header id="hud">
-  <div class="title">Ecosystem Tycoon — Live Ops</div>
+  <div class="title">Collegium — Live Ops</div>
   <div id="tick-badge">TICK –</div>
   <div class="hud-stat"><span class="label">Revenue</span><span class="value" id="hud-revenue">–</span></div>
   <div class="hud-stat"><span class="label">Costs</span><span class="value" id="hud-costs">–</span></div>
@@ -762,7 +768,16 @@ function renderOpsBars(agents) {
   const rows = agents.slice().sort((a, b) => (Number(b.tasks_completed) || 0) - (Number(a.tasks_completed) || 0));
   const maxTasks = Math.max.apply(null, rows.map((a) => Number(a.tasks_completed) || 0).concat([1]));
   const maxSpend = Math.max.apply(null, rows.map((a) => Number(a.cost_usd) || 0).concat([0.0001]));
-  const W = 560, LABEL_W = 96, BAR_W = 340, ROW_H = 40, TOP = 6;
+  /* Responsive chart width (layout only — data, sorting and values are
+     untouched): the SVG scales to its container, so a fixed 560-unit
+     viewBox would shrink the labels to ~6px on a phone. Size the
+     viewBox to the panel actually on screen so labels stay readable.
+     Desktop (560) is exactly as before. */
+  const W = Math.max(280, Math.min(560, (wrap.clientWidth || 588) - 28));
+  const _k = W / 560;
+  const LABEL_W = Math.max(70, Math.round(96 * _k));
+  const BAR_W = Math.min(Math.round(340 * _k), W - LABEL_W - 62);
+  const ROW_H = 40, TOP = 6;
   const H = TOP + rows.length * ROW_H + 4;
   let svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Tasks and spend per agent">';
   rows.forEach((a, i) => {
@@ -798,7 +813,11 @@ function renderOpsActivity() {
   }
   const vals = h.map((p) => p.tasks);
   const max = Math.max.apply(null, vals.concat([1]));
-  const W = 560, H = 170, PL = 38, PR = 10, PT = 10, PB = 22;
+  /* Responsive chart width, same reason as the bars above: keep the
+     axis labels readable on a phone. Desktop (560) is unchanged. */
+  const W = Math.max(280, Math.min(560, (wrap.clientWidth || 588) - 28));
+  const _k = W / 560;
+  const H = 170, PL = Math.max(34, Math.round(38 * _k)), PR = Math.max(8, Math.round(10 * _k)), PT = 10, PB = 22;
   const X = (i) => PL + (i / (h.length - 1)) * (W - PL - PR);
   const Y = (v) => PT + (1 - v / max) * (H - PT - PB);
   let svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Total tasks completed over the last polls">';
