@@ -18,6 +18,8 @@ from orchestrator.approvals import ApprovalGate
 from orchestrator.dispatcher import Dispatcher, DispatcherPolicy
 from orchestrator.models import ApprovalStatus, TaskStatus
 
+from _signin import sign_in_as_operator
+
 MISSION_MD = """# Marketing Mission — https://road2cissp.com
 
 _Generated 2026-10-04T19:58:45.692074+00:00 · niche: CISSP exam preparation_
@@ -129,6 +131,7 @@ def test_reports_pages(tmp_path, monkeypatch):
                   mtime=2000.0)
     app = create_app()
     client = TestClient(app)
+    sign_in_as_operator(client, app)
     r = client.get("/reports")
     assert r.status_code == 200
     assert "Marketing Mission — https://road2cissp.com" in r.text
@@ -139,9 +142,9 @@ def test_reports_pages(tmp_path, monkeypatch):
     assert "<table>" in r.text
     r = client.get("/reports/../secret.md")
     assert r.status_code == 404
-    # Portfolio index links the new pages.
+    # The public landing page links no internal pages at all.
     r = client.get("/")
-    assert "/reports" in r.text and "/approvals" in r.text
+    assert "/reports" not in r.text and "/approvals" not in r.text
 
 
 # -- gate persistence across processes ------------------------------------
@@ -243,6 +246,7 @@ def _submit(rt, biz):
 def test_approve_promotes_and_executes():
     rt, app, stub, biz, dispatcher = _loop_fixture()
     client = TestClient(app)
+    sign_in_as_operator(client, app)
     task, appr = _submit(rt, biz)
     assert task.status == TaskStatus.WAITING_APPROVAL
 
@@ -268,6 +272,7 @@ def test_approve_promotes_and_executes():
 def test_reject_cancels_and_never_executes():
     rt, app, stub, biz, dispatcher = _loop_fixture()
     client = TestClient(app)
+    sign_in_as_operator(client, app)
     task, appr = _submit(rt, biz)
 
     r = client.post(f"/approvals/{appr.id}/decide", data={"approved": "false"})
@@ -292,6 +297,7 @@ def test_approvals_page_human_readable(tmp_path, monkeypatch):
     rt = build_runtime()
     app = create_dashboard_app(rt)
     client = TestClient(app)
+    sign_in_as_operator(client, app)
     rt.approvals.request(
         action="mission_report_approval",
         details={"mission": "marketing_mission",

@@ -79,11 +79,22 @@ def test_double_dispatch_rejected():
 
 
 def test_dashboard_escapes_xss():
+    from _signin import operator_store_and_config, sign_in
+
     registry = BusinessRegistry()
     biz = registry.create('<script>alert("xss")</script>', "ecommerce")
-    app = create_app(registry=registry)
+    store, config = operator_store_and_config()
+    app = create_app(registry=registry, saas_store=store, saas_config=config)
     client = TestClient(app)
+    # The public landing page shows no business names at all — the
+    # payload cannot leak there, signed in or not. (The page has its
+    # own <script> for the preview, so the check is the payload.)
     r = client.get("/")
+    assert r.status_code == 200
+    assert 'alert("xss")' not in r.text
+    assert "&lt;script&gt;" not in r.text
+    sign_in(client, store)
+    r = client.get("/portfolio")
     assert r.status_code == 200
     assert "<script>" not in r.text
     assert "&lt;script&gt;" in r.text

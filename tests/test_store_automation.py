@@ -516,7 +516,13 @@ def test_dashboard_renders_ad_approvals(gate):
         "platform": "google", "product_title": "Laptop Stand",
         "current_daily_budget_usd": 10, "new_daily_budget_usd": 15, "cpa_usd": 5,
         "max_cpa_usd": 12.12, "roas": 6.0, "purchases": 4})
-    r = TestClient(create_app(approvals=gate)).get("/approvals")
+    from _signin import operator_store_and_config, sign_in
+
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(approvals=gate, saas_store=store,
+                                   saas_config=config))
+    sign_in(client, store)
+    r = client.get("/approvals")
     assert "Launch Meta ads" in r.text and "$70.00 max" in r.text
     assert "&lt;b&gt;Hi&lt;/b&gt;" in r.text  # escaped
     assert "Scale Google ads" in r.text and "$15.00/day" in r.text

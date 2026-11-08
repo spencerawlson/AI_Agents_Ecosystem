@@ -6,12 +6,14 @@ to the live-ops view. Every page is server-rendered HTML, mobile-first
 (single column on phones, 44px+ tap targets), light styling.
 
 Pages:
-  GET  /account                         -> dashboard or login
-  GET  /account/login                   sign in with Google
+  GET  /account                         -> Live Ops, or the landing page
+  GET  /account/login                   -> the landing page (sign-in
+                                          lives there, visible on it)
   GET  /account/auth/google/start       -> Google authorization URL
-  GET  /account/auth/google/callback    code -> session cookie
-  GET  /account/logout                  end the session
-  GET  /account/dashboard               sites, credits, jobs, funnel
+  GET  /account/auth/google/callback    code -> session cookie -> /ops
+  GET  /account/logout                  end the session -> landing page
+  GET  /account/dashboard               "My account": plan, credits,
+                                         sites, jobs, funnel
   GET  /account/subscribe               the $20/month plan
   POST /account/subscribe               create a Stripe checkout session
   POST /account/billing/webhook         Stripe webhook (signature-verified)
@@ -24,6 +26,13 @@ Pages:
   POST /account/sites/{site_id}/conversions
                                          owner-recorded sale (fallback)
 
+Sign-in flow (the ShipItAyiti flow): the landing page carries the
+sign-in and the URL box; after Google sign-in EVERYONE goes straight
+to Live Ops (/ops), scoped to their account. A website typed on the
+landing page rides along (?site_url=…) so /ops can offer the
+subscribe / add-site step for it. /admin is a separate URL for the
+operator only (see dashboard.app).
+
 Nothing here publishes or posts anywhere. A job that costs more
 credits than the balance is refused with the balance shown.
 """
@@ -32,6 +41,7 @@ from __future__ import annotations
 
 import html
 import json
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -64,6 +74,15 @@ from core.saas import (
 #: Where analyze reports are written (reports/analyze_<host>_<date>.md,
 #: same as the CLI). Tests override this with a temp dir.
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
+
+#: Short-lived cookie holding the website URL a visitor typed on the
+#: landing page while they sign in and subscribe. It is the only
+#: carrier across the Google round-trip (the OAuth state is a random
+#: CSRF token and holds nothing else). 30 minutes, HttpOnly, same-site
+#: lax; the callback consumes it and the subscribe page carries the
+#: URL onward in its form, so the visitor never retypes it.
+PENDING_SITE_COOKIE = "ventoryn_pending_site"
+PENDING_SITE_TTL_SECONDS = 30 * 60
 
 _SAAS_CSS = """
 body { font-family: sans-serif; margin: 0 auto; max-width: 720px;
@@ -109,19 +128,32 @@ def esc(value: object) -> str:
 
 
 def _page(title: str, inner: str, account: dict | None = None) -> str:
-    nav = ("<a href='/account/dashboard'>Dashboard</a> | "
-           "<a href='/account/subscribe'>Subscribe</a> | ")
-    if account:
-        nav += (f"<span class='muted'>{esc(account['email'])}</span> | "
-                "<a href='/account/logout'>Sign out</a>")
-    else:
-        nav += "<a href='/account/login'>Sign in</a>"
+    # The customer nav — their own pages only: Live Ops, My
+    # Portfolio, Approvals, Report, My account, Subscribe, Sign out.
+    # Never an operator tool, never another account's data.
+    nav = ("<nav class='customer-nav' aria-label='Ventoryn'>"
+           "<a href='/ops'>Live Ops</a>"
+           "<a href='/portfolio'>My Portfolio</a>"
+           "<a href='/approvals'>Approvals</a>"
+           "<a href='/report'>Report</a>"
+           "<a href='/account/dashboard'>My account</a>"
+           "<a href='/account/subscribe'>Subscribe</a>"
+           "<a href='/account/logout'>Sign out</a></nav>")
     return (f"<html><head><title>{esc(title)} — Ventoryn</title>"
             f"<meta name='viewport' content='width=device-width,"
-            f" initial-scale=1'><style>{_SAAS_CSS}</style></head><body>"
-            f"<p><a href='/'>Ventoryn</a> &middot; for website owners</p>"
-            f"<h1>{esc(title)}</h1>{inner}"
-            f"<hr><p class='muted'>{nav}</p></body></html>")
+            f" initial-scale=1'><style>{_SAAS_CSS}{_NAV_CSS}</style></head>"
+            f"<body>{nav}<p><a href='/'>Ventoryn</a></p>"
+            f"<h1>{esc(title)}</h1>{inner}</body></html>")
+
+
+_NAV_CSS = """
+.customer-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+.customer-nav a { display: inline-block; min-height: 44px; line-height: 44px;
+  padding: 0 14px; border-radius: 8px; background: #f3efff;
+  border: 1px solid #c4b5fd; color: #111; text-decoration: none;
+  font-size: 15px; }
+.customer-nav a:hover { background: #e9e2ff; }
+"""
 
 
 def _credit_table() -> str:
@@ -174,46 +206,56 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
     def _need_account(request: Request):
         account = _account(request)
         if account is None:
-            return None, RedirectResponse("/account/login", status_code=303)
+            # Sign-in lives on the landing page — that is where an
+            # unsigned visitor is sent, not to a separate sign-in page.
+            return None, RedirectResponse("/", status_code=303)
         return account, None
 
     # -- sign-in -------------------------------------------------------------
     @app.get("/account", response_class=HTMLResponse)
     def account_root(request: Request):
-        if _account(request):
-            return RedirectResponse("/account/dashboard", status_code=303)
-        return RedirectResponse("/account/login", status_code=303)
+        account = _account(request)
+        if account:
+            # Everyone lands on Live Ops after sign-in — the operator
+            # and every customer alike. /ops is scoped to the account.
+            return RedirectResponse("/ops", status_code=303)
+        return RedirectResponse("/", status_code=303)
 
     @app.get("/account/login", response_class=HTMLResponse)
     def login_page(request: Request):
-        if _account(request):
-            return RedirectResponse("/account/dashboard", status_code=303)
-        if not config.google_configured:
-            inner = ("<div class='card'><p>Sign-in with Google is not "
-                     "set up yet. The Google sign-in is configured by "
-                     "the operator (a Google Cloud OAuth client), not "
-                     "here — there is nothing to type in on this page."
-                     "</p></div>")
-        else:
-            inner = ("<div class='card'><p>Sign in with your Google "
-                     "account to manage your websites on Ventoryn.</p>"
-                     "<p><a class='btn btn-google' "
-                     "href='/account/auth/google/start'>Sign in with "
-                     "Google</a></p>"
-                     "<p class='muted'>Ventoryn sees your Google name "
-                     "and email address, and nothing else.</p></div>")
-        return _page("Sign in", inner)
+        account = _account(request)
+        if account:
+            return RedirectResponse("/ops", status_code=303)
+        # Sign-in belongs on the landing page (visible "Sign in with
+        # Google" there), not on a bare separate sign-in page.
+        return RedirectResponse("/", status_code=303)
 
     @app.get("/account/auth/google/start")
-    def google_start(request: Request):
+    def google_start(request: Request, site_url: str = ""):
         if not config.google_configured:
             return HTMLResponse(
                 _page("Sign in",
                       "<p>Sign-in with Google is not set up yet.</p>"),
                 status_code=400)
         state = store.create_oauth_state()
-        return RedirectResponse(google_auth_url(config, state),
-                                status_code=303)
+        response = RedirectResponse(google_auth_url(config, state),
+                                    status_code=303)
+        # Carry the website the visitor typed on the landing page
+        # across the Google round-trip. An invalid URL is ignored —
+        # the visitor simply signs in without one.
+        pending = ""
+        if site_url:
+            try:
+                pending = validate_site_url(site_url)
+            except ValueError:
+                pending = ""
+        if pending:
+            response.set_cookie(
+                PENDING_SITE_COOKIE, pending, httponly=True,
+                samesite="lax", path="/",
+                max_age=PENDING_SITE_TTL_SECONDS,
+                secure=config.cookie_secure)
+        return response
 
     @app.get("/account/auth/google/callback", response_class=HTMLResponse)
     def google_callback(request: Request, code: str = "",
@@ -244,7 +286,24 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             account = store.create_account(profile["sub"], profile["email"],
                                            profile.get("name", ""))
         token = store.create_session(account["id"])
-        response = RedirectResponse("/account/dashboard", status_code=303)
+        # The ShipItAyiti flow: after sign-in EVERYONE goes straight
+        # to Live Ops (/ops) — the operator and every customer alike.
+        # /ops is scoped to the signed-in account, so a customer sees
+        # only their own sites and work. A website typed on the
+        # landing page rides along as ?site_url=…, so /ops can offer
+        # the subscribe / add-site step for it; the pending cookie is
+        # consumed here either way.
+        pending = request.cookies.get(PENDING_SITE_COOKIE, "")
+        try:
+            pending = validate_site_url(pending) if pending else ""
+        except ValueError:
+            pending = ""
+        target = "/ops"
+        if pending:
+            target += ("?site_url=" +
+                       urllib.parse.quote(pending, safe=""))
+        response = RedirectResponse(target, status_code=303)
+        response.delete_cookie(PENDING_SITE_COOKIE, path="/")
         response.set_cookie(SESSION_COOKIE, token, httponly=True,
                             samesite="lax", path="/",
                             max_age=SESSION_TTL_DAYS * 24 * 3600,
@@ -256,24 +315,36 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         token = request.cookies.get(SESSION_COOKIE, "")
         if token:
             store.delete_session(token)
-        response = RedirectResponse("/account/login", status_code=303)
+        response = RedirectResponse("/", status_code=303)
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
 
     # -- customer dashboard --------------------------------------------------
     @app.get("/account/dashboard", response_class=HTMLResponse)
-    def dashboard(request: Request, subscribed: str = ""):
+    def dashboard(request: Request, subscribed: str = "",
+                  site_url: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
         sites = store.list_sites(account["id"])
         jobs = store.list_jobs(account["id"])
         entries = store.list_credit_entries(account["id"], limit=10)
+        # The website the visitor typed on the landing page, carried
+        # through sign-in and checkout — it arrives prefilled on the
+        # add-website form, never retyped.
+        try:
+            pending_url = validate_site_url(site_url) if site_url else ""
+        except ValueError:
+            pending_url = ""
+        add_site_href = ("/account/sites/new?url=" +
+                         urllib.parse.quote(pending_url, safe="") if
+                         pending_url else "/account/sites/new")
         notice = ""
         if subscribed:
             notice = ("<div class='card'><p><strong>Subscription started "
                       "— welcome.</strong> Your monthly credits are in.</p>"
-                      "</div>")
+                      f"<p><a class='btn btn-primary' href='{esc(add_site_href)}'>"
+                      "Add your website</a></p></div>")
         status = account["subscription_status"]
         status_badge = ("<span class='badge badge-ok'>Subscribed</span>"
                         if status == "active" else
@@ -294,7 +365,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 f"<div class='table-wrap'><table>{funnel}</table></div></div>")
         if not site_rows:
             site_rows = ("<div class='card'><p>No websites yet. "
-                         "<a href='/account/sites/new'>Add your first "
+                         f"<a href='{esc(add_site_href)}'>Add your first "
                          "website</a> — Ventoryn works to bring it its "
                          "first 100 paying customers.</p></div>")
         job_rows = "".join(
@@ -315,7 +386,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 credits &middot; {config.monthly_credits} credits included every month
 while subscribed.</p>
 <p><a class='btn btn-primary' href='/account/subscribe'>Subscribe — $20/month</a>
-<a class='btn' href='/account/sites/new'>Add a website</a></p></div>
+<a class='btn' href='{esc(add_site_href)}'>Add a website</a></p></div>
 <h2>Your websites</h2>{site_rows}
 <h2>Recent jobs</h2>
 <div class='table-wrap'><table>
@@ -329,10 +400,24 @@ while subscribed.</p>
 
     # -- subscribe -----------------------------------------------------------
     @app.get("/account/subscribe", response_class=HTMLResponse)
-    def subscribe_page(request: Request, cancelled: str = ""):
+    def subscribe_page(request: Request, cancelled: str = "",
+                       site_url: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
+        try:
+            pending_url = validate_site_url(site_url) if site_url else ""
+        except ValueError:
+            pending_url = ""
+        pending_note = ""
+        pending_field = ""
+        if pending_url:
+            pending_note = (f"<p>After subscribing, we'll add "
+                            f"<strong>{esc(pending_url)}</strong> to your "
+                            f"account — the website you typed on the "
+                            f"front page.</p>")
+            pending_field = (f"<input type='hidden' name='site_url' "
+                             f"value='{esc(pending_url)}'>")
         notice = ""
         if cancelled:
             notice = ("<div class='card'><p>Checkout was cancelled — "
@@ -342,6 +427,11 @@ while subscribed.</p>
                      f"to {esc(PLAN_NAME)} at {esc(PLAN_PRICE_LABEL)}."
                      "</p><p>Your monthly credits arrive with each "
                      "billing cycle.</p></div>")
+            if pending_url:
+                inner += (f"<div class='card'>{pending_note}<p><a class='btn "
+                          f"btn-primary' href='/account/sites/new?url="
+                          f"{esc(urllib.parse.quote(pending_url, safe=''))}'>"
+                          f"Add {esc(pending_url)}</a></p></div>")
             return _page("Subscribe", inner, account)
         if not config.stripe_configured:
             inner = (f"{notice}<div class='card'><h2>{esc(PLAN_NAME)} — "
@@ -362,7 +452,9 @@ while subscribed.</p>
                  f"</li><li>Your websites on Ventoryn, working toward "
                  f"their first 100 paying customers</li>"
                  f"<li>Growth reports per site</li></ul>"
+                 f"{pending_note}"
                  f"<form method='post' action='/account/subscribe'>"
+                 f"{pending_field}"
                  f"<button class='btn btn-primary' type='submit'>"
                  f"Subscribe — $20/month</button></form>"
                  f"<p class='muted'>Checkout is handled by Stripe. "
@@ -371,14 +463,20 @@ while subscribed.</p>
         return _page("Subscribe", inner, account)
 
     @app.post("/account/subscribe")
-    def subscribe_start(request: Request):
+    def subscribe_start(request: Request, site_url: str = Form("")):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
         if account["subscription_status"] == "active":
             return RedirectResponse("/account/dashboard", status_code=303)
         try:
-            session = create_checkout_session(config, account)
+            pending_url = validate_site_url(site_url) if site_url else ""
+        except ValueError:
+            pending_url = ""
+        try:
+            session = create_checkout_session(
+                config, account,
+                site_url=pending_url or None)
         except SaasError as exc:
             return HTMLResponse(
                 _page("Subscribe", f"<p>{esc(exc)}</p>"

@@ -164,15 +164,22 @@ def test_google_login_flow(client, store, config, monkeypatch):
                    params={"code": "auth-code", "state": state},
                    follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/account/dashboard"
+    # The ShipItAyiti flow: after sign-in EVERYONE goes straight to
+    # Live Ops (/ops) — the operator and every customer alike.
+    assert r.headers["location"] == "/ops"
     assert saas.SESSION_COOKIE in r.headers.get("set-cookie", "")
     account = store.get_account_by_sub("google-sub-1")
     assert account is not None and account["email"] == "ada@example.com"
 
     r = client.get("/account/dashboard")
     assert r.status_code == 200
-    assert "ada@example.com" in r.text
     assert "0" in r.text  # zero balance is real here (no subscription yet)
+
+    # The landing page names the signed-in account.
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "ada@example.com" in r.text
+    assert "Continue to Live Ops" in r.text
 
 
 def test_google_callback_rejects_bad_state(client, store):
@@ -183,12 +190,22 @@ def test_google_callback_rejects_bad_state(client, store):
 
 
 def test_login_page_says_so_when_google_unconfigured(store):
+    """Sign-in lives on the landing page now: with Google unconfigured
+    the landing page says so plainly instead of offering a button,
+    and /account/login sends you there."""
     app = create_app(saas_store=store,
                      saas_config=SaasConfig(base_url="http://testserver"))
-    r = TestClient(app).get("/account/login")
+    c = TestClient(app)
+    r = c.get("/account/login", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+    r = c.get("/")
     assert r.status_code == 200
     assert "not set up yet" in r.text
-    assert "Sign in with Google" not in r.text
+    # No sign-in button is offered when Google is not configured
+    # (the how-it-works prose may still name it, and the preview
+    # script holds the URL for after sign-in is configured).
+    assert "id='landing-signin'" not in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +215,9 @@ def test_login_page_says_so_when_google_unconfigured(store):
 def test_dashboard_requires_login(client):
     r = client.get("/account/dashboard", follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/account/login"
+    # Sign-in lives on the landing page — that is where an unsigned
+    # visitor is sent.
+    assert r.headers["location"] == "/"
 
 
 def test_dashboard_honest_unavailable_states(client, store):
@@ -230,7 +249,7 @@ def test_subscribe_page_shows_20_and_checkout(client, store, monkeypatch):
     assert "$20/month" in r.text
     assert "100 credits" in r.text
 
-    def _fake_checkout(config, account):
+    def _fake_checkout(config, account, site_url=None):
         assert config.stripe_price_id == "price_20usd"
         return {"id": "cs_test_1",
                 "url": "https://checkout.stripe.com/pay/cs_test_1"}

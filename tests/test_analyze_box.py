@@ -26,6 +26,8 @@ from fastapi.testclient import TestClient
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
 
+from _signin import operator_store_and_config, sign_in
+
 SITE = "https://example.com"
 
 GOOD_PAGE = """<html lang="en"><head><title>Example — Home</title>
@@ -70,8 +72,12 @@ def _dead_fetch(url, timeout=10.0):
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
     monkeypatch.setenv("ECOSYSTEM_STATE_DB", str(tmp_path / "state.db"))
-    app = create_app(registry=BusinessRegistry(), ledger=Ledger())
-    return TestClient(app)
+    store, config = operator_store_and_config()
+    app = create_app(registry=BusinessRegistry(), ledger=Ledger(),
+                     saas_store=store, saas_config=config)
+    client = TestClient(app)
+    sign_in(client, store)
+    return client
 
 
 def _poll_until_done(client, job_id, timeout=10.0):

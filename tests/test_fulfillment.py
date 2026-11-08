@@ -19,6 +19,8 @@ from ecosystem.fulfillment import (COST_ACTION, FulfilmentPolicy,
 from ecosystem.shopify_pipeline import load_state, run_check
 from orchestrator.approvals import ApprovalGate
 
+from _signin import operator_store_and_config, sign_in
+
 NOW = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
 PID = "gid://shopify/Product/1"
 OID = "gid://shopify/Order/5001"
@@ -358,7 +360,11 @@ def test_dashboard_renders_cost_approval(gate):
     gate.request(COST_ACTION, amount_usd=13.2, details={
         "order_id": OID, "order_name": "#1001", "products": ["Laptop Stand"],
         "approved_cost_usd": 10.7, "current_cost_usd": 13.2, "shipping_method": "CJPacket"})
-    r = TestClient(create_app(approvals=gate)).get("/approvals")
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(approvals=gate, saas_store=store,
+                                   saas_config=config))
+    sign_in(client, store)
+    r = client.get("/approvals")
     assert "Supplier cost went up" in r.text and "$13.20" in r.text and "#1001" in r.text
 
 

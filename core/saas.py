@@ -124,6 +124,13 @@ class SaasConfig:
     monthly_credits: int = MONTHLY_CREDIT_ALLOWANCE_DEFAULT
     base_url: str = "http://localhost:8000"
     cookie_secure: bool = False
+    #: The operator's Google email (Spencer). The operator signs in
+    #: with Google like anyone else; this email is what gates /admin,
+    #: the operator tools, and ownership of the existing ecosystem
+    #: businesses. Read from the environment (SAAS_OPERATOR_EMAIL) —
+    #: never a hardcoded secret, just an email address. Empty means
+    #: "no operator configured".
+    operator_email: str = ""
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "SaasConfig":
@@ -143,7 +150,15 @@ class SaasConfig:
             base_url=env.get("SAAS_BASE_URL", "http://localhost:8000"
                              ).rstrip("/"),
             cookie_secure=env.get("SAAS_COOKIE_SECURE", "") == "1",
+            operator_email=env.get("SAAS_OPERATOR_EMAIL", ""
+                                   ).strip().lower(),
         )
+
+    def is_operator(self, email: str | None) -> bool:
+        """True when this Google email is the operator's. Case- and
+        whitespace-insensitive; False when no operator is configured."""
+        return bool(self.operator_email and email and
+                    email.strip().lower() == self.operator_email)
 
     @property
     def google_configured(self) -> bool:
@@ -391,6 +406,16 @@ class SaasStore:
                 "SELECT * FROM saas_accounts WHERE stripe_subscription_id = ?",
                 (subscription_id,)).fetchone()
         return _row_dict(row) if row else None
+
+    def list_accounts(self) -> list[dict]:
+        """Every account on the platform, oldest first. Operator-only
+        data — the /admin pages are the only caller; a customer's own
+        pages never list other accounts."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_accounts ORDER BY created_at"
+                ).fetchall()
+        return [_row_dict(r) for r in rows]
 
     def set_stripe_customer(self, account_id: str, customer_id: str,
                             subscription_id: str | None = None) -> None:
@@ -793,21 +818,27 @@ def stripe_auth_header(secret_key: str) -> dict:
 
 
 def create_checkout_session(config: SaasConfig, account: dict,
-                            urlopen=None) -> dict:
+                            urlopen=None, site_url: str | None = None) -> dict:
     """Create a $20/month subscription checkout session for an account.
     Returns {"id", "url"}. Raises SaasError when Stripe is not
-    configured or the call fails."""
+    configured or the call fails. When ``site_url`` is given, the
+    success URL carries it, so the customer lands back on their
+    dashboard with the site they typed already filled in."""
     if not config.stripe_configured:
         raise SaasError(
             "Payments are not set up yet — the price is $20/month, but "
             "the Stripe connection is still being set up.")
+    success_url = f"{config.base_url}/account/dashboard?subscribed=1"
+    if site_url:
+        success_url += ("&site_url=" +
+                        urllib.parse.quote(site_url, safe=""))
     fields = {
         "mode": "subscription",
         "line_items[0][price]": config.stripe_price_id,
         "line_items[0][quantity]": "1",
         "client_reference_id": account["id"],
         "customer_email": account["email"],
-        "success_url": f"{config.base_url}/account/dashboard?subscribed=1",
+        "success_url": success_url,
         "cancel_url": f"{config.base_url}/account/subscribe?cancelled=1",
     }
     body = _http_post_form(

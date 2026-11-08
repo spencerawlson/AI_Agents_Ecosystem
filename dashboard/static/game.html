@@ -362,6 +362,13 @@
   @media (prefers-reduced-motion: reduce) {
     .blob, .floater, .char-card.working .avatar, .char-card.working .char-svg { animation: none !important; }
   }
+  /* Customer nav + pending-site banner (the signed-in home):
+     pill links in the same light language as the ops panels. */
+  #customer-nav { display: flex; flex-wrap: wrap; gap: 6px; max-width: 1400px; margin: 0 auto; padding: 12px 22px 0; }
+  #customer-nav a { display: inline-block; min-height: 44px; line-height: 44px; padding: 0 14px; border-radius: 8px; background: #f3efff; border: 1px solid #c4b5fd; color: #111; text-decoration: none; font-size: 15px; }
+  #pending-site { display: none; max-width: 1400px; margin: 12px auto 0; padding: 14px 16px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 12px; }
+  #pending-site.show { display: block; }
+  #pending-site a.cta { display: inline-block; min-height: 44px; line-height: 44px; padding: 0 20px; border-radius: 8px; background: linear-gradient(135deg, #f09a4e, #e8833a); color: #fff; font-weight: bold; text-decoration: none; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -384,6 +391,16 @@
   <div id="live-wrap"><span id="live-dot"></span><span id="live-label">LIVE</span></div>
 </header>
 <div id="error-banner"></div>
+<nav id="customer-nav" aria-label="Ventoryn">
+  <a href="/ops">Live Ops</a>
+  <a href="/portfolio">My Portfolio</a>
+  <a href="/approvals">Approvals</a>
+  <a href="/report">Report</a>
+  <a href="/account/dashboard">My account</a>
+  <a href="/account/subscribe">Subscribe</a>
+  <a href="/account/logout">Sign out</a>
+</nav>
+<div id="pending-site" role="status"></div>
 <div id="main">
   <div class="panel" id="analyze-panel">
     <h2>🔍 Analyze a site</h2>
@@ -537,6 +554,8 @@ const ACTOR_COLORS = {
 /* ---------------- state ---------------- */
 const state = {
   snapshot: null,
+  account: null,      // the signed-in account, from snapshot.account
+  pendingSiteUrl: null, // website carried through sign-in (?site_url=…)
   prevTasks: {},       // agentType -> tasks_completed, for flash highlight
   prevBizCount: null,
   auto: false,
@@ -546,6 +565,38 @@ const state = {
   opsHistory: [],      // {tick, tasks, spend} per poll, last 30, for the activity chart
   refreshInFlight: false,
 };
+
+/* The snapshot carries the signed-in account. The operator sees the
+   simulation controls (Step/Auto/Reset) and the "press Step" copy;
+   a customer never does — their Live Ops is their own sites and
+   work, and the crew works for them, not on a button press. A
+   website carried through sign-in from the landing page gets its
+   subscribe / add-site banner here, once the subscription status
+   is known. */
+function applyAccount() {
+  const a = state.account;
+  const isOp = !a || a.is_operator;
+  for (const id of ["btn-step", "btn-auto", "btn-pause", "btn-reset", "speed"]) {
+    const el = $(id);
+    if (el) el.style.display = isOp ? "" : "none";
+  }
+  const hint = document.querySelector("#controls .hint");
+  if (hint) hint.style.display = isOp ? "" : "none";
+  const bizTitle = document.querySelector("#businesses-panel h2");
+  if (bizTitle && a && !a.is_operator) bizTitle.textContent = "🏪 Your websites";
+  if (state.pendingSiteUrl && a) {
+    const banner = $("pending-site");
+    const enc = encodeURIComponent(state.pendingSiteUrl);
+    if (a.subscription_status === "active") {
+      banner.innerHTML = "<strong>" + esc(state.pendingSiteUrl) + "</strong> — the website you typed on the front page. " +
+        "<a class='cta' href='/account/sites/new?url=" + enc + "'>Add this website</a>";
+    } else {
+      banner.innerHTML = "<strong>" + esc(state.pendingSiteUrl) + "</strong> — the website you typed on the front page. " +
+        "<a class='cta' href='/account/subscribe?site_url=" + enc + "'>Subscribe — $20/month to add it</a>";
+    }
+    banner.classList.add("show");
+  }
+}
 
 /* ---------------- api ---------------- */
 async function api(path, method) {
@@ -648,6 +699,8 @@ function drawSpark() {
 /* ---------------- render ---------------- */
 function render(snapshot) {
   state.snapshot = snapshot;
+  state.account = snapshot.account || null;
+  applyAccount();
   const t = snapshot.totals || {};
   const tick = snapshot.tick;
   const last = state.profitHistory[state.profitHistory.length - 1];
@@ -733,9 +786,12 @@ function renderStations(s) {
       // Product station: derived from totals + businesses (no agent_type).
       const n = Number(totals.businesses) || 0;
       const latest = businesses.length ? businesses[businesses.length - 1] : null;
+      const noBiz = (state.account && !state.account.is_operator)
+        ? "No websites yet — add one above"
+        : "No businesses yet — press Step";
       inner += '<div class="char-big">' + fmtInt(n) + ' <span style="font-size:14px">🏪</span></div>' +
         '<div class="char-sub" title="' + esc(latest ? latest.name : "") + '">' +
-        esc(latest ? "Latest: " + latest.name : "No businesses yet — press Step") + "</div>";
+        esc(latest ? "Latest: " + latest.name : noBiz) + "</div>";
     } else {
       // Ledger station: real ledger totals (no agent_type).
       const profit = Number(totals.net_profit) || 0;
@@ -756,7 +812,10 @@ function renderBusinesses(businesses) {
   const wrap = $("businesses-list");
   wrap.innerHTML = "";
   if (!businesses.length) {
-    wrap.innerHTML = '<div class="empty-note">No businesses yet — press Step and the crew will get to work! 🚀</div>';
+    const empty = (state.account && !state.account.is_operator)
+      ? "No websites yet — paste your URL in the analyzer above and subscribe to put the crew to work on it."
+      : "No businesses yet — press Step and the crew will get to work! 🚀";
+    wrap.innerHTML = '<div class="empty-note">' + empty + "</div>";
     return;
   }
   for (const b of businesses) {
@@ -785,6 +844,12 @@ function eventVoice(e) {
     const who = e.actor === "game" ? "The crew" : (e.actor || "Someone");
     return who + " finished a tick" + (e.business_id ? " and launched a business! 🎉" : ".");
   }
+  if (r && r.job_type) {
+    // A customer's own job (analyze, …) in their scoped feed: the
+    // result string is already the human summary ("Site 100/100 · …").
+    const done = e.event === "job_done";
+    return (done ? "✅ " : "❌ ") + String(r.job_type).replace(/_/g, " ") + " — " + (r.summary || e.event);
+  }
   return (e.actor || "system") + " — " + (e.event || "");
 }
 
@@ -807,7 +872,12 @@ function renderEvents(events) {
     feed.appendChild(row);
     shown++;
   }
-  if (!shown) feed.innerHTML = '<div class="empty-note">Quiet… for now. Press Step! 🎲</div>';
+  if (!shown) {
+    const empty = (state.account && !state.account.is_operator)
+      ? "Quiet… for now. Your websites' work will show up here."
+      : "Quiet… for now. Press Step! 🎲";
+    feed.innerHTML = '<div class="empty-note">' + empty + "</div>";
+  }
   feed.scrollTop = 0;
 }
 
@@ -1224,6 +1294,16 @@ $("speed").addEventListener("change", () => {
   if (state.auto) { stopAuto(); startAuto(); }
 });
 addEventListener("resize", () => { if (confettiPieces.length) { $("confetti").width = innerWidth; $("confetti").height = innerHeight; } });
+
+/* A website carried through sign-in from the landing page
+   (?site_url=…): prefill the analyzer. The subscribe / add-site
+   banner is filled in by applyAccount() once the first snapshot
+   (and with it the subscription status) arrives. */
+const _siteParam = new URLSearchParams(location.search).get("site_url");
+if (_siteParam) {
+  state.pendingSiteUrl = _siteParam;
+  $("analyze-url").value = _siteParam;
+}
 
 updateButtons();
 refresh();

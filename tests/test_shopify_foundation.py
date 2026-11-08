@@ -318,8 +318,14 @@ def test_dashboard_shows_supplier_approval(gate, tmp_path):
 
     from dashboard.app import create_app
 
+    from _signin import operator_store_and_config, sign_in
+
     _run_source(gate, tmp_path)
-    r = TestClient(create_app(approvals=gate)).get("/approvals")
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(approvals=gate, saas_store=store,
+                                   saas_config=config))
+    sign_in(client, store)
+    r = client.get("/approvals")
     assert r.status_code == 200
     assert "Supplier #1" in r.text
     assert "$23.99" in r.text

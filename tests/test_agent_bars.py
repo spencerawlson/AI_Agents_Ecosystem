@@ -34,10 +34,17 @@ def _registry(*types):
     return reg
 
 
+from _signin import operator_store_and_config, sign_in
+
+
 def _snapshot(audit, *types):
     orch = Orchestrator(registry=_registry(*types))
-    app = create_app(orchestrator=orch, audit=audit)
-    return TestClient(app).get("/api/snapshot").json()
+    store, config = operator_store_and_config()
+    app = create_app(orchestrator=orch, audit=audit,
+                     saas_store=store, saas_config=config)
+    client = TestClient(app)
+    sign_in(client, store)
+    return client.get("/api/snapshot").json()
 
 
 def _by_type(rows):

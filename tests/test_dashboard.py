@@ -17,6 +17,18 @@ from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 from orchestrator.registry import AgentRegistry
 
+from _signin import operator_store_and_config, sign_in
+
+
+def _operator_app(**kwargs):
+    """create_app wired with an operator store/config, plus a signed-in
+    operator client. Returns (app, client, store)."""
+    store, config = operator_store_and_config()
+    app = create_app(saas_store=store, saas_config=config, **kwargs)
+    client = TestClient(app)
+    sign_in(client, store)
+    return app, client, store
+
 
 def test_dashboard():
     registry = BusinessRegistry()
@@ -28,15 +40,24 @@ def test_dashboard():
     ledger.record(biz.id, "advertising", -200)
     approvals.request("ad_spend_increase", amount_usd=100.0, business_id=biz.id)
 
-    app = create_app(registry=registry, ledger=ledger, approvals=approvals)
-    client = TestClient(app)
+    app, client, _store = _operator_app(
+        registry=registry, ledger=ledger, approvals=approvals)
 
+    # / is the public landing page now — the portfolio moved to
+    # /portfolio, and it is the operator's own (signed-in) view.
     r = client.get("/")
+    assert r.status_code == 200
+    assert "first 100 paying customers" in r.text
+    assert "Sign in with Google" in r.text
+    assert "$20/month" in r.text
+
+    r = client.get("/portfolio")
     assert r.status_code == 200
     assert "Test Store" in r.text
     assert "$800.00" in r.text  # net profit
     assert "/ops" in r.text  # Live Ops link, not the old "game" tag
     assert "Live Ops" in r.text
+    assert "biz-card" in r.text  # styled cards, not a bare table
 
     r = client.get(f"/businesses/{biz.id}")
     assert r.status_code == 200
@@ -69,9 +90,8 @@ def test_api_report():
                             description="test agent")
     orchestrator = Orchestrator(registry=agent_registry)
 
-    app = create_app(orchestrator=orchestrator, registry=registry,
-                     ledger=ledger)
-    client = TestClient(app)
+    app, client, _store = _operator_app(
+        orchestrator=orchestrator, registry=registry, ledger=ledger)
 
     r = client.get("/api/report")
     assert r.status_code == 200
@@ -93,12 +113,12 @@ def test_api_report():
 def test_api_report_experiment_shape():
     """experiment_001 block has the required keys when a monitor ran."""
     registry = BusinessRegistry()
-    app = create_app(registry=registry, ledger=Ledger())
+    app, client, _store = _operator_app(
+        registry=registry, ledger=Ledger())
     app.state.game["experiment_001"] = {
         "verdict": "ON_TRACK", "days_elapsed": 5, "days_remaining": 55,
         "orders": 3, "revenue_usd": 36.0, "spend_usd": 4.5, "pace_pct": 42,
     }
-    client = TestClient(app)
     exp = client.get("/api/report").json()["experiment_001"]
     assert set(exp) == {"verdict", "days_elapsed", "days_remaining", "orders",
                         "revenue_usd", "spend_usd", "pace_pct"}
@@ -113,8 +133,8 @@ def test_report_page():
     biz = registry.create("Report Store", "ecommerce")
     ledger.record(biz.id, "revenue", 500)
 
-    app = create_app(registry=registry, ledger=ledger)
-    client = TestClient(app)
+    app, client, _store = _operator_app(
+        registry=registry, ledger=ledger)
 
     r = client.get("/report")
     assert r.status_code == 200
@@ -131,8 +151,8 @@ def test_game_view_is_live_ops():
     """/game serves the Ventoryn — Live Ops page with a vector
     cast (one inline SVG per character, no emoji in the roster) and the
     live ops window; /ops is an alias for the same page."""
-    app = create_app(registry=BusinessRegistry(), ledger=Ledger())
-    client = TestClient(app)
+    app, client, _store = _operator_app(
+        registry=BusinessRegistry(), ledger=Ledger())
     for path in ("/game", "/ops"):
         r = client.get(path)
         assert r.status_code == 200
@@ -192,10 +212,10 @@ def test_api_snapshot_feeds_live_ops():
     agent_registry.register("research", capabilities=["analyze"],
                             description="r")
     orchestrator = Orchestrator(registry=agent_registry)
-    app = create_app(orchestrator=orchestrator, registry=registry,
-                     ledger=ledger, audit=audit)
+    app, client, _store = _operator_app(
+        orchestrator=orchestrator, registry=registry,
+        ledger=ledger, audit=audit)
     app.state.game["tick"] = 3
-    client = TestClient(app)
     data = client.get("/api/snapshot").json()
     assert data["tick"] == 3
     by_type = {a["type"]: a for a in data["agents"]}
@@ -235,9 +255,9 @@ def test_api_snapshot_includes_event_cost():
     agent_registry.register("discovery", capabilities=["search"],
                             description="d")
     orchestrator = Orchestrator(registry=agent_registry)
-    app = create_app(orchestrator=orchestrator, registry=registry,
-                     ledger=ledger, audit=audit)
-    client = TestClient(app)
+    app, client, _store = _operator_app(
+        orchestrator=orchestrator, registry=registry,
+        ledger=ledger, audit=audit)
     data = client.get("/api/snapshot").json()
     by_event = {e["event"]: e for e in data["events"]}
     assert by_event["run_completed"]["cost_usd"] == 0.02
@@ -254,11 +274,10 @@ def test_create_app_keeps_empty_audit_log():
     tick_completed) while the money piled up elsewhere."""
     audit = AuditLog()
     assert len(audit) == 0
-    app = create_app(registry=BusinessRegistry(), ledger=Ledger(),
-                     audit=audit)
+    app, client, _store = _operator_app(
+        registry=BusinessRegistry(), ledger=Ledger(), audit=audit)
     audit.record("discovery", "run_completed", tokens_used=10,
                  cost_usd=0.01)
-    client = TestClient(app)
     data = client.get("/api/snapshot").json()
     assert len(data["events"]) == 1
     assert data["events"][0]["event"] == "run_completed"
@@ -284,8 +303,8 @@ def test_live_ops_is_ventoryn_and_mobile_friendly():
     viewBox to the panel on screen (so labels don't shrink to ~6px on
     a phone), and the footer controls keep 44px+ tap targets. The
     desktop crew grid is untouched."""
-    app = create_app(registry=BusinessRegistry(), ledger=Ledger())
-    client = TestClient(app)
+    app, client, _store = _operator_app(
+        registry=BusinessRegistry(), ledger=Ledger())
     r = client.get("/ops")
     assert r.status_code == 200
     assert "Ventoryn — Live Ops" in r.text
