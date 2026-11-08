@@ -203,7 +203,7 @@ def create_app(
         "ledger": ledger or Ledger(),
         "experiments": experiments or ExperimentEngine(),
         "approvals": approvals or ApprovalGate(),
-        "audit": audit or AuditLog(),
+        "audit": audit if audit is not None else AuditLog(),
     }
     app.state.ecosystem = state
 
@@ -482,6 +482,8 @@ nothing in them was published.</p>
             "actor": e.agent_type, "event": e.event,
             "business_id": e.business_id, "task_id": e.task_id,
             "result": e.result,
+            "cost_usd": round(e.cost_usd, 4),
+            "tokens_used": e.tokens_used,
         } for e in aud.latest(50)]
         totals = {
             "revenue": round(sum(r["revenue"] for r in biz_rows), 2),

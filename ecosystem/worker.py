@@ -189,6 +189,12 @@ def run_tick(rt, tick: int) -> dict:
                      budget_usd=1.0, budget_tokens=5000)
     r1 = orch.dispatch(t1.id)
     if r1.status != TaskStatus.COMPLETED:
+        # The run happened and cost what it cost even though it failed:
+        # record it, or the feed can never show a failed agent.
+        rt.audit.record(agent_type="discovery", event="run_failed",
+                        task_id=t1.id, run_id=r1.id,
+                        tokens_used=r1.tokens_used, cost_usd=r1.cost_usd,
+                        error=r1.error, result={"tick": tick})
         return {"tick": tick, "ok": False, "error": f"discovery: {r1.error}"}
     opportunities = r1.output["opportunities"]
 
@@ -196,6 +202,15 @@ def run_tick(rt, tick: int) -> dict:
                      budget_usd=2.0, budget_tokens=8000)
     r2 = orch.dispatch(t2.id)
     if r2.status != TaskStatus.COMPLETED:
+        rt.audit.record(agent_type="discovery", event="run_completed",
+                        task_id=t1.id, run_id=r1.id,
+                        tokens_used=r1.tokens_used, cost_usd=r1.cost_usd,
+                        result={"tick": tick,
+                                "opportunities": len(opportunities)})
+        rt.audit.record(agent_type="research", event="run_failed",
+                        task_id=t2.id, run_id=r2.id,
+                        tokens_used=r2.tokens_used, cost_usd=r2.cost_usd,
+                        error=r2.error, result={"tick": tick})
         return {"tick": tick, "ok": False, "error": f"research: {r2.error}"}
     reports = r2.output["reports"]
 
@@ -224,6 +239,18 @@ def run_tick(rt, tick: int) -> dict:
                         business_id=biz.id,
                         result={"tick": tick, "winner": winner.niche,
                                 "score": winner.score})
+
+    # One event per agent run, not just the tick summary above: this is
+    # what lets the feed answer "what is Scout doing" — who ran, what
+    # they produced, and what it cost. Recorded even with no winner
+    # (business_id is then None); the runs happened either way.
+    for run, extra in ((r1, {"opportunities": len(opportunities)}),
+                       (r2, {"reports": len(reports)})):
+        rt.audit.record(agent_type=run.agent_type, event="run_completed",
+                        task_id=run.task_id, run_id=run.id,
+                        business_id=business_id,
+                        tokens_used=run.tokens_used, cost_usd=run.cost_usd,
+                        result={"tick": tick, **extra})
 
     return {
         "tick": tick,

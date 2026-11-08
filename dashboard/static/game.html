@@ -216,6 +216,7 @@
     color: #fff; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
   .ops-event { font-weight: 800; }
   .ops-ids { font-size: 11px; color: var(--dim); font-weight: 600; word-break: break-all; }
+  .ops-cost { font-size: 11px; color: #b8860b; font-weight: 700; white-space: nowrap; }
   .ops-result { font-size: 12px; margin-top: 2px; word-break: break-word; }
 
   /* ---------- experiment 001 ---------- */
@@ -403,6 +404,14 @@ const esc = (v) => String(v == null ? "" : v)
 const fmtUSD = (n) => {
   const v = Number(n) || 0;
   return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+/* Sub-cent run costs (a $0.0004 LLM call) would read "$0.00" under
+   fmtUSD and hide the spend the feed exists to show. */
+const fmtCost = (n) => {
+  const v = Number(n) || 0;
+  if (v === 0) return "$0.00";
+  if (Math.abs(v) < 0.01) return "$" + v.toFixed(4);
+  return fmtUSD(v);
 };
 const fmtInt = (n) => (Number(n) || 0).toLocaleString("en-US");
 const fmtTime = (ts) => {
@@ -816,11 +825,19 @@ function renderOpsFeed(events) {
     const color = ACTOR_COLORS[e.actor] || ACTOR_COLORS.system;
     const ids = [e.business_id, e.task_id].filter(Boolean).join(" · ");
     const result = eventResult(e);
+    /* What the run spent — shown only when the run spent anything.
+       Old events (recorded before costs were serialized, or heuristic
+       runs at $0) show nothing instead of a fake "$0.00". */
+    const c = Number(e.cost_usd) || 0;
+    const tk = Number(e.tokens_used) || 0;
+    const cost = (c > 0 || tk > 0)
+      ? fmtCost(c) + " · " + fmtInt(tk) + " tokens" : "";
     row.innerHTML = '<div class="ops-top">' +
       '<span class="ops-time">' + esc(fmtTime(e.ts)) + "</span>" +
       '<span class="ops-actor" style="background:' + esc(color) + '">' + esc(e.actor || "system") + "</span>" +
       '<span class="ops-event">' + esc(e.event || "") + "</span>" +
       (ids ? '<span class="ops-ids">' + esc(ids) + "</span>" : "") +
+      (cost ? '<span class="ops-cost">' + esc(cost) + "</span>" : "") +
       "</div>" +
       (result ? '<div class="ops-result">' + esc(result) + "</div>" : "");
     feed.appendChild(row);

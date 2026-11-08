@@ -35,12 +35,36 @@ every 5 seconds (skipped while the tab is hidden), so the feed and
 graphs move while ticks run elsewhere — Auto, the worker, another
 tab.
 
+## What persists
+
+The feed used to be amnesiac: the ledger survived restarts (shared
+SQLite) but the audit log lived only in memory, so a dashboard
+restart emptied "What the team is doing" while the money stayed —
+and a worker process's events never reached the dashboard at all,
+since they died with the worker. Now the audit log lives in the
+same SQLite file as the businesses and the ledger
+(`ECOSYSTEM_STATE_DB`, `core/state_store.py` `SharedAuditLog`):
+
+- Every tick records **one event per agent run** (`run_completed`,
+  with tokens + cost and a result summary — opportunities found,
+  reports written) plus the `tick_completed` summary, so the feed
+  can say what each agent did and what it spent. Failed runs are
+  recorded as `run_failed`, with the error.
+- The feed shows the cost next to an event when the run spent
+  anything (e.g. "$0.02 · 1,240 tokens"); older cost-less events
+  and $0 heuristic runs show nothing.
+- The table keeps the **latest 500 events**; older ones are pruned.
+- Without `ECOSYSTEM_STATE_DB` the audit stays in-memory (tests,
+  one-off runs) and a restart still clears it.
+- Reset (`/api/reset`) rebuilds the runtime but does not wipe the
+  audit log: the history is a record, not session state.
+
 ## Honest limits
 
 - The activity line is a **rolling in-page history** (last 30
   polls). It resets on reload; the status line says so. The bars,
   feed and cards always come from the server, so they survive a
-  reload.
+  reload — and a restart too, when shared state is on.
 - When nothing has happened yet, the panels say so ("Nothing yet
   — run a tick", "No work recorded yet") instead of inventing
   activity. An empty feed is a quiet crew, not a broken page.

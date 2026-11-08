@@ -24,8 +24,9 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from orchestrator.models import utcnow
+from orchestrator.models import AuditEvent, utcnow
 
+from .audit import AuditLog
 from .ledger import KIND_TO_FIELD, Ledger, ProfitAndLoss
 from .models import TRANSITIONS, Business, BusinessStatus, LedgerEntry
 from .registry import BusinessRegistry, InvalidTransition
@@ -43,6 +44,11 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
     data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entries_business ON ledger_entries(business_id);
+CREATE TABLE IF NOT EXISTS audit_events (
+    id TEXT PRIMARY KEY,
+    created_seq INTEGER,
+    data TEXT NOT NULL
+);
 """
 
 
@@ -183,3 +189,79 @@ def shared_state_enabled() -> str | None:
     """The configured shared-state database path, or None."""
     import os
     return os.environ.get("ECOSYSTEM_STATE_DB") or None
+
+
+class SharedAuditLog(AuditLog):
+    """AuditLog with the same semantics, SQLite-backed.
+
+    The bug this fixes: the ledger survived restarts (shared SQLite)
+    but the audit log lived only in memory, so a dashboard restart
+    emptied "What the team is doing" while the money stayed — and a
+    worker process's events never reached the dashboard at all, since
+    they died with the worker. Now the audit log lives in the same
+    ECOSYSTEM_STATE_DB file as the businesses and the ledger.
+
+    Same pattern as SharedLedger: every read goes to the database, so
+    an event recorded by ANY process is visible to the others
+    immediately, and survives restarts. The table keeps only the
+    latest 500 events so it never grows forever.
+    """
+
+    MAX_EVENTS = 500
+
+    def __init__(self, db_path: str | Path) -> None:
+        super().__init__()
+        self._store = _SQLiteStore(db_path)
+        self._events = self._load_all()
+
+    def _load_all(self) -> list[AuditEvent]:
+        with self._store._lock:
+            cur = self._store._conn.execute(
+                "SELECT data FROM audit_events ORDER BY created_seq")
+            rows = cur.fetchall()
+        return [AuditEvent.model_validate_json(r[0]) for r in rows]
+
+    def record(self, *args, **kwargs) -> AuditEvent:
+        evt = super().record(*args, **kwargs)
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "INSERT INTO audit_events (id, created_seq, data) "
+                "VALUES (?, (SELECT COALESCE(MAX(created_seq), 0) + 1 "
+                "FROM audit_events), ?)",
+                (evt.id, evt.model_dump_json()))
+            self._store._conn.execute(
+                "DELETE FROM audit_events WHERE id NOT IN "
+                "(SELECT id FROM audit_events ORDER BY created_seq "
+                "DESC LIMIT ?)", (self.MAX_EVENTS,))
+        if len(self._events) > self.MAX_EVENTS:
+            del self._events[:len(self._events) - self.MAX_EVENTS]
+        return evt
+
+    def for_business(self, business_id: str) -> list[AuditEvent]:
+        return [e for e in self._load_all()
+                if e.business_id == business_id]
+
+    def for_task(self, task_id: str) -> list[AuditEvent]:
+        return [e for e in self._load_all() if e.task_id == task_id]
+
+    def latest(self, n: int = 50) -> list[AuditEvent]:
+        """Most recent events, newest first — read from the database."""
+        with self._store._lock:
+            cur = self._store._conn.execute(
+                "SELECT data FROM audit_events ORDER BY created_seq "
+                "DESC LIMIT ?", (n,))
+            rows = cur.fetchall()
+        return [AuditEvent.model_validate_json(r[0]) for r in rows]
+
+    def total_ai_cost(self, business_id: str | None = None) -> float:
+        events = self._load_all()
+        if business_id is not None:
+            events = [e for e in events if e.business_id == business_id]
+        return sum(e.cost_usd for e in events)
+
+    def __len__(self) -> int:
+        with self._store._lock:
+            cur = self._store._conn.execute(
+                "SELECT COUNT(*) FROM audit_events")
+            row = cur.fetchone()
+        return row[0] if row else 0

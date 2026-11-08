@@ -144,6 +144,9 @@ def test_game_view_is_live_ops():
         assert 'id="ops-activity"' in r.text
         assert 'id="ops-status"' in r.text
         assert "setInterval" in r.text and "5000" in r.text
+        # The ops feed shows what a run spent (class + formatter).
+        assert "ops-cost" in r.text
+        assert "fmtCost" in r.text
         # One well-formed inline SVG vector icon per character.
         attrs = re.search(r"const SVG_ATTRS = '(.*?)';", r.text).group(1)
         roster = r.text.split("const ROSTER = [", 1)[1].split("];", 1)[0]
@@ -198,12 +201,58 @@ def test_api_snapshot_feeds_live_ops():
     assert len(data["events"]) == 1
     evt = data["events"][0]
     assert set(evt) >= {"ts", "actor", "event", "business_id", "task_id",
-                        "result"}
+                        "result", "cost_usd", "tokens_used"}
     assert evt["actor"] == "discovery"
     assert evt["event"] == "tick_completed"
     assert evt["business_id"] == biz.id
     assert evt["task_id"] == "task_1"
     assert evt["result"]["winner"] == "Ops Store"
+
+
+def test_api_snapshot_includes_event_cost():
+    """GET /api/snapshot carries each event's cost + tokens, so the ops
+    feed can show what a run spent — and $0 / 0 tokens for old
+    cost-less events, which the feed then shows nothing for."""
+    registry = BusinessRegistry()
+    ledger = Ledger()
+    audit = AuditLog()
+    biz = registry.create("Cost Store", "ecommerce")
+    audit.record("discovery", "run_completed", task_id="task_1",
+                 business_id=biz.id, tokens_used=1240, cost_usd=0.02,
+                 result={"tick": 1, "opportunities": 5})
+    audit.record("worker", "tick_completed", business_id=biz.id,
+                 result={"tick": 1, "winner": "Cost Store", "score": 80})
+    agent_registry = AgentRegistry()
+    agent_registry.register("discovery", capabilities=["search"],
+                            description="d")
+    orchestrator = Orchestrator(registry=agent_registry)
+    app = create_app(orchestrator=orchestrator, registry=registry,
+                     ledger=ledger, audit=audit)
+    client = TestClient(app)
+    data = client.get("/api/snapshot").json()
+    by_event = {e["event"]: e for e in data["events"]}
+    assert by_event["run_completed"]["cost_usd"] == 0.02
+    assert by_event["run_completed"]["tokens_used"] == 1240
+    assert by_event["tick_completed"]["cost_usd"] == 0.0
+    assert by_event["tick_completed"]["tokens_used"] == 0
+
+
+def test_create_app_keeps_empty_audit_log():
+    """Regression: create_app used to do `audit or AuditLog()`, and an
+    empty AuditLog is falsy (__len__ == 0) — so the dashboard silently
+    swapped in a second, empty log and never saw the orchestrator's or
+    worker's events. The feed showed one event per tick (its own
+    tick_completed) while the money piled up elsewhere."""
+    audit = AuditLog()
+    assert len(audit) == 0
+    app = create_app(registry=BusinessRegistry(), ledger=Ledger(),
+                     audit=audit)
+    audit.record("discovery", "run_completed", tokens_used=10,
+                 cost_usd=0.01)
+    client = TestClient(app)
+    data = client.get("/api/snapshot").json()
+    assert len(data["events"]) == 1
+    assert data["events"][0]["event"] == "run_completed"
 
 
 if __name__ == "__main__":
@@ -213,4 +262,6 @@ if __name__ == "__main__":
     test_report_page()
     test_game_view_is_live_ops()
     test_api_snapshot_feeds_live_ops()
+    test_api_snapshot_includes_event_cost()
+    test_create_app_keeps_empty_audit_log()
     print("Report tests passed.")

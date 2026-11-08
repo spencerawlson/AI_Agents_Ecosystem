@@ -193,7 +193,20 @@ def build_runtime(use_postgres: bool = False,
             )
         store = PostgresTaskStore(url)
 
-    audit_log = AuditLog()
+    # Shared state: with ECOSYSTEM_STATE_DB set, businesses, the ledger
+    # AND the audit log live in one SQLite file shared by every process
+    # (dashboard, worker, missions) instead of per-process memory — the
+    # audit log used to be in-memory only, so a restart emptied the
+    # dashboard feed while the money stayed. Unset = the original
+    # in-memory behavior (tests stay hermetic).
+    state_db = os.environ.get("ECOSYSTEM_STATE_DB")
+    if state_db:
+        from core.state_store import SharedAuditLog
+
+        audit_log: AuditLog = SharedAuditLog(state_db)
+        log.info("shared state: audit log in %s", state_db)
+    else:
+        audit_log = AuditLog()
     orchestrator = Orchestrator(registry=agent_registry, store=store,
                               audit=audit_log)
     for agent_type, handler in handlers.items():
@@ -209,8 +222,8 @@ def build_runtime(use_postgres: bool = False,
     # ledger live in one SQLite file shared by every process (dashboard,
     # worker, missions) instead of per-process memory — real businesses
     # become visible in the GUI and survive restarts. Unset = the
-    # original in-memory behavior (tests stay hermetic).
-    state_db = os.environ.get("ECOSYSTEM_STATE_DB")
+    # original in-memory behavior (tests stay hermetic). The audit log
+    # was already swapped in above, from the same file.
     if state_db:
         from core.state_store import SharedBusinessRegistry, SharedLedger
 
