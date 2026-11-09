@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -316,6 +317,24 @@ def run_dispatcher(rt, args) -> int:
     return 0
 
 
+def _ticks_paused() -> bool:
+    """The operator-global tick pause, read from the shared state
+    DB (ECOSYSTEM_STATE_DB) — the same persisted flag the
+    dashboard's Pause button sets. No DB configured, or the flag
+    unreadable, means not paused (fail open: a transient read
+    error must not stop the worker; /api/tick is the authoritative
+    gate and refuses while paused)."""
+    db = os.environ.get("ECOSYSTEM_STATE_DB")
+    if not db:
+        return False
+    try:
+        from ventoryn.saas import SaasStore
+
+        return SaasStore(db).get_global_pause()
+    except Exception:  # noqa: BLE001 - pause check never breaks a tick
+        return False
+
+
 def main(argv: list[str] | None = None, rt=None) -> int:
     parser = argparse.ArgumentParser(description="Ecosystem headless worker")
     parser.add_argument("--interval", type=float, default=60.0,
@@ -385,6 +404,17 @@ def main(argv: list[str] | None = None, rt=None) -> int:
     tick = 0
     while True:
         tick += 1
+        if _ticks_paused():
+            # The operator paused ALL agents: no tick work at all
+            # (growth, discovery, monitor, store) — but the loop
+            # still counts and sleeps, so a --ticks run terminates
+            # and the loop resumes on its own when unpaused.
+            print(f"tick {tick}: paused — skipping tick work "
+                  f"(resume all agents to run ticks)", flush=True)
+            if args.ticks and tick >= args.ticks:
+                break
+            time.sleep(args.interval)
+            continue
         if args.growth:
             run_growth_tick(rt, tick)
         if args.discovery:

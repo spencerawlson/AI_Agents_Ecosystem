@@ -336,25 +336,26 @@ like the rest of the runtime.
   `/approvals` (scoped + ownership-enforced decide, redirects back
   to the list with a confirmation) and the customer's Acquisition &
   Attribution `/report` (image-3 structure, real data only), the
-  operator-only legacy report (old shell, untouched), and the `/admin`
-  routes (live now + recent activity, subscribers, accounts with a
-  Two-factor column + per-account reset, agents, admin 2FA setup —
-  password-gated, see above). The signed-in pages share one centered
-  header with a hamburger menu at the far right
-  (`ventoryn/nav.py`); the forced-2FA gate middleware redirects any
-  signed-in session without 2FA to the setup/verify pages. The
-  `/admin` look blends the Kay Ayiti admin board (pale slate-blue,
-  white radius-16 cards, red count accents) with the ShipItAyiti
-  admin (navy/slate headers, ringed cards, uppercase table headers).
-  Registers the SaaS routes on the same store/config.
-- `ventoryn/static/game.html` — the Live Ops page: the shared
-  header is injected server-side at the `<!--VENTORYN_HEADER-->`
-  placeholder (the pill nav row is gone), the account-aware snapshot
-  (operator controls hidden for customers, customer empty states,
-  the pending-site subscribe/add-site banner, the `?site_url=`
-  prefill), the analyze panel with the full country selector
-  (injected at `<!--VENTORYN_COUNTRY_OPTIONS-->`), and a revenue
-  figure that renders "hidden" when the snapshot carries null.
+  operator's Agent & Financial Report (same content, through the
+  platform shell), and the `/admin` routes (live now + recent
+  activity, subscribers, accounts with a Two-factor column +
+  per-account reset, agents, admin 2FA setup — password-gated, see
+  above). The signed-in pages share one platform shell — the purple
+  sidebar + white workspace + app header (`ventoryn/nav.py`,
+  `ventoryn/ui.py`); the forced-2FA gate middleware redirects any
+  signed-in session without 2FA to the setup/verify pages, which
+  render inside the same shell. The `/admin` look blends the Kay
+  Ayiti admin board (pale slate-blue, white radius-16 cards, red
+  count accents) with the ShipItAyiti admin (navy/slate headers,
+  ringed cards, uppercase table headers). Registers the SaaS routes
+  on the same store/config.
+- The Live Ops Overview (`/ops`, `ventoryn/app.py`) is
+  server-rendered through the platform shell — no game file: the
+  account-aware snapshot (operator controls hidden for customers,
+  customer empty states, the pending-site subscribe prompt, the
+  `?site_url=` prefill), the analyze panel with the full country
+  selector, and a revenue figure that renders "hidden" when the
+  snapshot carries null. `/game` redirects to `/ops` (303).
 - `ecosystem/runtime.py` — `create_dashboard_app()` passes the
   file-backed store.
 

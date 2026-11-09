@@ -443,6 +443,10 @@ CREATE TABLE IF NOT EXISTS saas_admin_totp (
     pending_secret TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS saas_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 """
 
 #: Columns added to tables that already exist on a deployed state
@@ -909,6 +913,30 @@ class SaasStore:
             self._conn.execute(
                 "UPDATE saas_accounts SET posting_paused = ? WHERE id = ?",
                 (1 if paused else 0, account_id))
+
+    def get_global_pause(self) -> bool:
+        """The operator-global tick pause: True means the
+        orchestrator tick loop is stopped for every account. The
+        flag lives in the state DB (saas_meta), so it survives a
+        dashboard restart — it is not an in-memory toggle. Defaults
+        to False (running). This is NOT the per-account posting
+        pause (set_posting_paused): that one only stops an
+        account's posts and replies; this one stops the agents
+        working at all."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM saas_meta WHERE key = 'tick_paused'"
+                ).fetchone()
+        return bool(row and row[0] == "1")
+
+    def set_global_pause(self, paused: bool) -> None:
+        """Set the operator-global tick pause (see
+        get_global_pause)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO saas_meta (key, value)"
+                " VALUES ('tick_paused', ?)",
+                ("1" if paused else "0",))
 
     def delete_account(self, account_id: str) -> None:
         """Delete an account and everything it owns: sites and their

@@ -170,7 +170,10 @@ def test_current_page_is_not_a_clickable_menu_option():
             ("/analytics", "/analytics", "Analytics"),
             ("/integrations", "/integrations", "Integrations"),
             ("/customers", "/customers", "Customers"),
-            ("/account/dashboard", "/account/dashboard", "Settings")):
+            ("/account/dashboard", "/account/dashboard", "Settings"),
+            # /portfolio maps to the Overview item (it is a site list,
+            # not a sidebar item of its own).
+            ("/portfolio", "/ops", "Overview")):
         r = client_a.get(path)
         assert r.status_code == 200, path
         # The current page is a label, never a link to itself.
@@ -178,10 +181,6 @@ def test_current_page_is_not_a_clickable_menu_option():
             (path, href)
         assert label in r.text, (path, label)
         assert "aria-current='page'" in r.text, path
-    # /portfolio is not a sidebar item: nothing is marked current.
-    r = client_a.get("/portfolio")
-    assert r.status_code == 200
-    assert "aria-current='page'" not in r.text
     # The admin pages too: the current admin page is a label.
     admin = _admin_client(app)
     r = admin.get("/admin/subscribers")
@@ -356,13 +355,15 @@ def test_report_header_split_customer_vs_operator():
     assert "v-burger" not in r.text
     assert "class='customer-nav'" not in r.text
     assert "ada.example.com" in r.text
-    # The operator's agent & financial report keeps its shell.
+    # The operator's agent & financial report renders through
+    # the platform shell now — sidebar, no pill nav, no hamburger.
     client_op, _op = _operator_client(app, store)
     r = client_op.get("/report")
     assert r.status_code == 200
-    assert "class='customer-nav'" in r.text
+    assert "class='app-sidebar'" in r.text
     assert "v-burger" not in r.text
-    assert "class='app-sidebar'" not in r.text
+    assert "class='customer-nav'" not in r.text
+    assert "Agent &amp; Financial Report" in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -437,15 +438,18 @@ def test_admin_pages_carry_the_new_styling():
     r = admin.get("/admin")
     assert r.status_code == 200
     assert "v-admin-card" in r.text
-    assert "admin-head" in r.text  # the simple admin header, no sidebar
-    assert "class='app-sidebar'" not in r.text
+    # The admin pages render through the platform shell now: the
+    # sidebar with the Admin group active, no simple admin header.
+    assert "class='app-sidebar'" in r.text
+    assert "admin-head" not in r.text
+    assert ">Admin<" in r.text
     assert "v-live-dot" in r.text or "Nobody is on the platform" in r.text
     for path in ("/admin/subscribers", "/admin/accounts", "/admin/agents"):
         r = admin.get(path)
         assert r.status_code == 200, path
         assert "v-admin-card" in r.text, path
-        assert "admin-head" in r.text, path
-        assert "class='app-sidebar'" not in r.text, path
+        assert "class='app-sidebar'" in r.text, path
+        assert "admin-head" not in r.text, path
 
 
 def test_admin_login_page_is_password_only():

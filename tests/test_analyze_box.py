@@ -322,27 +322,18 @@ def test_ops_page_has_analyze_panel(client):
     assert "min-height: 44px" in r.text
 
 
-def test_ops_page_has_carousel(client):
+def test_ops_page_has_no_carousel(client):
+    """The crew carousel is gone by design: the professional
+    Overview has no agents section, so there is no scroll-snap
+    strip, no crew prev/next buttons, and no carousel JS on /ops.
+    The agents roster lives only on /agents."""
     r = client.get("/ops")
     assert r.status_code == 200
-    # Scroll-snap strip, one card per view, scrollbar hidden.
-    assert "scroll-snap-type: x mandatory" in r.text
-    assert "scroll-snap-align: start" in r.text
-    assert "#stations::-webkit-scrollbar { display: none; }" in r.text
-    # Prev/next buttons (44px+ tap targets, aria-labels), dots, "n of 8".
-    assert 'id="crew-prev"' in r.text
-    assert 'aria-label="Previous agent"' in r.text
-    assert 'id="crew-next"' in r.text
-    assert 'aria-label="Next agent"' in r.text
-    assert 'id="crew-dots"' in r.text
-    assert 'id="crew-pos"' in r.text
-    assert "1 of 8" in r.text
-    # The JS that drives it, and the scroll save/restore across the
-    # 5s re-render of the cards.
-    assert "buildCrewNav" in r.text
-    assert "crewScrollTo" in r.text
-    assert "crewUpdateNav" in r.text
-    assert "savedScroll" in r.text
-    # Desktop grid rule untouched.
-    assert "#stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }" in r.text
-    assert "#stations { grid-template-columns: 1fr; }" not in r.text
+    assert "scroll-snap-type: x mandatory" not in r.text
+    assert "scroll-snap-align: start" not in r.text
+    assert 'id="crew-prev"' not in r.text
+    assert 'id="crew-next"' not in r.text
+    assert 'id="crew-dots"' not in r.text
+    assert 'id="crew-pos"' not in r.text
+    assert "buildCrewNav" not in r.text
+    assert "Your crew" not in r.text

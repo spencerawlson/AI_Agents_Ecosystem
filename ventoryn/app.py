@@ -5,8 +5,9 @@ Public front door:
                            Ventoryn is, the URL box + free preview, $20/mo
 
 Customer pages (sign-in required; each account sees ONLY its own data):
-  GET /ops, /game          Live Ops — the post-sign-in home for every
+  GET /ops                 Live Ops — the post-sign-in home for every
                            account, scoped to that account's sites
+                           (/game redirects to /ops, 303)
   GET /portfolio           the account's own sites/businesses
   GET /approvals           the account's own approvals (approve before
                            anything ships — nothing publishes unapproved)
@@ -40,13 +41,15 @@ from __future__ import annotations
 
 import html
 import hmac
+import json
 import os
 import re
 import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                              RedirectResponse)
 
 from core.audit import AuditLog
 from ventoryn.qrcode import qr_svg
@@ -377,9 +380,9 @@ def create_app(
 
     def _activity_label(path: str) -> str:
         """What the admin's "Live now" list shows as the last action
-        for a request path. The /api/snapshot poll (every 5s while
-        Live Ops is open) counts as Live Ops — that is how an open
-        page stays live."""
+        for a request path. Live Ops and /api/snapshot (the
+        Overview's data source, read by DJINN too) count as Live
+        Ops — that is how an open page stays live."""
         if path in ("/ops", "/game", "/api/snapshot"):
             return "Live Ops"
         if path.startswith("/portfolio"):
@@ -512,50 +515,13 @@ def create_app(
         }
 
     # -- navigation ---------------------------------------------------------
-    # Signed-in pages share ONE header (ventoryn.nav): centered
-    # Ventoryn brand + page title, and a hamburger menu holding every
-    # section. The old pill row of links is gone. _CUSTOMER_NAV is
-    # kept ONLY for the operator's agent & financial report, which
-    # renders its own shell (that page is untouched). The customer
-    # /report was rebuilt per the attribution reference (image 3) and
-    # now uses the shared header like every other signed-in page.
-    # Neither links Experiments, Experiment 001, Daily plan,
-    # Attribution, or "for website owners" — those stay reachable by
-    # direct URL only.
-    _CUSTOMER_NAV = (
-        "<nav class='customer-nav' aria-label='Ventoryn'>"
-        "<a href='/ops'>Live Ops</a>"
-        "<a href='/portfolio'>My Portfolio</a>"
-        "<a href='/approvals'>Approvals</a>"
-        "<a href='/report'>Report</a>"
-        "<a href='/account/dashboard'>My account</a>"
-        "<a href='/account/subscribe'>Subscribe</a>"
-        "<a href='/account/logout'>Sign out</a></nav>")
-    _NAV_CSS = """
-/* Operator Agent & Financial report: its own pill row of links
-   (kept by design), styled in the platform palette. */
-.customer-nav, .admin-nav { display: flex; flex-wrap: wrap; gap: 6px;
-  margin: 0; padding: 10px 20px; background: var(--v-navy);
-  justify-content: center; }
-.customer-nav a, .admin-nav a { display: inline-flex; align-items: center;
-  min-height: 44px; padding: 0 14px; border-radius: 10px;
-  color: #d9d4f5; text-decoration: none; font-size: 15px; font-weight: 500; }
-.customer-nav a:hover, .admin-nav a:hover { color: #fff;
-  background: rgba(255, 255, 255, .1); }
-.stat-cards, .cards { display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;
-  margin: 14px 0; }
-.stat-card, .cards .card { margin: 0; }
-.stat-card .label, .cards .card .label { font-size: 12px; font-weight: 700;
-  color: var(--v-muted); text-transform: uppercase; letter-spacing: .05em; }
-.stat-card .value, .cards .card .value { font-size: 24px; font-weight: 800;
-  margin-top: 4px; font-variant-numeric: tabular-nums; }
-.biz-card { background: var(--v-card); border: 1px solid var(--v-line);
-  border-radius: var(--v-radius); padding: 16px; margin: 12px 0; }
-.biz-name { font-size: 18px; font-weight: 700; }
-.biz-sub { color: var(--v-muted); font-size: 14px; margin: 4px 0 8px; }
-.biz-nums { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
-"""
+    # Signed-in pages share ONE shell (ventoryn.nav): the purple
+    # sidebar + app header. No signed-in page builds its own
+    # document or its own nav — the operator's agent & financial
+    # report renders through _operator_page like every other page
+    # (its old pill-row shell is gone). The sidebar never links
+    # Experiments, Experiment 001, Daily plan, or "for website
+    # owners" — those stay reachable by direct URL only.
     # Portfolio color — the Live Ops visual language, not the plain
     # grey stat cards above (those stay exactly as they are: /report
     # uses them, and /report must not change). Violet gradients on
@@ -572,11 +538,11 @@ def create_app(
   border: 1px solid var(--v-line); box-shadow: var(--v-shadow); }
 .v-stat::before { content: ""; position: absolute; inset: 0 0 auto 0;
   height: 4px; }
-.v-stat-1 { background: linear-gradient(135deg, var(--v-navy), #2a1f5c);
+.v-stat-1 { background: linear-gradient(135deg, var(--v-navy), var(--v-navy-2));
   border-color: transparent; color: #fff; }
 .v-stat-1 .v-stat-label { color: var(--v-violet-line); }
 .v-stat-2::before { background: linear-gradient(90deg, var(--v-violet), var(--v-blue)); }
-.v-stat-3::before { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.v-stat-3::before { background: linear-gradient(90deg, var(--v-green), var(--v-green-soft)); }
 .v-stat-label { display: block; font-size: 12px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .06em; color: var(--v-muted); }
 .v-stat-value { display: block; font-size: 30px; font-weight: 800;
@@ -600,6 +566,70 @@ def create_app(
 .v-biz dt { color: var(--v-muted); }
 .v-biz dd { margin: 0; font-weight: 700; text-align: right;
   font-variant-numeric: tabular-nums; }
+/* Analyze box (Overview, Portfolio, Businesses): the same URL +
+   market-country form as the landing page's free preview, in
+   platform card styling. Nothing is published; the report is
+   saved locally and shown here. */
+#analyze-panel .analyze-row { display: flex; gap: 12px; flex-wrap: wrap;
+  align-items: flex-end; }
+#analyze-panel .analyze-field { display: flex; flex-direction: column;
+  gap: 4px; flex: 1 1 180px; }
+#analyze-panel .analyze-label { font-size: 13px; font-weight: 600;
+  color: var(--v-muted); }
+.analyze-field input, .analyze-field select { min-height: 44px; }
+.analyze-status { margin: 12px 0 0; font-size: 14px; color: var(--v-muted); }
+.analyze-status.error { color: var(--v-red); font-weight: 600; }
+.analyze-scores { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.analyze-score { background: var(--v-violet-soft);
+  border-radius: var(--v-radius-sm); padding: 12px 16px; }
+.analyze-score .label { font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--v-muted); }
+.analyze-score .value { font-size: 22px; font-weight: 800; }
+.analyze-score .value.na { color: var(--v-muted); }
+.analyze-findings { margin: 8px 0; padding-left: 20px; font-size: 14px; }
+.analyze-findings li { margin: 6px 0; }
+.analyze-findings .sev { font-weight: 700; color: var(--v-violet-deep); }
+.analyze-report-link { display: inline-block; margin-top: 10px;
+  font-weight: 600; }
+@media (max-width: 560px) {
+  #analyze-panel .analyze-row { flex-direction: column; align-items: stretch; }
+}
+/* Live activity feed (Overview) + the events feed (Agents):
+   one plain row per event — time, actor, event, ids, cost, result.
+   No game colors, no HUD. */
+.v-feed-row { display: flex; flex-wrap: wrap; gap: 4px 12px;
+  align-items: baseline; padding: 10px 0;
+  border-bottom: 1px solid var(--v-line); font-size: 14px; }
+.v-feed-row:last-child { border-bottom: 0; }
+.v-feed-time { color: var(--v-muted); font-variant-numeric: tabular-nums; }
+.v-feed-actor { background: var(--v-violet-soft);
+  color: var(--v-violet-deep); border-radius: 999px; padding: 2px 10px;
+  font-size: 12px; font-weight: 700; }
+.v-feed-event { font-weight: 700; }
+.v-feed-ids { color: var(--v-muted); }
+.v-feed-cost { color: var(--v-muted); margin-left: auto; }
+.v-feed-result { flex-basis: 100%; color: var(--v-muted); }
+.v-feed-voice { flex-basis: 100%; font-size: 14px; }
+.v-feed-meta { flex-basis: 100%; color: var(--v-muted); font-size: 13px; }
+/* Agent activity (Agents page): tasks + spend per agent, and
+   activity over time. Plain HTML bars — platform styling, not the
+   old game's SVG charts. */
+.v-team-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0;
+  font-size: 14px; }
+.v-team-label { flex: 0 0 110px; font-weight: 700; }
+.v-team-track { flex: 1; height: 14px; background: var(--v-bg);
+  border-radius: 999px; overflow: hidden; }
+.v-team-fill { display: block; height: 100%; border-radius: 999px; }
+.v-team-num { flex: 0 0 64px; text-align: right; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.v-act { display: flex; align-items: flex-end; gap: 6px; height: 120px;
+  margin: 12px 0 4px; }
+.v-act-col { flex: 1; display: flex; flex-direction: column;
+  align-items: center; gap: 4px; min-width: 0; }
+.v-act-bar { width: 100%; max-width: 36px; background: var(--v-blue);
+  border-radius: 4px 4px 0 0; min-height: 2px; }
+.v-act-num { font-size: 12px; font-weight: 700; }
+.v-act-day { font-size: 11px; color: var(--v-muted); }
 """
     # Admin look — a blend of the Kay Ayiti and ShipItAyiti admin
     # boards: Kay Ayiti's light board (pale blue-grey background,
@@ -627,15 +657,15 @@ def create_app(
 .v-flow-step { flex: 1 1 140px; border: 1px solid var(--v-line);
   border-radius: var(--v-radius); padding: 12px; background: #fff;
   box-shadow: var(--v-shadow); }
-.v-flow-step.done { border-color: #86efac; background: var(--v-green-soft); }
+.v-flow-step.done { border-color: var(--v-green); background: var(--v-green-soft); }
 .v-flow-step strong { display: block; font-size: 14px; margin-top: 4px; }
 .v-flow-step span { font-size: 13px; color: var(--v-muted); }
 .v-flow-check { display: inline-flex; align-items: center;
   justify-content: center; width: 26px; height: 26px; border-radius: 50%;
   background: var(--v-green); color: #fff; }
 .v-flow-check svg { width: 16px; height: 16px; display: block; }
-.v-flow-step:not(.done) .v-flow-check { background: #e5e7eb;
-  color: #9ca3af; }
+.v-flow-step:not(.done) .v-flow-check { background: var(--v-line);
+  color: var(--v-faint); }
 .v-flow-arrow { align-self: center; color: var(--v-violet-deep); }
 .v-flow-arrow svg { width: 18px; height: 18px; display: block; }
 .v-donut-wrap { display: flex; gap: 16px; align-items: center;
@@ -648,7 +678,7 @@ def create_app(
 .v-bbar { display: flex; align-items: center; gap: 8px; margin: 8px 0;
   font-size: 14px; }
 .v-bbar-label { flex: 0 0 110px; }
-.v-bbar-track { flex: 1; height: 14px; background: #f1f0f7;
+.v-bbar-track { flex: 1; height: 14px; background: var(--v-bg);
   border-radius: 999px; overflow: hidden; }
 .v-bbar-fill { display: block; height: 100%; border-radius: 999px; }
 .v-bbar-num { flex: 0 0 32px; text-align: right; font-weight: bold; }
@@ -656,6 +686,16 @@ def create_app(
 @media (max-width: 640px) {
   .v-report-grid { grid-template-columns: 1fr; }
 }
+/* Operator Agent & Financial report: the stat-card grid (Revenue /
+   Total costs / Net profit). Token-only, like everything above. */
+.cards { display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;
+  margin: 14px 0; }
+.cards .card { margin: 0; }
+.cards .card .label { font-size: 12px; font-weight: 700;
+  color: var(--v-muted); text-transform: uppercase; letter-spacing: .05em; }
+.cards .card .value { font-size: 24px; font-weight: 800;
+  margin-top: 4px; font-variant-numeric: tabular-nums; }
 """
 
     # Approvals: the pending/decided tables as platform cards —
@@ -679,7 +719,7 @@ def create_app(
 .v-admin-card h2 { margin: 0 0 10px; font-size: 18px; }
 .v-admin-card h2 .v-count { color: var(--v-violet-deep); }
 .v-admin-card .v-live-dot { display: inline-block; width: 9px; height: 9px;
-  border-radius: 50%; background: #16a34a; margin-right: 6px;
+  border-radius: 50%; background: var(--v-green); margin-right: 6px;
   box-shadow: 0 0 0 3px var(--v-green-soft); }
 .v-admin-card table { margin: 6px 0 4px; }
 .v-admin .v-error { color: var(--v-red); font-weight: 700; }
@@ -705,10 +745,17 @@ def create_app(
 """
 
     # Old _operator_page "current" keys -> platform sidebar keys.
-    # Pages with None get the sidebar with nothing active.
+    # /portfolio + /businesses are the overview's site lists, so
+    # Overview is active there; /reports is the attribution
+    # archive, so Attribution is active there. /experiments +
+    # /experiment-001 are direct-URL-only operator tools: they
+    # deliberately get the sidebar with nothing active (no sidebar
+    # item for them), and that is by design, not an oversight.
     _PLATFORM_CURRENT = {
-        "live-ops": "overview", "portfolio": None, "businesses": None,
-        "approvals": "approvals", "reports": None, "report": "attribution",
+        "live-ops": "overview", "portfolio": "overview",
+        "businesses": "overview",
+        "approvals": "approvals", "reports": "attribution",
+        "report": "attribution",
         "experiments": None, "experiment-001": None, "account": "settings",
         "campaigns": "campaigns", "agents": "agents",
         "analytics": "analytics", "integrations": "integrations",
@@ -1699,6 +1746,8 @@ if (demoToggle && demoValue) {{
 <p class='muted'>Costs per website read $0 here: the site's own costs
 are its credits, and credits are not dollars. Revenue is real — the
 sum of recorded paying customers per site.</p>{hidden_note}
+{_analyze_box_html()}
+<p><a class='btn' href='/account/sites/new'>Add a website</a></p>
 <div class='v-biz-grid'>{cards}</div>"""
         return _operator_page(
             "My Portfolio", inner, account=account, current="portfolio",
@@ -1734,11 +1783,11 @@ sum of recorded paying customers per site.</p>{hidden_note}
                 f"account ({esc(account['email'])}). Only the owning "
                 f"account sees a business, its approvals and its "
                 f"data.</div>" if unclaimed else "")
-        inner = f"""{note}<div class="table-wrap"><table>
+        inner = f"""{note}{_analyze_box_html()}<div class="table-wrap"><table>
 <tr><th>Name</th><th>Type</th><th>Status</th><th class="num">Net profit</th><th>Owner</th></tr>{rows}</table></div>
 <a class="v-back" href="/portfolio">{icon('arrow_left', 15)} My Portfolio</a>"""
         return _operator_page(f"Businesses ({len(businesses)})", inner,
-                              account=account, current=None,
+                              account=account, current="businesses",
                               is_operator=True)
 
     @app.post("/businesses/{business_id}/claim")
@@ -1784,7 +1833,7 @@ sum of recorded paying customers per site.</p>{hidden_note}
 <p class="muted">P&amp;L · {len(events)} audit events</p>
 <a class="v-back" href="/businesses">{icon('arrow_left', 15)} All businesses</a>"""
         return _operator_page(biz.name, inner, account=account,
-                              current=None, is_operator=True)
+                              current="businesses", is_operator=True)
 
     @app.get("/experiments", response_class=HTMLResponse)
     def experiment_list(request: Request):
@@ -1937,7 +1986,7 @@ nothing in them was published.</p>
 {rows}</table></div>
 <a class="v-back" href="/approvals">Go to Approvals {icon('arrow_right', 15)}</a>"""
         return _operator_page("Mission reports", inner, account=account,
-                              current=None, is_operator=True)
+                              current="reports", is_operator=True)
 
     @app.get("/reports/{name}", response_class=HTMLResponse)
     def report_view(request: Request, name: str):
@@ -1955,8 +2004,24 @@ nothing in them was published.</p>
             title,
             f"""<article class="card v-doc">{body}</article>
 <a class="v-back" href="/reports">{icon('arrow_left', 15)} Back to reports</a>""",
-            account=account, current=None, is_operator=True,
+            account=account, current="reports", is_operator=True,
             extra_css=ui.DOC_CSS)
+
+    @app.get("/reports/{name}/download", response_class=FileResponse)
+    def report_download(request: Request, name: str):
+        """Download one mission report as Markdown. Operator only —
+        the same validated path as render_report, so path
+        traversal is impossible."""
+        account, redirect = _need_operator(request)
+        if redirect is not None:
+            return redirect
+        from ventoryn.reports import report_path
+
+        path = report_path(name)
+        if path is None:
+            raise HTTPException(404, "report not found")
+        return FileResponse(path, media_type="text/markdown",
+                            filename=name)
 
     @app.get("/experiment-001", response_class=HTMLResponse)
     def experiment_001(request: Request):
@@ -2017,81 +2082,77 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
     # -- Live Ops API (powers the /ops live view; /game is the old address) ---
     # All state transitions go through the real runtime components; these
     # endpoints only serialize what the orchestrator/ledger/audit produced.
-    from fastapi.responses import JSONResponse, FileResponse
-    from fastapi.staticfiles import StaticFiles
-
-    static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.is_dir():
-        app.mount("/static", StaticFiles(directory=str(static_dir)),
-                  name="static")
-
     @app.get("/game", response_class=HTMLResponse)
-    @app.get("/ops", response_class=HTMLResponse)
-    def game_view(request: Request):
-        """Ventoryn live-ops view of the local runtime. Sign-in
-        required — /ops is the post-sign-in home for every account,
-        and the page is scoped to the signed-in account by the
-        snapshot it polls. Not signed in -> the landing page. The
-        platform shell (purple sidebar + app header) is injected
-        where the page carries the <!--VENTORYN_HEADER--> placeholder
-        — the HUD already carries "Ventoryn — Live Ops" as its title,
-        so the head title is "Live Ops". Both /game and /ops serve
-        this same file, so both get the shell."""
+    def game_redirect(request: Request):
+        """The old /game address redirects to the professional
+        Overview — the game view is gone."""
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
-        page = static_dir / "game.html"
-        if page.exists():
-            text = page.read_text(encoding="utf-8")
-            from ventoryn.nav import (
-                SIDEBAR_CSS, SIDEBAR_JS, platform_head_html, sidebar_html)
-            # Growth + pending, as in _operator_page: verified over
-            # the account's counted sites, per-account pending
-            # approvals (the /approvals handler's filter).
-            sites = _saas_store.list_sites(account["id"])
-            counted_ids = [s["id"] for s in sites
-                           if s.get("count_show", 1)]
-            verified = _saas_store.conversion_status_counts(
-                counted_ids)["verified"]
-            owned = _owned_business_ids(account)
-            pending = len([a for a in state["approvals"].pending()
-                           if _approval_visible(account, a, owned)])
-            is_op = _saas_config.is_operator(account["email"])
-            sidebar = sidebar_html(
-                "overview", is_op, verified=verified,
-                pending_approvals=pending,
-                account_email=account.get("email", ""))
-            head = platform_head_html("Live Ops", "Ventoryn — Live Ops",
-                                      pending_approvals=pending)
-            text = text.replace(
-                "<!--VENTORYN_HEADER-->",
-                f"<div class='app-layout'>{sidebar}"
-                f"<div class='app-content'>{head}")
-            text = text.replace("</body>",
-                                "</div></div>" + SIDEBAR_JS + "</body>", 1)
-            # The platform tokens + shell styles, so Live Ops wears
-            # the same navy/violet as the landing page and every
-            # other page (one source: ventoryn/ui.py + nav.py).
-            text = text.replace(
-                "</head>",
-                f"<meta name='theme-color' content='#0b0e1e'>"
-                f"<style>{ui.TOKENS_CSS}{SIDEBAR_CSS}</style></head>", 1)
-            # The market-country selector: every ISO country, ca
-            # selected by default (core.countries.country_options).
-            text = text.replace("<!--VENTORYN_COUNTRY_OPTIONS-->",
-                                country_options("ca"))
-            # The privacy toggles card: per-site forms posting to
-            # the existing privacy endpoint (fresh 2FA field when
-            # TOTP is enabled), rendered server-side — the snapshot
-            # poll carries no HTML. No live Plausible fetch here.
-            text = text.replace(
-                "<!--VENTORYN_PRIVACY_FORMS-->",
-                _attribution_data(account, check_visitors=False,
-                                  return_to="/ops")["privacy_forms"])
-            return HTMLResponse(text)
-        return HTMLResponse(
-            "<html><body><h1>Live Ops view not built yet</h1>"
-            "<p><a href='/'>Back</a></p></body></html>", status_code=503)
+        return RedirectResponse("/ops", status_code=303)
+
+    @app.get("/ops", response_class=HTMLResponse)
+    def live_ops_page(request: Request):
+        """The professional Overview (Live Ops): the top summary
+        (progress ring + verified/pending stats), the pause control
+        (operator only), the analyze-the-site box, the businesses,
+        the attribution sections, and the Live activity feed — all
+        server-rendered through the platform shell, all from real
+        store data. No game design: no crew, no HUD, no runtime
+        controls, no Experiment 001, no tasks/spend bars here
+        (those live on the Agents page). Sign-in required — /ops
+        is the post-sign-in home for every account."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        is_op = _saas_config.is_operator(account["email"])
+        snap = _snapshot(account)
+        data = _attribution_data(account, check_visitors=False,
+                                 return_to="/ops")
+        counts = data["counts"]
+
+        def _money(value):
+            return "hidden" if value is None else money(value)
+        biz_cards = "".join(
+            f"<article class='v-biz v-accent-{i % 4}'>"
+            f"<h3>{esc(b['name'])}</h3>"
+            f"<p class='v-biz-url'>{esc(b['business_type'])} — "
+            f"{esc(b['status'])}"
+            + (" — <a class='pill' href='/businesses'>Unclaimed — claim"
+               "</a>" if b.get("owner_email", "x") is None else "")
+            + f"</p>"
+            f"<dl><dt>Revenue</dt><dd>{_money(b['revenue'])}</dd>"
+            f"<dt>Costs</dt><dd>{money(b['total_costs'])}</dd>"
+            f"<dt>Net profit</dt><dd>{_money(b['net_profit'])}</dd></dl>"
+            f"</article>"
+            for i, b in enumerate(snap["businesses"])) or (
+            "<div class='card'><p>No websites yet. "
+            "<a href='/account/sites/new'>Add your first website</a> — "
+            "Ventoryn works to bring it its first 100 paying "
+            "customers.</p></div>")
+        pause_card = (ui.pause_card_html(
+            _saas_store.get_global_pause(), "/ops") if is_op else "")
+        # The landing funnel: a visitor who typed a URL on the
+        # landing page arrives here with ?site_url= — prefill the
+        # analyze box with it and, for a customer who has not
+        # subscribed yet, offer the subscribe step for that URL so
+        # it is never retyped. Only a real http(s) URL is accepted.
+        site_url = (request.query_params.get("site_url") or "").strip()
+        prefill = site_url if site_url.startswith(
+            ("http://", "https://")) else ""
+        show_prompt = bool(prefill) and not is_op and \
+            account["subscription_status"] != "active"
+        inner = f"""{_progress_grid_html(data)}
+{pause_card}
+{_analyze_box_html(prefill, show_prompt)}
+<h2>Businesses</h2>
+<div class='v-biz-grid'>{biz_cards}</div>
+{_attribution_sections_html(data)}
+{_live_activity_feed_html(snap["events"])}"""
+        return _operator_page(
+            "Live Ops", inner, account=account, current="live-ops",
+            is_operator=is_op,
+            extra_css=_PORTFOLIO_CSS + _REPORT_CSS)
 
     game = {
         "tick": 0,
@@ -2108,6 +2169,359 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         orch = state["orchestrator"]
         aud: AuditLog = state["audit"]
         return agent_stats_from_audit(aud, orch.registry.agent_types())
+
+    # -- professional Overview helpers --------------------------------------
+    # The Overview is server-rendered through _operator_page (no
+    # game.html, no JS poll). These helpers build its sections — and
+    # the Agents page's moved sections — from real store data only.
+
+    def _activity_events(account, limit: int = 50) -> list[dict]:
+        """The activity feed, scoped to the viewer — the same events
+        /api/snapshot returns, newest first. The operator (or no
+        account, the tick internals) sees the audit log; a customer
+        sees only their own jobs. The Overview's Live activity feed
+        and the Agents page's "What just happened" both read this."""
+        aud: AuditLog = state["audit"]
+        if account is None or _saas_config.is_operator(account["email"]):
+            return [{
+                "ts": e.created_at.isoformat()
+                if hasattr(e.created_at, "isoformat")
+                else str(e.created_at),
+                "actor": e.agent_type, "event": e.event,
+                "business_id": e.business_id, "task_id": e.task_id,
+                "result": e.result,
+                "cost_usd": round(e.cost_usd, 4),
+                "tokens_used": e.tokens_used,
+            } for e in aud.latest(limit)]
+        sites_by_id = {s["id"]: s
+                       for s in _saas_store.list_sites(account["id"])}
+        events = []
+        for job in _saas_store.list_jobs(account["id"], limit=limit):
+            site = sites_by_id.get(job["site_id"] or "")
+            events.append({
+                "ts": job["created_at"],
+                "actor": "ventoryn",
+                "event": "job_" + job["status"],
+                "business_id": (site or {}).get("host", ""),
+                "task_id": "",
+                "result": {"job_type": job["job_type"],
+                           "summary": job["result"] or ""},
+                "cost_usd": 0.0,
+                "tokens_used": 0,
+            })
+        return events
+
+    def _fmt_event_time(ts) -> str:
+        """An event timestamp as YYYY-MM-DD HH:MM (the feed is
+        server-rendered, so the date matters — the old page only
+        showed the clock). Falls back to the raw value, never
+        crashes on a bad timestamp."""
+        try:
+            from datetime import datetime
+
+            dt = datetime.fromisoformat(str(ts))
+            return dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            return str(ts or "")[:16]
+
+    def _event_voice(e: dict) -> str:
+        """One plain sentence for an activity event — the Agents
+        page's "What just happened" feed. Professional wording:
+        no crew / game voice. (Port of the old Live Ops eventVoice,
+        minus the game framing.)"""
+        r = e.get("result") or {}
+        if isinstance(r, dict) and r.get("winner") is not None:
+            tick = (f"T{r['tick']} — " if r.get("tick") is not None
+                    else "")
+            return (f"{tick}Analyst ranked the opportunities — "
+                    f"'{r['winner']}' wins ({r.get('score', '—')})")
+        if e.get("event") == "stop_loss_triggered":
+            return "Stop-loss triggered — check Experiment 001."
+        if e.get("event") == "tick_completed":
+            who = ("Orchestrator" if e.get("actor") == "game"
+                   else (e.get("actor") or "Someone"))
+            return (who + " finished a tick" +
+                    (" and launched a business." if e.get("business_id")
+                     else "."))
+        if isinstance(r, dict) and r.get("job_type"):
+            done = e.get("event") == "job_done"
+            return ((("" if done else "Failed: ") +
+                     str(r["job_type"]).replace("_", " ") + " — " +
+                     (r.get("summary") or e.get("event", ""))))
+        return f"{e.get('actor') or 'system'} — {e.get('event') or ''}"
+
+    def _event_result_text(e: dict) -> str:
+        """The detail line for a Live activity feed row (port of the
+        old eventResult): a winner summary, a plain string, or the
+        result JSON truncated to 140 characters. Never a fake
+        number."""
+        r = e.get("result")
+        if r is None:
+            return ""
+        if isinstance(r, str):
+            return r
+        if isinstance(r, dict):
+            if r.get("winner") is not None:
+                return (f"winner: '{r['winner']}' "
+                        f"(score {r.get('score', '—')})")
+            s = json.dumps(r)
+            return s if len(s) <= 140 else s[:140] + "…"
+        return str(r)
+
+    def _live_activity_feed_html(events: list[dict]) -> str:
+        """The Live activity feed: one structured row per event —
+        time, actor, event, business/task, cost + tokens, result.
+        The Overview's own card (the feed lives here, not inside
+        the "What the team is doing" panel — that panel moved to
+        the Agents page)."""
+        rows = ""
+        for e in events[:30]:
+            ids = " — ".join(x for x in (e.get("business_id"),
+                                         e.get("task_id")) if x)
+            cost = ""
+            c = float(e.get("cost_usd") or 0)
+            tk = int(e.get("tokens_used") or 0)
+            if c > 0 or tk > 0:
+                cost = f"${c:,.4f} — {tk:,} tokens"
+            result = _event_result_text(e).replace(" · ", " — ")
+            rows += (f"<div class='v-feed-row'>"
+                     f"<span class='v-feed-time'>"
+                     f"{esc(_fmt_event_time(e.get('ts', '')))}</span>"
+                     f"<span class='v-feed-actor'>"
+                     f"{esc(e.get('actor') or 'system')}</span>"
+                     f"<span class='v-feed-event'>"
+                     f"{esc(e.get('event') or '')}</span>"
+                     + (f"<span class='v-feed-ids'>{esc(ids)}</span>"
+                        if ids else "")
+                     + (f"<span class='v-feed-cost'>{esc(cost)}</span>"
+                        if cost else "")
+                     + (f"<div class='v-feed-result'>{esc(result)}</div>"
+                        if result else "")
+                     + "</div>")
+        if not rows:
+            rows = ("<p class='muted'>Nothing yet — agent work will "
+                    "show up here.</p>")
+        return f"<div class='card'><h2>Live activity</h2>{rows}</div>"
+
+    def _team_doing_html(stats: list[dict], events: list[dict]) -> str:
+        """What the team is doing (Agents page only): tasks & spend
+        per agent (bars from the audit log) and activity over time
+        (events per day, last 7 days, from the same persisted
+        events — the old line chart was browser-memory poll
+        history, which no longer exists, so the chart is rebuilt
+        from what is actually stored)."""
+        from datetime import datetime, timedelta, timezone
+
+        rows = sorted(stats, key=lambda s: -int(s.get("tasks_completed", 0) or 0))
+        max_tasks = max([int(s.get("tasks_completed", 0) or 0)
+                         for s in rows] + [1])
+        max_spend = max([float(s.get("cost_usd", 0) or 0)
+                         for s in rows] + [0.0001])
+        bars = ""
+        for s in rows:
+            tasks = int(s.get("tasks_completed", 0) or 0)
+            spend = float(s.get("cost_usd", 0) or 0)
+            tw = max(3 if tasks > 0 else 0, tasks / max_tasks * 100)
+            sw = max(3 if spend > 0 else 0, spend / max_spend * 100)
+            label = esc(str(s.get("type", "?")).replace("_", " ").title())
+            bars += (
+                f"<div class='v-team-bar'><span class='v-team-label'>"
+                f"{label}</span>"
+                f"<div class='v-team-track'><span class='v-team-fill' "
+                f"style='width:{tw:.1f}%;background:var(--v-blue)'></span>"
+                f"</div><span class='v-team-num'>{tasks} tasks</span></div>"
+                f"<div class='v-team-bar'><span class='v-team-label'>"
+                f"</span>"
+                f"<div class='v-team-track'><span class='v-team-fill' "
+                f"style='width:{sw:.1f}%;background:var(--v-violet-deep)'>"
+                f"</span></div>"
+                f"<span class='v-team-num'>${spend:,.4f}</span></div>")
+        total_tasks = sum(int(s.get("tasks_completed", 0) or 0) for s in rows)
+        total_spend = sum(float(s.get("cost_usd", 0) or 0) for s in rows)
+        total_tokens = sum(int(s.get("tokens_used", 0) or 0) for s in rows)
+        if total_tasks == 0 and total_spend == 0 and total_tokens == 0:
+            bars += ("<p class='muted'>No work recorded yet — run a "
+                     "tick and the bars will fill in.</p>")
+        # Activity over time: events per day, last 7 days (UTC dates
+        # — conversions and audit events are timestamped in UTC).
+        today = datetime.now(timezone.utc).date()
+        days = [today - timedelta(days=i) for i in range(6, -1, -1)]
+        per_day = {d.isoformat(): 0 for d in days}
+        for e in events:
+            day = str(e.get("ts", ""))[:10]
+            if day in per_day:
+                per_day[day] += 1
+        max_day = max(list(per_day.values()) + [1])
+        cols = ""
+        for d in days:
+            n = per_day[d.isoformat()]
+            h = max(2 if n > 0 else 0, n / max_day * 100)
+            cols += (
+                f"<div class='v-act-col'>"
+                f"<span class='v-act-num'>{n}</span>"
+                f"<span class='v-act-bar' style='height:{h:.0f}%'></span>"
+                f"<span class='v-act-day'>{d.strftime('%b %d')}</span>"
+                f"</div>")
+        return (f"<div class='card'><h2>What the team is doing</h2>"
+                f"{bars}"
+                f"<h3>Activity — events per day, last 7 days</h3>"
+                f"<div class='v-act'>{cols}</div>"
+                f"<p class='muted'>{total_tasks} tasks, "
+                f"{total_tokens:,} tokens, ${total_spend:,.4f} total "
+                f"spend.</p></div>")
+
+    def _analyze_box_html(prefill: str = "",
+                          show_subscribe_prompt: bool = False) -> str:
+        """The analyze-the-site box: URL + market country (+ optional
+        language), POSTs to /api/analyze and polls for the result —
+        the same async job as the landing page's free preview, in
+        platform card styling. Nothing is published; the report is
+        saved locally and shown here. The element ids match the old
+        Live Ops panel (analyze-panel, analyze-form, analyze-url,
+        analyze-country, analyze-language, analyze-submit,
+        analyze-status, analyze-result) so the box works the same
+        everywhere it appears. `prefill` fills the URL from the
+        landing funnel (?site_url=) so it is never retyped; when
+        `show_subscribe_prompt` is true the box also offers the
+        subscribe step for that URL."""
+        prefill_attr = f" value='{esc(prefill)}'" if prefill else ""
+        prompt = ""
+        if show_subscribe_prompt and prefill:
+            from urllib.parse import quote as _quote
+
+            prompt = (
+                f"<p><a href='/account/subscribe?site_url="
+                f"{_quote(prefill, safe='')}'>Subscribe — $20/month "
+                f"to add it</a></p>")
+        return f"""<div class='card' id="analyze-panel">
+<h2>Analyze a site</h2>
+<p class='muted'>Paste a website URL and a market country — the same
+analysis as the <code>analyze</code> command. Nothing is published;
+the report is saved locally and shown here.</p>
+<form id="analyze-form">
+<div class='analyze-row'>
+<label class='analyze-field analyze-url'>
+<span class='analyze-label'>Website URL</span>
+<input id="analyze-url" type='text' inputmode='url'
+placeholder='yourwebsite.com' autocomplete='off' required{prefill_attr}>
+</label>
+<label class='analyze-field analyze-country'>
+<span class='analyze-label'>Market country</span>
+<select id="analyze-country" required>{country_options("ca")}</select>
+</label>
+<label class='analyze-field analyze-language'>
+<span class='analyze-label'>Language (optional)</span>
+<input id="analyze-language" type='text' placeholder='en'
+maxlength='5' autocomplete='off'>
+</label>
+<button type='submit' class='btn btn-primary'
+id="analyze-submit">Analyze</button>
+</div>
+</form>
+{prompt}
+<div id="analyze-status" class='analyze-status' aria-live='polite'></div>
+<div id="analyze-result" hidden></div>
+</div>
+<script>
+(function () {{
+  var jobId = null;
+  function $(id) {{ return document.getElementById(id); }}
+  function esc(s) {{ return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }}
+  function analyzeStatus(msg, isErr) {{
+    var el = $("analyze-status");
+    el.textContent = msg;
+    el.classList.toggle("error", !!isErr);
+  }}
+  function renderAnalyzeResult(job) {{
+    var box = $("analyze-result");
+    var r = job.result || {{}};
+    var html = "";
+    if (r.fetchable === false) {{
+      html += '<div class="analyze-scores">' +
+        '<div class="analyze-score"><div class="label">Site score</div><div class="value na">Unavailable</div></div>' +
+        '<div class="analyze-score"><div class="label">GEO score</div><div class="value na">Unavailable</div></div>' +
+        "</div>" +
+        "<p><strong>Could not fetch the site.</strong> " + esc(r.unavailable_reason || "Check the URL and try again.") + "</p>";
+    }} else {{
+      html += '<div class="analyze-scores">' +
+        '<div class="analyze-score"><div class="label">Site score</div><div class="value">' + esc(r.site_score) + " / 100</div></div>" +
+        '<div class="analyze-score"><div class="label">GEO score</div><div class="value">' + esc(r.geo_score) + " / 100</div></div>" +
+        "</div>";
+    }}
+    var findings = r.findings || [];
+    if (findings.length) {{
+      html += '<h3>Top findings</h3><ul class="analyze-findings">';
+      for (var i = 0; i < findings.length; i++) {{
+        var f = findings[i];
+        html += "<li><span class=\\"sev\\">[" + esc(f.severity) + " — " + esc(f.area) + "]</span> " +
+          esc(f.issue) + " — Fix: " + esc(f.fix) + "</li>";
+      }}
+      html += "</ul>";
+    }} else if (r.fetchable !== false) {{
+      html += "<p>No findings — the site is in good shape for this market.</p>";
+    }}
+    if (job.report_url) {{
+      html += '<a class="analyze-report-link" href="' + esc(job.report_url) + '" target="_blank" rel="noopener">Full report (' + esc(job.report_name || "report.md") + ")</a>";
+    }}
+    box.innerHTML = html;
+    box.hidden = false;
+  }}
+  async function pollAnalyzeJob() {{
+    if (!jobId) return;
+    try {{
+      var res = await fetch("/api/analyze/" + encodeURIComponent(jobId));
+      var job = await res.json();
+      if (job.status === "done") {{
+        jobId = null;
+        analyzeStatus("Done — " + job.url);
+        renderAnalyzeResult(job);
+        $("analyze-submit").disabled = false;
+      }} else if (job.status === "failed") {{
+        jobId = null;
+        analyzeStatus("Could not analyze: " + (job.error || "the analysis failed."), true);
+        $("analyze-submit").disabled = false;
+      }} else {{
+        analyzeStatus("Analyzing " + job.url + "… (this takes a few seconds)");
+        setTimeout(pollAnalyzeJob, 3000);
+      }}
+    }} catch (err) {{
+      if (String(err.message || "").indexOf("404") !== -1) {{
+        jobId = null;
+        analyzeStatus("The dashboard restarted while the analysis was running — please run it again.", true);
+        $("analyze-submit").disabled = false;
+      }} else {{
+        setTimeout(pollAnalyzeJob, 3000);
+      }}
+    }}
+  }}
+  $("analyze-form").addEventListener("submit", async function (ev) {{
+    ev.preventDefault();
+    var url = $("analyze-url").value.trim();
+    if (url && url.indexOf("://") === -1) url = "https://" + url;
+    var country = $("analyze-country").value.trim().toLowerCase();
+    var language = $("analyze-language").value.trim().toLowerCase();
+    $("analyze-result").hidden = true;
+    $("analyze-result").innerHTML = "";
+    analyzeStatus("Starting analysis…");
+    $("analyze-submit").disabled = true;
+    try {{
+      var res = await fetch("/api/analyze", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ url: url, country: country, language: language }}),
+      }});
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+      jobId = data.job_id;
+      analyzeStatus("Analyzing " + data.url + "… (this takes a few seconds)");
+      setTimeout(pollAnalyzeJob, 3000);
+    }} catch (err) {{
+      analyzeStatus("Could not start the analysis: " + err.message, true);
+      $("analyze-submit").disabled = false;
+    }}
+  }});
+}})();
+</script>"""
 
     # Inline SVG for a flow step with no evidence yet (a grey dot,
     # matching the green check from ventoryn.icons).
@@ -2420,7 +2834,6 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         revenue."""
         reg: BusinessRegistry = state["registry"]
         led: Ledger = state["ledger"]
-        aud: AuditLog = state["audit"]
         operator = account is None or _saas_config.is_operator(
             account["email"])
         if operator:
@@ -2435,36 +2848,12 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
                 # The operator's own SaaS sites ride along with his
                 # businesses — his account sees everything of his.
                 biz_rows += _site_business_rows(account)
-            events = [{
-                "ts": e.created_at.isoformat()
-                if hasattr(e.created_at, "isoformat")
-                else str(e.created_at),
-                "actor": e.agent_type, "event": e.event,
-                "business_id": e.business_id, "task_id": e.task_id,
-                "result": e.result,
-                "cost_usd": round(e.cost_usd, 4),
-                "tokens_used": e.tokens_used,
-            } for e in aud.latest(50)]
+            events = _activity_events(account, limit=50)
             agents = _agent_snapshot()
             exp = game["experiment_001"]
         else:
             biz_rows = _site_business_rows(account)
-            sites_by_id = {s["id"]: s
-                           for s in _saas_store.list_sites(account["id"])}
-            events = []
-            for job in _saas_store.list_jobs(account["id"], limit=50):
-                site = sites_by_id.get(job["site_id"] or "")
-                events.append({
-                    "ts": job["created_at"],
-                    "actor": "ventoryn",
-                    "event": "job_" + job["status"],
-                    "business_id": (site or {}).get("host", ""),
-                    "task_id": "",
-                    "result": {"job_type": job["job_type"],
-                               "summary": job["result"] or ""},
-                    "cost_usd": 0.0,
-                    "tokens_used": 0,
-                })
+            events = _activity_events(account, limit=50)
             agents = [{
                 "type": t, "tasks_completed": 0, "tokens_used": 0,
                 "cost_usd": 0.0, "last_task": "",
@@ -2703,6 +3092,80 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         return FileResponse(str(path), media_type="text/markdown",
                             filename=job["report_name"])
 
+    def _progress_grid_html(data: dict) -> str:
+        """The top summary: progress ring (verified / 100) + the
+        Verified / Pending / Unattributed stat cards. Shared by the
+        customer /report and the professional Overview, so the two
+        can never disagree."""
+        counts = data["counts"]
+        verified = data["verified"]
+        last7 = data["last7"]
+        ring = data["ring_svg"]
+        count_note = (
+            "<p class='muted'>The customer count is hidden on one or "
+            "more of your sites — change it in Data &amp; privacy "
+            "controls below.</p>" if data["any_count_hidden"] else "")
+        return f"""<div class='v-report-grid'>
+<div class='card v-progress'><h2>Progress to 100</h2>{ring}
+<div class='v-bar-track'><div class='v-bar-fill' style='width:{min(verified, 100)}%'></div></div>
+<p><span class='pill green'>+{last7} verified customers (7 days)</span></p>
+<p class='muted'>Goal: 100 verified paying customers.</p>{count_note}</div>
+<div class='card'><h2>Verified</h2><div class='big'>{verified}</div>
+<p class='muted'>The Ventoryn signature reached the payment.</p></div>
+<div class='card'><h2>Pending</h2><div class='big'>{counts['pending']}</div>
+<p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div>
+<div class='card'><h2>Unattributed</h2><div class='big'>{counts['unattributed']}</div>
+<p class='muted'>Real Stripe payment, no signature.</p></div>
+</div>"""
+
+    def _attribution_sections_html(data: dict) -> str:
+        """The attribution sections shared by the customer /report
+        and the professional Overview: the flow, the conversion
+        donut + campaign table, the privacy controls, the trend +
+        breakdown + data-source legend. Every figure comes from
+        _attribution_data — this only renders it."""
+        flow_html = "".join(
+            f"<div class='v-flow-step{' done' if step['ok'] else ''}'>"
+            f"<span class='v-flow-check'>"
+            f"{icon('check', 16) if step['ok'] else _FLOW_DOT_SVG}"
+            f"</span> <strong>{esc(step['label'])}</strong>"
+            f"<span>{esc(step['note'])}</span></div>"
+            + (f"<span class='v-flow-arrow'>{icon('arrow_right', 18)}"
+               f"</span>" if i < 5 else "")
+            for i, step in enumerate(data["flow_steps"]))
+        camp_rows = "".join(
+            f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
+            f"<td>{c['verified']}</td><td>Active</td></tr>"
+            for c in data["campaigns"]) or (
+            "<tr><td colspan='4'>No signed campaigns yet — run agent "
+            "work from a site page.</td></tr>")
+        return f"""<div class='card'><h2>Attribution flow</h2><div class='v-flow'>{flow_html}</div>
+<p class='muted'>A step shows a check only where this account has real
+evidence for it. Steps without evidence read "No evidence yet" — nothing
+is assumed.</p></div>
+<div class='v-report-grid'>
+<div class='card'><h2>Conversion status</h2>
+<div class='v-donut-wrap'>{data['donut_svg']}<ul class='v-legend'>{data['legend_html']}</ul></div></div>
+<div class='card'><h2>Campaign performance</h2>
+<div class='table-wrap'><table>
+<tr><th>Campaign</th><th>Source</th><th>Verified conversions</th><th>Status</th></tr>
+{camp_rows}</table></div>
+<p class='muted'>Clicks per campaign are not tracked yet — the table shows
+verified conversions only.</p></div>
+</div>
+<div class='card'><h2>Data &amp; privacy controls</h2>
+<p class='muted'>Revenue amounts are private by default. The count and the
+per-sale details are separate settings.</p>{data['privacy_forms']}</div>
+<div class='v-report-grid'>
+<div class='card'><h2>Acquisition trend</h2>{data['trend_svg']}</div>
+<div class='card'><h2>Conversion breakdown</h2>{data['breakdown_html']}
+<div class='card'><h2>Data source &amp; accuracy</h2><ul>
+<li><strong>Real data</strong> — live, verified events (e.g. Stripe, analytics).</li>
+<li><strong>Estimated data</strong> — Ventoryn does not show estimated data on this report — figures are real or unavailable.</li>
+<li><strong>Demonstration data</strong> — sample data shown for illustration only — used only on the public landing preview.</li>
+</ul></div></div>
+</div>"""
+
     @app.get("/report", response_class=HTMLResponse)
     def report_page(request: Request):
         """Server-rendered report (mobile-friendly). The operator gets
@@ -2735,38 +3198,6 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             # only renders it. check_visitors=True here: the strict
             # read — visitors actually recorded.
             data = _attribution_data(account, check_visitors=True)
-            counts = data["counts"]
-            verified = data["verified"]
-            total_conv = data["total"]
-            last7 = data["last7"]
-            ring = data["ring_svg"]
-            donut = data["donut_svg"]
-            legend = data["legend_html"]
-            trend_svg = data["trend_svg"]
-            breakdown_html = data["breakdown_html"]
-            privacy_forms = data["privacy_forms"]
-            any_count_hidden = data["any_count_hidden"]
-
-            # Attribution flow: inline SVG check for a step with
-            # evidence, a grey SVG dot without; an SVG arrow
-            # between steps — no text glyphs.
-            flow_html = "".join(
-                f"<div class='v-flow-step{' done' if step['ok'] else ''}'>"
-                f"<span class='v-flow-check'>"
-                f"{icon('check', 16) if step['ok'] else _FLOW_DOT_SVG}"
-                f"</span> <strong>{esc(step['label'])}</strong>"
-                f"<span>{esc(step['note'])}</span></div>"
-                + (f"<span class='v-flow-arrow'>{icon('arrow_right', 18)}"
-                   f"</span>" if i < 5 else "")
-                for i, step in enumerate(data["flow_steps"]))
-
-            # Campaign performance: one row per signed action.
-            camp_rows = "".join(
-                f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
-                f"<td>{c['verified']}</td><td>Active</td></tr>"
-                for c in data["campaigns"]) or (
-                "<tr><td colspan='4'>No signed campaigns yet — run agent "
-                "work from a site page.</td></tr>")
             # Your websites + recent jobs (revenue/count hidden per
             # the toggles — the display HTML comes from the helper).
             site_rows = "".join(
@@ -2781,51 +3212,11 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
                 f"<td>{esc(j['result'] or '—')}</td></tr>"
                 for j in _saas_store.list_jobs(account["id"])
             ) or "<tr><td colspan='4'>No jobs yet.</td></tr>"
-            count_note = (
-                "<p class='muted'>The customer count is hidden on one or "
-                "more of your sites — change it in Data &amp; privacy "
-                "controls below.</p>" if any_count_hidden else "")
             inner = f"""<p class='muted'>Track your journey to your first
 100 verified paying customers.</p>
 <p class='muted'>Generated: {esc(utcnow().isoformat())}</p>
-<div class='v-report-grid'>
-<div class='card v-progress'><h2>Progress to 100</h2>{ring}
-<div class='v-bar-track'><div class='v-bar-fill' style='width:{min(verified, 100)}%'></div></div>
-<p><span class='pill green'>+{last7} verified customers (7 days)</span></p>
-<p class='muted'>Goal: 100 verified paying customers.</p>{count_note}</div>
-<div class='card'><h2>Verified</h2><div class='big'>{verified}</div>
-<p class='muted'>The Ventoryn signature reached the payment.</p></div>
-<div class='card'><h2>Pending</h2><div class='big'>{counts['pending']}</div>
-<p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div>
-<div class='card'><h2>Unattributed</h2><div class='big'>{counts['unattributed']}</div>
-<p class='muted'>Real Stripe payment, no signature.</p></div>
-</div>
-<div class='card'><h2>Attribution flow</h2><div class='v-flow'>{flow_html}</div>
-<p class='muted'>A step shows a check only where this account has real
-evidence for it. Steps without evidence read "No evidence yet" — nothing
-is assumed.</p></div>
-<div class='v-report-grid'>
-<div class='card'><h2>Conversion status</h2>
-<div class='v-donut-wrap'>{donut}<ul class='v-legend'>{legend}</ul></div></div>
-<div class='card'><h2>Campaign performance</h2>
-<div class='table-wrap'><table>
-<tr><th>Campaign</th><th>Source</th><th>Verified conversions</th><th>Status</th></tr>
-{camp_rows}</table></div>
-<p class='muted'>Clicks per campaign are not tracked yet — the table shows
-verified conversions only.</p></div>
-</div>
-<div class='card'><h2>Data &amp; privacy controls</h2>
-<p class='muted'>Revenue amounts are private by default. The count and the
-per-sale details are separate settings.</p>{privacy_forms}</div>
-<div class='v-report-grid'>
-<div class='card'><h2>Acquisition trend</h2>{trend_svg}</div>
-<div class='card'><h2>Conversion breakdown</h2>{breakdown_html}
-<div class='card'><h2>Data source &amp; accuracy</h2><ul>
-<li><strong>Real data</strong> — live, verified events (e.g. Stripe, analytics).</li>
-<li><strong>Estimated data</strong> — Ventoryn does not show estimated data on this report — figures are real or unavailable.</li>
-<li><strong>Demonstration data</strong> — sample data shown for illustration only — used only on the public landing preview.</li>
-</ul></div></div>
-</div>
+{_progress_grid_html(data)}
+{_attribution_sections_html(data)}
 <h2>Your websites</h2>
 <div class="table-wrap"><table>
 <tr><th>Website</th><th>Paying customers</th><th>Revenue</th></tr>
@@ -2868,13 +3259,7 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
         net_color = ("var(--v-muted)" if fin["net_profit"] is None else
                      "var(--v-green)" if fin["net_profit"] >= 0 else
                      "var(--v-red)")
-        return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>Agent &amp; Financial Report — Ventoryn</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0b0e1e">
-<style>{ui.BASE_CSS}{_NAV_CSS}</style></head><body>{_CUSTOMER_NAV}<main class="v-main">
-<h1>Agent &amp; Financial Report</h1>
-<p>Generated: {esc(utcnow().isoformat())} · Tick: {snap["tick"]}</p>
+        inner = f"""<p class='muted'>Generated: {esc(utcnow().isoformat())} — Tick: {snap["tick"]}</p>
 <h2>Financials</h2>
 <div class="cards">
 <div class="card"><div class="label">Revenue</div>
@@ -2892,8 +3277,10 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
 <div class="table-wrap"><table>
 <tr><th>Name</th><th>Type</th><th>Status</th><th>Revenue</th><th>Costs</th>
 <th>Net profit</th></tr>{biz_rows}</table></div>
-{exp_block}
-</main></body></html>"""
+{exp_block}"""
+        return _operator_page("Agent & Financial Report", inner,
+                              account=account, current="report",
+                              is_operator=True, extra_css=_REPORT_CSS)
 
     # -- the five platform sections (sidebar items) -----------------------
     # Each follows the /approvals handler as the template:
@@ -2931,7 +3318,8 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
 shows verified conversions only.</p>"""
         return _operator_page(
             "Campaigns", inner, account=account, current="campaigns",
-            is_operator=_saas_config.is_operator(account["email"]))
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS)
 
     @app.get("/agents", response_class=HTMLResponse)
     def agents_page(request: Request):
@@ -2948,12 +3336,13 @@ shows verified conversions only.</p>"""
         if redirect is not None:
             return redirect
         agent_types = state["orchestrator"].registry.agent_types()
+        stats_list = (agent_stats_from_audit(state["audit"], agent_types)
+                      if agent_types else [])
         if not agent_types:
-            inner = ("<div class='card'><p>No agents registered yet."
-                     "</p></div>")
+            roster_html = ("<div class='card'><p>No agents registered "
+                           "yet.</p></div>")
         else:
-            stats = {s["type"]: s for s in agent_stats_from_audit(
-                state["audit"], agent_types)}
+            stats = {s["type"]: s for s in stats_list}
             crew = {
                 "discovery": ("Scout", "Discovery"),
                 "research": ("Analyst", "Research"),
@@ -2986,7 +3375,31 @@ shows verified conversions only.</p>"""
                     f"<dt>Cost</dt>"
                     f"<dd>${s.get('cost_usd', 0.0):,.4f}</dd></dl>"
                     f"</article>")
-            inner = f"<div class='v-biz-grid'>{cards}</div>"
+            roster_html = f"<div class='v-biz-grid'>{cards}</div>"
+        # Moved here from Overview (agents live ONLY on this page):
+        # "What the team is doing" (tasks & spend bars + activity
+        # over time) and "What just happened" (the events feed).
+        events = _activity_events(account, limit=200)
+        feed_rows = ""
+        for e in events[:30]:
+            ids = " — ".join(x for x in (e.get("business_id"),
+                                         e.get("task_id")) if x)
+            meta = " — ".join(x for x in
+                             (_fmt_event_time(e.get("ts", "")), ids)
+                             if x)
+            feed_rows += (
+                f"<div class='v-feed-row'>"
+                f"<span class='v-feed-voice'>{esc(_event_voice(e))}</span>"
+                + (f"<span class='v-feed-meta'>{esc(meta)}</span>"
+                   if meta else "")
+                + "</div>")
+        if not feed_rows:
+            feed_rows = ("<p class='muted'>Quiet — for now. Your "
+                         "websites' work will show up here.</p>")
+        inner = (f"{roster_html}"
+                 f"{_team_doing_html(stats_list, events)}"
+                 f"<div class='card'><h2>What just happened</h2>"
+                 f"{feed_rows}</div>")
         return _operator_page(
             "Agents", inner, account=account, current="agents",
             is_operator=_saas_config.is_operator(account["email"]),
@@ -3032,6 +3445,35 @@ shows verified conversions only.</p>"""
                 f"<td>{s['revenue_html']}</td></tr>")
         rows = rows or ("<tr><td colspan='5'>No websites yet — add one "
                         "to see its funnel.</td></tr>")
+        # Reports live here: the report page itself, plus (operator
+        # only) the generated mission reports — view in the browser
+        # or download the Markdown.
+        if _saas_config.is_operator(account["email"]):
+            from ventoryn.reports import list_reports
+
+            report_rows = "".join(
+                f"<tr><td>{esc(r['title'])}</td>"
+                f"<td>{esc(r['date'] or r['generated_at'] or '—')}</td>"
+                f"<td><a href='/reports/{esc(r['name'])}'>View</a></td>"
+                f"<td><a href='/reports/{esc(r['name'])}/download'>"
+                f"Download</a></td></tr>"
+                for r in list_reports()) or (
+                "<tr><td colspan='4'>No mission reports yet.</td></tr>")
+            report_section = (f"<div class='card'><h2>Reports</h2>"
+                "<p><a class='btn btn-primary' href='/report'>View the "
+                "Agent &amp; Financial Report</a></p>"
+                "<p class='muted'>The operator's agent + financial "
+                "report, and the mission reports below — view in the "
+                "browser or download the Markdown.</p>"
+                "<div class='table-wrap'><table>"
+                "<tr><th>Report</th><th>Date</th><th></th><th></th></tr>"
+                f"{report_rows}</table></div></div>")
+        else:
+            report_section = (f"<div class='card'><h2>Reports</h2>"
+                "<p><a class='btn btn-primary' href='/report'>View the "
+                "Acquisition &amp; Attribution report</a></p>"
+                "<p class='muted'>Progress, funnel, campaigns and jobs "
+                "for this account.</p></div>")
         inner = f"""<div class='v-stats'>
 <div class='v-stat v-stat-1'><span class='v-stat-label'>Verified</span>
 <span class='v-stat-value'>{counts['verified']}</span></div>
@@ -3046,7 +3488,8 @@ shows verified conversions only.</p>"""
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.
 Signups read unavailable because no signup tracking is connected yet.</p>
-<div class='card'><h2>Acquisition trend</h2>{data['trend_svg']}</div>"""
+<div class='card'><h2>Acquisition trend</h2>{data['trend_svg']}</div>
+{report_section}"""
         return _operator_page(
             "Analytics", inner, account=account, current="analytics",
             is_operator=_saas_config.is_operator(account["email"]),
@@ -3168,7 +3611,8 @@ is paid and rate-limited.</p>""" + cards)
         return _operator_page(
             "Integrations", inner, account=account,
             current="integrations",
-            is_operator=_saas_config.is_operator(account["email"]))
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS)
 
     @app.get("/customers", response_class=HTMLResponse)
     def customers_page(request: Request):
@@ -3238,11 +3682,18 @@ a real Stripe payment, no signature.</p>"""
     @app.post("/api/tick")
     def api_tick(request: Request):
         """One orchestrator tick. Operator only — a customer must
-        never be able to drive the simulation (or reset it)."""
+        never be able to drive the simulation (or reset it).
+        Refused while the operator-global pause is on: a paused
+        tick does not run and does not advance the counter."""
         _, redirect = _need_operator(request)
         if redirect is not None:
             return JSONResponse({"ok": False, "error": "operator only"},
                                 status_code=403)
+        if _saas_store.get_global_pause():
+            return JSONResponse(
+                {"ok": False,
+                 "error": "paused — resume all agents to run ticks"},
+                status_code=409)
         from ecosystem.worker import run_etsy_monitor_tick, run_tick
 
         game["tick"] += 1
@@ -3263,6 +3714,24 @@ a real Stripe payment, no signature.</p>"""
                 game["experiment_001"] = snap
         return JSONResponse({"ok": result.get("ok", False),
                              "snapshot": _snapshot()})
+
+    @app.post("/api/pause")
+    def api_pause(request: Request, paused: str = Form("0"),
+                  next: str = Form("/ops")):
+        """Operator only: pause / resume ALL agents. The flag is
+        persisted in the state DB and gates the orchestrator tick
+        loop (/api/tick refuses while paused; the worker loop skips
+        tick work). On-demand analyze jobs are untouched. A form
+        POST (the Overview button + the Settings control) that
+        redirects back to `next` — a same-site path only."""
+        _, redirect = _need_operator(request)
+        if redirect is not None:
+            return JSONResponse({"ok": False, "error": "operator only"},
+                                status_code=403)
+        _saas_store.set_global_pause(paused == "1")
+        dest = (next if (next.startswith("/")
+                         and not next.startswith("//")) else "/ops")
+        return RedirectResponse(dest, status_code=303)
 
     @app.post("/api/reset")
     def api_reset(request: Request):
@@ -3328,18 +3797,44 @@ a real Stripe payment, no signature.</p>"""
         return True, None
 
     def _admin_page(title: str, inner: str, current: str) -> str:
-        """Admin shell: the small centered admin header (brand + page
-        title + link row to the 4 admin pages, no hamburger, no
-        sidebar) + the admin board look — Kay Ayiti's light board
-        blended with ShipItAyiti's slate/navy headers."""
-        from ventoryn.nav import ADMIN_HEADER_CSS, simple_header_html
+        """Admin shell: the platform shell (purple sidebar with the
+        Admin group active + app header), keeping only the board
+        CONTENT styling (_ADMIN_CSS cards/tables) as extra_css.
+        The admin pages open on the admin password session, never a
+        Google session, so the sidebar's Growth Plan card + the
+        Approvals badge read the operator account from the store
+        (verified over their counted sites); when the operator has
+        no Google account yet the card reads 0 and the Admin group
+        still shows — the admin pages are operator-only either
+        way."""
+        from ventoryn.nav import platform_head_html, sidebar_html
 
+        operator_email = (_saas_config.operator_email or "").strip().lower()
+        operator = None
+        for account in _saas_store.list_accounts():
+            if account.get("email", "").strip().lower() == operator_email:
+                operator = account
+                break
+        verified = 0
+        pending = 0
+        if operator is not None:
+            sites = _saas_store.list_sites(operator["id"])
+            counted_ids = [s["id"] for s in sites
+                           if s.get("count_show", 1)]
+            verified = _saas_store.conversion_status_counts(
+                counted_ids)["verified"]
+            owned = _owned_business_ids(operator)
+            pending = len([a for a in state["approvals"].pending()
+                           if _approval_visible(operator, a, owned)])
+        sidebar = sidebar_html(
+            current, True, verified=verified, pending_approvals=pending,
+            account_email=(operator or {}).get("email", ""))
+        head = platform_head_html(title, pending_approvals=pending)
         return ui.page(f"{title} (admin)", inner +
                        "<p class='v-admin-foot'>Signed in as admin · "
                        "<a href='/admin/logout'>Admin sign out</a></p>",
-                       header=simple_header_html(title, current),
-                       extra_css=_ADMIN_CSS + ADMIN_HEADER_CSS,
-                       body_class="v-admin")
+                       sidebar=sidebar, page_head=head,
+                       extra_css=_ADMIN_CSS, body_class="v-admin")
 
     def _admin_auth_page(title: str, inner: str) -> str:
         """Password-only login page: no header, no menu, no Google
@@ -3449,7 +3944,7 @@ a real Stripe payment, no signature.</p>"""
                      "<p class='muted'>Resetting turns two-factor off — "
                      "the next admin login is password-only until it is "
                      "set up again.</p></div>")
-            return _admin_page("Two-factor", inner, "admin-two-factor")
+            return _admin_page("Two-factor", inner, "admin-live")
         secret = _saas_store.get_admin_totp_pending_secret()
         if not secret:
             secret = _saas_store.begin_admin_totp_setup()["secret"]
@@ -3475,7 +3970,7 @@ a real Stripe payment, no signature.</p>"""
                    "setup — save them. If you lose your phone and the "
                    "codes, two-factor can only be reset from inside an "
                    "admin session.</p></div>")
-        return _admin_page("Two-factor", inner, "admin-two-factor")
+        return _admin_page("Two-factor", inner, "admin-live")
 
     @app.post("/admin/two-factor/setup", response_class=HTMLResponse)
     def admin_totp_setup_confirm(request: Request, code: str = Form("")):
@@ -3496,7 +3991,7 @@ a real Stripe payment, no signature.</p>"""
             state["audit"].record(agent_type="admin",
                                  event="admin_totp_enabled",
                                  result={"success": True})
-            return _admin_page("Two-factor", inner, "admin-two-factor")
+            return _admin_page("Two-factor", inner, "admin-live")
         state["audit"].record(agent_type="admin",
                              event="admin_totp_enabled",
                              result={"success": False})
@@ -3781,6 +4276,49 @@ a real Stripe payment, no signature.</p>"""
         else:
             dest = f"/account/two-factor/setup?next={nxt}"
         return RedirectResponse(dest, status_code=303)
+
+    # -- error pages in the platform shell ------------------------------
+    # Unknown URLs used to return FastAPI's bare JSON
+    # {"detail": "Not found"} — a signed-in user got no navigation
+    # at all. A 404/500 now renders the platform shell (sidebar +
+    # header) when signed in, and a bare centered card when not.
+    # The shell render is best-effort: if it fails, the bare card
+    # is the fallback, never a second crash.
+    async def _shell_error_page(request: Request, status_code: int,
+                                title: str, message: str):
+        inner = (f"<div class='card'><h2>{esc(title)}</h2>"
+                 f"<p>{esc(message)}</p>"
+                 f"<p><a class='btn btn-primary' href='/ops'>"
+                 f"Back to Live Ops</a></p></div>")
+        try:
+            account = _current_account(request)
+        except Exception:  # noqa: BLE001 - error page never crashes
+            account = None
+        if account is None:
+            return HTMLResponse(
+                ui.page(title, inner), status_code=status_code)
+        try:
+            page = _operator_page(
+                title, inner, account=account, current=None,
+                is_operator=_saas_config.is_operator(account["email"]))
+        except Exception:  # noqa: BLE001 - error page never crashes
+            return HTMLResponse(
+                ui.page(title, inner), status_code=status_code)
+        return HTMLResponse(page, status_code=status_code)
+
+    @app.exception_handler(404)
+    async def _not_found_handler(request: Request, exc):
+        return await _shell_error_page(
+            request, 404, "Page not found",
+            "That page does not exist — check the address, or go back "
+            "to Live Ops.")
+
+    @app.exception_handler(500)
+    async def _server_error_handler(request: Request, exc):
+        return await _shell_error_page(
+            request, 500, "Something went wrong",
+            "Ventoryn hit an unexpected error. Try again, or go back "
+            "to Live Ops.")
 
     return app
 

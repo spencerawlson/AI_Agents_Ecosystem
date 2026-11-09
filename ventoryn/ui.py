@@ -4,7 +4,8 @@ Every server-rendered page (signed-in app pages, the SaaS account
 pages, the admin board, the operator tools) is built with ``page()``
 and styled by ``BASE_CSS``, so they all share the landing page's
 brand: navy app bar, violet accent, white cards on a soft tint.
-The Live Ops page (static/game.html) reads the same tokens.
+The professional Overview (Live Ops) is server-rendered through the
+same shell — there is no separate game page any more.
 
 Page-specific CSS (portfolio stat cards, report charts, admin board)
 is layered on top through ``extra_css`` and should only use the
@@ -175,15 +176,44 @@ def money(value: float | None, places: int = 2) -> str:
     return f"{sign}${abs(value):,.{places}f}"
 
 
+def pause_card_html(paused: bool, next_path: str) -> str:
+    """The operator-global pause control: the only way to stop the
+    agents working. Pausing stops the orchestrator tick loop (no
+    ticks run while paused, including any automatic ticking);
+    on-demand analyze jobs are untouched. The state is read from
+    the store on every render, so the button always shows the
+    truth. Shared by the Overview button and the Settings control
+    (My account, operator only)."""
+    if paused:
+        state_html = ("<p><strong>Agents are paused.</strong> No "
+                      "agent work runs while paused — ticks are "
+                      "refused until you resume.</p>")
+        btn = "Resume all agents"
+        value = "0"
+    else:
+        state_html = ("<p><strong>Agents are running.</strong> "
+                      "Pause stops the agents working — no ticks "
+                      "run while paused.</p>")
+        btn = "Pause all agents"
+        value = "1"
+    return (f"<div class='card'><h2>Agents</h2>{state_html}"
+            f"<form method='post' action='/api/pause'>"
+            f"<input type='hidden' name='paused' value='{value}'>"
+            f"<input type='hidden' name='next' value='{esc(next_path)}'>"
+            f"<p><button class='btn' type='submit'>{btn}</button></p>"
+            f"</form></div>")
+
+
 def page(title: str, inner: str, *, header: str = "",
          extra_css: str = "", body_class: str = "",
          head_extra: str = "", sidebar: str = "",
          page_head: str = "") -> str:
     """A complete HTML document in the Ventoryn shell.
 
-    ``header`` is the app bar (``simple_header_html`` for admin
-    pages) or empty for pages without navigation (unsigned error
-    pages, the admin login).
+    ``header`` is an app bar (legacy, unused now that every
+    signed-in page — admin included — uses the platform shell) or
+    empty for pages without navigation (unsigned error pages, the
+    admin login).
     ``inner`` goes inside the centered <main>.
 
     Platform shell: pass ``sidebar`` (from ventoryn.nav.sidebar_html)

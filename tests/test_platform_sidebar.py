@@ -98,28 +98,24 @@ def test_sidebar_all_nine_items_on_every_signed_in_page():
                (_operator_client(app, store)[0], True))
     for client, is_operator in clients:
         for path in SIDEBAR_PAGES:
-            # The OPERATOR's /report keeps its old agent & financial
-            # shell by design (no sidebar) — covered below.
-            if path == "/report" and is_operator:
-                continue
             r = client.get(path)
             assert r.status_code == 200, path
             aside = _sidebar_aside(r.text)
             for item in SIDEBAR_ITEMS:
                 assert item in aside, (path, item)
             # The current page (when it is a sidebar item) is a
-            # non-clickable span, never a dead link. /portfolio and
-            # /account/subscribe are not sidebar items, so nothing
-            # is marked current there.
+            # non-clickable span, never a dead link. /portfolio maps
+            # to Overview; /account/subscribe is not a sidebar
+            # item, so nothing is marked current there.
             assert "aria-current='page'" in aside or path in (
-                "/portfolio", "/account/subscribe"), path
-    # The operator's /report keeps its old shell: customer nav, no
-    # sidebar, no hamburger.
+                "/account/subscribe",), path
+    # The operator's /report renders through the platform shell too
+    # (step 4 of the unification): sidebar, no pill nav.
     op_client, _op = _operator_client(app, store)
     r = op_client.get("/report")
     assert r.status_code == 200
-    assert "class='customer-nav'" in r.text
-    assert "class='app-sidebar'" not in r.text
+    assert "class='app-sidebar'" in r.text
+    assert "class='customer-nav'" not in r.text
     assert "v-burger" not in r.text
 
 
@@ -295,8 +291,10 @@ def test_ops_overview_real_empty_state():
     for label in ("Verified", "Pending", "Unattributed",
                   "Attribution flow", "Conversion status",
                   "Campaign performance", "Acquisition trend",
-                  "Conversion breakdown", "Your crew"):
+                  "Conversion breakdown"):
         assert label in r.text, label
+    # No crew on Overview: agents live only on /agents.
+    assert "Your crew" not in r.text
     assert "No signed campaigns yet" in r.text
     # The analyze panel is still there.
     assert "analyze-url" in r.text

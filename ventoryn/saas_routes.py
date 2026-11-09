@@ -326,7 +326,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "too, the operator can reset two-factor for your account "
                  "— ask him, and set it up again at your next sign-in.</p>"
                  "</div>")
-        return _page("Set up two-factor", inner)
+        return _signed_page("Set up two-factor", inner, account,
+                            current="account")
 
     def _totp_verify_page(account: dict, nxt: str, error: str = "") -> str:
         """The code-at-sign-in page: a TOTP code or a backup code."""
@@ -345,7 +346,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "<p class='muted'>Lost your phone and your backup codes? "
                  "The operator can reset two-factor for your account — ask "
                  "him.</p></div>")
-        return _page("Two-factor code", inner)
+        return _signed_page("Two-factor code", inner, account,
+                            current="account")
 
     # -- sign-in -------------------------------------------------------------
     @app.get("/account", response_class=HTMLResponse)
@@ -503,7 +505,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      f"<div class='codes'>{codes_html}</div>"
                      f"<p><a class='btn btn-primary' href='{esc(dest)}'>"
                      "Continue to Live Ops</a></p></div>")
-            return HTMLResponse(_page("Two-factor is on", inner))
+            return HTMLResponse(_signed_page("Two-factor is on", inner,
+                                            account, current="account"))
         return HTMLResponse(
             _totp_setup_page(account, _safe_next(next),
                              "That code did not match — check your "
@@ -605,7 +608,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page("Security",
                       f"<p>{esc(err)}</p><p><a href='/account/security'>"
-                      "Back</a>.</p>", account),
+                      "Back</a>.</p>", account, current="account"),
                 status_code=400)
         # Revoke at the provider first, best-effort, then delete
         # everything the account owns.
@@ -706,6 +709,13 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 f"{totp_line}"
                 f"<p><a class='btn' href='{esc(add_site_href)}'>"
                 "Add a website</a></p></div>")
+            # The operator-global pause control (Settings): the only
+            # way to stop the agents working, alongside the Pause
+            # button on Overview. Same card, same endpoint.
+            from ventoryn import ui as _ui
+
+            pause_card = _ui.pause_card_html(
+                store.get_global_pause(), "/account/dashboard")
         else:
             plan_card = (
                 f"<div class='card'><h2>Your plan</h2>"
@@ -717,8 +727,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 f"{totp_line}"
                 f"<p><a class='btn' href='{esc(add_site_href)}'>"
                 "Add a website</a></p></div>")
+            pause_card = ""
         inner = f"""{notice}
 {plan_card}
+{pause_card}
 <h2>Your websites</h2>{site_rows}
 <h2>Recent jobs</h2>
 <div class='table-wrap'><table>
@@ -825,7 +837,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page("Subscribe", f"<p>{esc(exc)}</p>"
                       "<p><a href='/account/subscribe'>Back</a>.</p>",
-                      account),
+                      account, current="subscribe"),
                 status_code=400)
         return RedirectResponse(session["url"], status_code=303)
 
@@ -854,7 +866,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "</select>"
                  "<p><button class='btn btn-primary' type='submit'>"
                  "Add website</button></p></form></div>")
-        return _signed_page("Add a website", inner, account)
+        return _signed_page("Add a website", inner, account, current="account")
 
     @app.post("/account/sites")
     def site_create(request: Request, url: str = Form(...),
@@ -868,7 +880,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page("Add a website",
                       f"<p>{esc(exc)}</p><p><a href='/account/sites/new'>"
-                      "Back</a>.</p>", account),
+                      "Back</a>.</p>", account, current="account"),
                 status_code=400)
         # The admin's recent-activity feed: a real website was added.
         store.record_activity_event(account["id"], "site-added",
@@ -884,7 +896,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account), status_code=404)
+                                      account, current="account"), status_code=404)
         connections = store.get_connections(site_id)
         plausible_raw = (store.get_connection(site_id, "plausible") or {}
                          ).get("_detail_raw") or {}
@@ -1069,7 +1081,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <input type='text' id='amount' name='amount_usd' placeholder='19.00'>
 <p><button class='btn' type='submit'>Record sale</button></p></form></div>
 <h2>Connections</h2>{conn_rows}"""
-        return _signed_page(site["url"], inner, account)
+        return _signed_page(site["url"], inner, account, current="account")
 
     @app.post("/account/sites/{site_id}/connections/{kind}")
     def connection_update(request: Request, site_id: str, kind: str,
@@ -1082,7 +1094,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account), status_code=404)
+                                      account, current="account"), status_code=404)
         if kind in ("reddit", "x"):
             return HTMLResponse(
                 _signed_page(site["url"],
@@ -1090,7 +1102,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       "own app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account),
+                      account, current="account"),
                 status_code=400)
         if kind == "plausible":
             raw = (store.get_connection(site_id, "plausible") or {}
@@ -1126,7 +1138,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                     "to see real paying customers here.", detail)
         else:
             return HTMLResponse(
-                _signed_page(site["url"], "<p>Unknown connection.</p>", account),
+                _signed_page(site["url"], "<p>Unknown connection.</p>", account, current="account"),
                 status_code=400)
         return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
 
@@ -1143,13 +1155,13 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account), status_code=404)
+                                      account, current="account"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/account/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account),
+                      "Back</a>.</p>", account, current="account"),
                 status_code=400)
         # A checkbox sends "on" when ticked and nothing at all when
         # unticked — the three settings are independent.
@@ -1169,13 +1181,13 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account), status_code=404)
+                                      account, current="account"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/account/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account),
+                      "Back</a>.</p>", account, current="account"),
                 status_code=400)
         conn = store.get_connection(site_id, kind) or {}
         raw = conn.get("_detail_raw") or {}
@@ -1185,7 +1197,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                  f"{esc(note)}</p>"
                  f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
-        return HTMLResponse(_signed_page(site["url"], inner, account))
+        return HTMLResponse(_signed_page(site["url"], inner, account, current="account"))
 
     @app.post("/account/sites/{site_id}/jobs")
     def run_job(request: Request, site_id: str,
@@ -1196,11 +1208,11 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account), status_code=404)
+                                      account, current="account"), status_code=404)
         cost = CREDIT_COSTS.get(job_type)
         if cost is None:
             return HTMLResponse(
-                _signed_page(site["url"], "<p>Unknown job type.</p>", account),
+                _signed_page(site["url"], "<p>Unknown job type.</p>", account, current="account"),
                 status_code=400)
         if job_type not in RUNNABLE_JOB_TYPES:
             return HTMLResponse(
@@ -1209,7 +1221,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"available yet — it will cost {cost} credits when it "
                       f"lands. Nothing was charged.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account),
+                      account, current="account"),
                 status_code=400)
         is_op = config.is_operator(account["email"])
         balance = store.credit_balance(account["id"])
@@ -1220,7 +1232,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"{balance}. Nothing ran and nothing was charged. "
                       f"Top up by subscribing on the "
                       f"<a href='/account/subscribe'>Subscribe</a> page.</p>",
-                      account),
+                      account, current="account"),
                 status_code=402)
         # Charge first (atomic — the job row is created with the charge),
         # run second; a failed run is refunded, so nobody pays for work
@@ -1232,7 +1244,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(exc)}</p><p><a href='/account/sites/"
-                      f"{esc(site_id)}'>Back</a>.</p>", account),
+                      f"{esc(site_id)}'>Back</a>.</p>", account, current="account"),
                 status_code=402)
         try:
             from ecosystem.analyze import render_report, run_analysis
@@ -1275,7 +1287,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"],
                       detail +
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account),
+                      account, current="account"),
                 status_code=500)
         return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
 
@@ -1288,7 +1300,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account), status_code=404)
+                                      account, current="account"), status_code=404)
         try:
             amount_cents = int(round(float(amount_usd) * 100))
             if amount_cents <= 0:
@@ -1298,7 +1310,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"],
                       "<p>Enter a sale amount in dollars, e.g. 19.00.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account),
+                      account, current="account"),
                 status_code=400)
         store.record_conversion(site_id, amount_cents, "usd", "manual")
         return RedirectResponse(f"/account/sites/{site_id}", status_code=303)

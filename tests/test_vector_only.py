@@ -102,7 +102,9 @@ def test_no_bitmap_reference_in_page_templates():
         here / "ventoryn" / "app.py",
         here / "ventoryn" / "nav.py",
         here / "ventoryn" / "saas_routes.py",
-        here / "ventoryn" / "static" / "game.html",
+        # (The game file ventoryn/static/game.html is deleted —
+        # Overview is server-rendered now — so it is no longer
+        # scanned.)
     ]
     for path in sources:
         text = path.read_text(encoding="utf-8")

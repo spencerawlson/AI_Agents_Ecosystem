@@ -73,7 +73,8 @@ def test_bars_from_audit_log():
     assert by_type["research"]["tasks_completed"] == 1
     assert by_type["research"]["tokens_used"] == 800
     assert by_type["research"]["cost_usd"] == 0.01
-    # Snapshot shape is unchanged for game.html.
+    # Snapshot shape is unchanged (DJINN reads it — never
+    # remove a snapshot key).
     assert set(by_type["discovery"]) == {"type", "tasks_completed",
                                          "tokens_used", "cost_usd",
                                          "last_task"}

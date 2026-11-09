@@ -224,15 +224,17 @@ def test_ops_serves_for_a_signed_in_customer():
     client, _account = _customer_client(app, store, CUSTOMER_A)
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Ventoryn — Live Ops" in r.text
+    assert "Live Ops — Ventoryn" in r.text
     # The customer sidebar, not the old operator link paragraph.
     assert "Overview" in r.text
     assert "My account" in r.text
     assert "Sign out" in r.text
-    # The operator simulation controls are hidden for customers
-    # (JS hides them from the account in the snapshot).
-    assert "applyAccount" in r.text
-    assert "state.pendingSiteUrl" in r.text
+    # The game JS is gone: no applyAccount, no pendingSiteUrl state
+    # — the Overview is server-rendered, and the funnel URL is
+    # prefilled server-side instead (see the funnel test below).
+    assert "applyAccount" not in r.text
+    assert "state.pendingSiteUrl" not in r.text
+    assert "Your crew" not in r.text
 
 
 def test_tick_is_operator_only():
@@ -686,10 +688,12 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
     assert r.status_code == 200
     assert "Two-factor is on" in r.text
 
-    # 3. /ops (signed in) prefills the analyzer with that URL.
+    # 3. /ops (signed in) prefills the analyzer with that URL —
+    # server-rendered now, not game JS state — and offers the
+    # subscribe step for it.
     r = client.get("/ops?site_url=https%3A%2F%2Fada.example.com")
     assert r.status_code == 200
-    assert "pendingSiteUrl" in r.text
+    assert "value='https://ada.example.com'" in r.text
     assert "Subscribe — $20/month to add it" in r.text
 
     # 4. Subscribe carries the URL onward (never retyped).

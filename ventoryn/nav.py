@@ -10,9 +10,11 @@ inside the platform shell (``ventoryn.ui.page`` with ``sidebar=`` +
 - ``platform_head_html`` — the app header (mobile sidebar toggle,
   page title + subtitle, approvals bell, avatar dropdown).
 - ``SIDEBAR_CSS`` / ``SIDEBAR_JS`` — the shell styles + behaviour.
-- ``simple_header_html`` / ``ADMIN_HEADER_CSS`` — admin pages only.
-  Admin pages do NOT get the sidebar; they keep their existing board
-  look (``_ADMIN_CSS`` in app.py stays as-is).
+
+Admin pages render through the same platform shell (the sidebar
+with the Admin group active); the old admin-only centered header
+(``simple_header_html`` / ``ADMIN_HEADER_CSS``) is gone. Only
+``/admin/login`` stays bare — a login page with no nav is correct.
 
 Rules (Spencer's):
 - The page you are already on is NOT a clickable option: it renders
@@ -29,7 +31,9 @@ function, so there is no import cycle in either direction.
 The old hamburger header (``HEADER_CSS`` / ``HEADER_JS`` /
 ``header_html``) is gone: its last callers (the operator
 mission-report page and the account pages' non-sidebar branch)
-now use the platform shell above.
+now use the platform shell above. The admin-only centered header
+(``simple_header_html`` / ``ADMIN_HEADER_CSS``) is gone too: admin
+pages use the same platform shell, with the Admin group active.
 """
 
 from __future__ import annotations
@@ -333,48 +337,4 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"<a href='/account/logout'>Sign out</a>"
         f"</div></div>"
         f"</div>"
-        f"</header>")
-
-
-# ---------------------------------------------------------------------------
-# Admin-only header (no sidebar on admin pages).
-# ---------------------------------------------------------------------------
-
-ADMIN_HEADER_CSS = """
-/* Admin pages only: centered brand + page title + a plain link row
-   to the 4 admin pages. The admin board itself keeps its existing
-   Kay Ayiti / ShipItAyiti look (_ADMIN_CSS stays as-is). */
-.admin-head { background: var(--v-navy, #0b0e1e); color: #fff;
-  text-align: center; padding: 18px 20px 14px; }
-.admin-head .admin-brand { font-size: 22px; font-weight: 800; color: #fff;
-  text-decoration: none; letter-spacing: .02em; }
-.admin-head h1 { font-size: 20px; color: #fff; margin: 10px 0 8px; }
-.admin-links { display: flex; flex-wrap: wrap; gap: 4px 18px;
-  justify-content: center; font-size: 14px; }
-.admin-links a { color: #c4b5fd; text-decoration: none; min-height: 44px;
-  display: inline-flex; align-items: center; }
-.admin-links a:hover { color: #fff; }
-.admin-links .admin-current { color: #fff; font-weight: 700;
-  min-height: 44px; display: inline-flex; align-items: center; }
-"""
-
-
-def simple_header_html(title: str, current: str | None) -> str:
-    """The small centered header for admin pages only: brand + page
-    title + a plain link row to the 4 admin pages + Admin sign out.
-    The current admin page renders as a non-clickable label."""
-    links = []
-    for key, label, href in _ADMIN_ITEMS:
-        if key == current:
-            links.append(f"<span class='admin-current' "
-                         f"aria-current='page'>{esc(label)}</span>")
-        else:
-            links.append(f"<a href='{esc(href)}'>{esc(label)}</a>")
-    links.append("<a href='/admin/logout'>Admin sign out</a>")
-    return (
-        f"<header class='admin-head'>"
-        f"<a class='admin-brand' href='/admin'>Ventoryn</a>"
-        f"<h1>{esc(title)}</h1>"
-        f"<nav class='admin-links' aria-label='Admin'>"
-        f"{''.join(links)}</nav>"
         f"</header>")

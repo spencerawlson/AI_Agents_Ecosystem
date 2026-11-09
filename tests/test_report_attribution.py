@@ -236,14 +236,16 @@ def test_report_respects_the_three_toggles():
     assert "Conversion details are hidden" in r.text
 
 
-def test_operator_report_unchanged():
+def test_operator_report_content_unchanged():
     app, store = _app_with()
     client = TestClient(app)
     sign_in(client, store)  # the operator
     r = client.get("/report")
     assert r.status_code == 200
-    # The operator's Agent & Financial Report keeps its old shell.
-    assert "class='customer-nav'" in r.text
+    # The operator's Agent & Financial Report keeps its content —
+    # only its shell changed (platform sidebar, no pill nav).
+    assert "class='app-sidebar'" in r.text
+    assert "class='customer-nav'" not in r.text
     assert "v-burger" not in r.text
     assert "Agent &amp; Financial Report" in r.text
     assert "Acquisition &amp; Attribution" not in r.text

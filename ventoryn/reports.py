@@ -175,18 +175,31 @@ def render_markdown(text: str) -> str:
     return "\n".join(out)
 
 
-def render_report(name: str) -> tuple[str, str] | None:
-    """Return (title, html) for a report, or None if unknown/invalid.
-
-    The name is strictly validated and resolved inside the reports
-    directory, so path traversal is impossible.
-    """
+def report_path(name: str) -> Path | None:
+    """The validated path of a mission report, or None if the name
+    is invalid or the file is not inside the reports directory —
+    path traversal is impossible."""
     if not _NAME_RE.fullmatch(name):
         return None
     path = (reports_dir() / name).resolve()
     try:
         if path.parent != reports_dir().resolve() or not path.is_file():
             return None
+    except OSError:
+        return None
+    return path
+
+
+def render_report(name: str) -> tuple[str, str] | None:
+    """Return (title, html) for a report, or None if unknown/invalid.
+
+    The name is strictly validated and resolved inside the reports
+    directory, so path traversal is impossible.
+    """
+    path = report_path(name)
+    if path is None:
+        return None
+    try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None

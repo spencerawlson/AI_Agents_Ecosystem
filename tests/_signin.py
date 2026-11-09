@@ -1,6 +1,7 @@
 """Sign-in helpers for the auth-gated dashboard tests.
 
-The dashboard now requires sign-in: /ops, /game, /portfolio,
+The dashboard now requires sign-in: /ops (/game redirects to
+/ops), /portfolio,
 /approvals, /report, /api/snapshot and /api/report need a session
 cookie; the operator tools (/businesses, /experiments, /reports,
 /experiment-001, /api/tick, /api/reset) need the operator account —

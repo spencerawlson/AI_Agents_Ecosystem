@@ -1,8 +1,6 @@
 """Dashboard smoke test."""
 
-import re
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -144,51 +142,40 @@ def test_report_page():
     assert "Agent performance" in r.text
     assert "Business P" in r.text
     assert "$500.00" in r.text
-    assert "/ops" in r.text  # link to the Live Ops view
-    assert "Live Ops" in r.text
+    # The report renders through the platform shell now: the
+    # sidebar links back to Live Ops (Overview), no pill nav.
+    assert "class='app-sidebar'" in r.text
+    assert "/ops" in r.text
+    assert "Overview" in r.text
+    assert "class='customer-nav'" not in r.text
 
 
-def test_game_view_is_live_ops():
-    """/game serves the Ventoryn — Live Ops page with a vector
-    cast (one inline SVG per character, no emoji in the roster) and the
-    live ops window; /ops is an alias for the same page."""
+def test_game_redirects_to_live_ops():
+    """The game view is gone: /game redirects to the professional
+    server-rendered Overview (/ops), which keeps the top summary
+    and the Live activity feed but no crew, no HUD, no runtime
+    controls, and no game file behind it."""
     app, client, _store = _operator_app(
         registry=BusinessRegistry(), ledger=Ledger())
-    for path in ("/game", "/ops"):
-        r = client.get(path)
-        assert r.status_code == 200
-        assert "Ventoryn — Live Ops" in r.text
-        assert "Live game view" not in r.text
-        assert "What the team is doing" in r.text
-        assert 'id="ops-feed"' in r.text
-        assert 'id="ops-bars"' in r.text
-        assert 'id="ops-activity"' in r.text
-        assert 'id="ops-status"' in r.text
-        assert "setInterval" in r.text and "5000" in r.text
-        # The ops feed shows what a run spent (class + formatter).
-        assert "ops-cost" in r.text
-        assert "fmtCost" in r.text
-        # One well-formed inline SVG vector icon per character.
-        attrs = re.search(r"const SVG_ATTRS = '(.*?)';", r.text).group(1)
-        roster = r.text.split("const ROSTER = [", 1)[1].split("];", 1)[0]
-        icons = re.findall(r"'<svg ' \+ SVG_ATTRS \+ '(.*?)</svg>'",
-                           roster, re.S)
-        assert len(icons) == 8
-        for body in icons:
-            svg = "<svg " + attrs + body + "</svg>"
-            root = ET.fromstring(svg)
-            assert root.get("viewBox") == "0 0 64 64"
-            assert root.get("data-icon") in {
-                "scout", "analyst", "builder", "studio",
-                "growth", "care", "ops", "ledger"}
-        # No emoji left in the cast.
-        for old in ("🔭", "🔬", "🛠️", "🎨", "📣", "💬", "⚙️", "📒"):
-            assert old not in roster
-        assert "char-emoji" not in r.text
-        # The poll-error banner is neutral: /ops and /game share
-        # this file, and "game server" reads wrong on Live Ops.
-        assert "Can't reach the server" in r.text
-        assert "game server" not in r.text
+    r = client.get("/game", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ops"
+    r = client.get("/ops")
+    assert r.status_code == 200
+    assert "Live Ops — Ventoryn" in r.text
+    assert "Live game view" not in r.text
+    assert "Your crew" not in r.text
+    assert "What the team is doing" not in r.text
+    assert 'id="ops-feed"' not in r.text
+    assert 'id="ops-bars"' not in r.text
+    assert 'id="ops-activity"' not in r.text
+    assert 'id="ops-status"' not in r.text
+    assert "confetti" not in r.text.lower()
+    assert "game.html" not in r.text
+    # The professional Overview keeps the Live activity feed.
+    assert "Live activity" in r.text
+    # The poll-error wording is gone with the game file.
+    assert "game server" not in r.text
 
 
 def test_api_snapshot_feeds_live_ops():
@@ -293,50 +280,34 @@ if __name__ == "__main__":
     test_api_report()
     test_api_report_experiment_shape()
     test_report_page()
-    test_game_view_is_live_ops()
+    test_game_redirects_to_live_ops()
     test_api_snapshot_feeds_live_ops()
     test_api_snapshot_includes_event_cost()
     test_create_app_keeps_empty_audit_log()
     print("Report tests passed.")
 
 
-def test_live_ops_is_ventoryn_and_mobile_friendly():
-    """The live-ops page is Ventoryn now (not Ecosystem Tycoon), and its
-    phone layout is thumb-friendly: the crew section becomes a
-    one-card-at-a-time scroll-snap carousel at <=560px (native swipe,
-    prev/next buttons, dots + "n of 8"), the ops charts size their SVG
-    viewBox to the panel on screen (so labels don't shrink to ~6px on
-    a phone), and the footer controls keep 44px+ tap targets. The
-    desktop crew grid is untouched."""
+def test_live_ops_is_ventoryn_and_professional():
+    """The live-ops page is Ventoryn now (not Ecosystem Tycoon), and
+    the professional Overview is thumb-friendly through the platform
+    shell: the analyze fields keep 44px+ tap targets, the sidebar
+    collapses behind a 44px toggle on a phone, and there is no crew
+    carousel, no game HUD, and no runtime controls on the page.
+    The live-ops doc moved with the name."""
     app, client, _store = _operator_app(
         registry=BusinessRegistry(), ledger=Ledger())
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Ventoryn — Live Ops" in r.text
+    assert "Live Ops — Ventoryn" in r.text
     assert "Ecosystem Tycoon" not in r.text
-    # Desktop crew grid untouched; the old single-column rule is gone,
-    # replaced by the phone carousel strip.
-    assert "#stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }" in r.text
-    assert "#stations { grid-template-columns: 1fr; }" not in r.text
-    # Carousel: scroll-snap strip, one card per view, buttons, dots,
-    # position indicator, and the JS that drives them.
-    assert "scroll-snap-type: x mandatory" in r.text
-    assert "scroll-snap-align: start" in r.text
-    assert 'id="crew-prev"' in r.text
-    assert 'id="crew-next"' in r.text
-    assert 'id="crew-dots"' in r.text
-    assert 'id="crew-pos"' in r.text
-    assert "1 of 8" in r.text
-    assert "buildCrewNav" in r.text
-    assert "crewScrollTo" in r.text
-    # Ops charts measure the panel instead of a fixed 560-unit viewBox.
-    assert "wrap.clientWidth" in r.text
-    # Footer controls stay thumb-friendly.
-    assert "min-height: 48px" in r.text
+    assert "Your crew" not in r.text
+    assert "scroll-snap-type: x mandatory" not in r.text
+    assert 'id="crew-prev"' not in r.text
+    assert "What the team is doing" not in r.text
+    # Thumb-friendly: the analyze fields and the sidebar toggle.
+    assert "min-height: 44px" in r.text
     # The live-ops doc moved with the name.
     root = Path(__file__).resolve().parent.parent
     doc = root / "docs" / "ventoryn-live-ops.md"
     assert doc.exists()
     assert doc.read_text(encoding="utf-8").splitlines()[0] == "# Ventoryn — Live Ops"
-    assert not (root / "docs" / "tycoon-live-ops.md").exists()
-    assert not (root / "docs" / "collegium-live-ops.md").exists()
