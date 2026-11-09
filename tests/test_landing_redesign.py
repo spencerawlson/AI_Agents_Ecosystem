@@ -67,6 +67,11 @@ def test_public_nav_with_product_dropdown():
     assert "Who it" in r.text  # dropdown item "Who it's for"
     assert "Sign In" in r.text and "Get Started" in r.text
     assert 'id="nav-toggle"' in r.text  # mobile nav toggle
+    # Spencer 2026-11-08: the mobile hamburger sits at the FAR LEFT
+    # of the header, before the brand — never centered between the
+    # brand and the Get Started button.
+    assert (r.text.index('id="nav-toggle"')
+            < r.text.index('class="brand"'))
 
 
 def test_preview_light_panels_image2_style():
@@ -84,7 +89,7 @@ def test_preview_light_panels_image2_style():
     assert "+6 new customers (7 days)" in r.text
     # Illustrative label, everywhere the numbers appear.
     assert "ILLUSTRATIVE DEMO DATA" in r.text
-    assert "Illustrative demo data." in r.text
+    assert "Illustrative product preview — not live customer data." in r.text
 
 
 def test_preview_funnel_image1_numbers():
@@ -124,6 +129,23 @@ def test_how_it_works_image1():
         assert step in r.text
     assert r.text.count('class="step-icon"') == 5
     assert "Start Your First 100 Journey" in r.text
+    # Step connectors are inline SVG arrows between the cards — the
+    # old font-glyph arrow rendered as "92" here. They exist on
+    # desktop and are hidden where the cards stack.
+    assert ".steps li:not(:last-child)::after" in r.text
+    assert "data:image/svg+xml" in r.text
+    # The preview grid must not blow out past the preview shell:
+    # its tracks shrink below content width and its cells too.
+    assert ("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)"
+            in r.text)
+    assert ".preview-cell {" in r.text and "min-width: 0" in r.text
+    # The light preview panels sit inside the dark hero (white
+    # text): the preview-main sets dark text, or the funnel
+    # numbers, queue titles, agent names and trace labels inherit
+    # white and are invisible on the light background.
+    assert (".preview-main { flex: 1; min-width: 0; background: #f4f2fb;"
+            " padding: 16px;" in r.text)
+    assert "color: var(--ink); }" in r.text
 
 
 def test_features_attribution_differentiation_who():

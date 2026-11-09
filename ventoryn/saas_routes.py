@@ -89,7 +89,6 @@ from ventoryn.saas import (
     create_checkout_session,
 )
 from ventoryn.totp import provisioning_uri
-from ventoryn.nav import HEADER_CSS, header_html
 
 #: Where analyze reports are written (reports/analyze_<host>_<date>.md,
 #: same as the CLI). Tests override this with a temp dir.
@@ -121,21 +120,44 @@ def esc(value: object) -> str:
 
 
 def _page(title: str, inner: str, account: dict | None = None,
-          current: str | None = None, is_operator: bool = False) -> str:
-    """Shell for the shell's own pages: the shared centered header
-    (brand + page title + hamburger menu) + content, mobile-first,
-    the same light styling as the Live Ops page. The menu never
-    links Experiments, Experiment 001, Daily plan, Attribution, or
-    "for website owners" — those stay reachable by direct URL only.
-    Unsigned error pages get no header — the menu belongs to
-    signed-in pages only."""
+          current: str | None = None, is_operator: bool = False,
+          sidebar: bool = False, verified: int = 0,
+          pending_approvals: int = 0) -> str:
+    """Shell for the shell's own pages: the platform shell (purple
+    sidebar + app header) whenever an account is given, else the
+    shared centered page (no navigation for unsigned error pages —
+    the menu belongs to signed-in pages only). Mobile-first, the
+    same light styling as the Live Ops page. The menu never links
+    Experiments, Experiment 001, Daily plan, Attribution, or "for
+    website owners" — those stay reachable by direct URL only.
+
+    ``verified`` / ``pending_approvals`` are computed by
+    ``_signed_page`` (which is where the store and the app live —
+    this function is module-level, so neither is in scope here) and
+    feed the sidebar's Growth Plan card and Approvals badge. The
+    sidebar ``current`` maps from the old ``current`` arg where
+    sensible ("account" -> "settings"); anything else gets the
+    sidebar with nothing active. The ``sidebar`` parameter is kept
+    for callers that pass it; every account-bearing page gets the
+    sidebar now."""
     from ventoryn import ui
 
     if account is None:
         return ui.page(title, f"<h1>{esc(title)}</h1>{inner}",
                        extra_css=_SAAS_CSS)
-    return ui.page(title, inner,
-                   header=header_html(current, is_operator, title),
+    # Any signed-in account page gets the platform shell — the old
+    # hamburger header is retired. ``verified`` / ``pending_approvals``
+    # come from _signed_page.
+    from ventoryn.nav import platform_head_html, sidebar_html
+
+    platform_current = {"account": "settings"}.get(current)
+    sb = sidebar_html(platform_current, is_operator,
+                      verified=verified,
+                      pending_approvals=pending_approvals,
+                      account_email=account.get("email", ""))
+    head = platform_head_html(title,
+                              pending_approvals=pending_approvals)
+    return ui.page(title, inner, sidebar=sb, page_head=head,
                    extra_css=_SAAS_CSS)
 
 
@@ -216,10 +238,27 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 
     def _signed_page(title: str, inner: str, account: dict,
                      current: str | None = None) -> str:
-        """_page for a signed-in account: the shared header with the
-        right menu for the role (operator gets the Admin group)."""
+        """_page for a signed-in account: the platform shell (purple
+        sidebar + app header). These routes are all behind the
+        forced-2FA middleware gate, so the sidebar is safe here.
+        Growth (verified / 100) comes from the store over the
+        account's counted sites; pending approvals are the
+        per-account pending ones from app.state.ecosystem (set at
+        the top of create_app, long before register_saas_routes
+        runs, so it is reachable here) — approvals for this
+        account's sites, plus unassigned ones for the operator."""
+        sites = store.list_sites(account["id"])
+        counted_ids = [s["id"] for s in sites if s.get("count_show", 1)]
+        verified = store.conversion_status_counts(counted_ids)["verified"]
+        site_biz_ids = {f"site:{s['id']}" for s in sites}
+        is_op = config.is_operator(account["email"])
+        gate = app.state.ecosystem["approvals"]
+        pending = len([a for a in gate.pending()
+                       if a.business_id in site_biz_ids
+                       or (is_op and a.business_id is None)])
         return _page(title, inner, account, current=current,
-                     is_operator=config.is_operator(account["email"]))
+                     is_operator=is_op, sidebar=True, verified=verified,
+                     pending_approvals=pending)
 
     def _safe_next(value: str) -> str:
         """Where a 2FA page sends the user after: a same-site path

@@ -177,21 +177,45 @@ def money(value: float | None, places: int = 2) -> str:
 
 def page(title: str, inner: str, *, header: str = "",
          extra_css: str = "", body_class: str = "",
-         head_extra: str = "") -> str:
+         head_extra: str = "", sidebar: str = "",
+         page_head: str = "") -> str:
     """A complete HTML document in the Ventoryn shell.
 
-    ``header`` is the app bar (ventoryn.nav.header_html) or empty for
-    pages without navigation (unsigned error pages, the admin login).
+    ``header`` is the app bar (``simple_header_html`` for admin
+    pages) or empty for pages without navigation (unsigned error
+    pages, the admin login).
     ``inner`` goes inside the centered <main>.
-    """
-    from ventoryn.nav import HEADER_CSS
 
+    Platform shell: pass ``sidebar`` (from ventoryn.nav.sidebar_html)
+    and ``page_head`` (from ventoryn.nav.platform_head_html) and the
+    page renders as ``<div class="app-layout">{sidebar}<div
+    class="app-content">{page_head}<main class="app-main">{inner}</main>
+    </div></div>`` with the platform CSS + JS. When ``sidebar`` is
+    empty, the existing centered rendering is unchanged.
+
+    Import-cycle note: the platform CSS/JS live in ventoryn.nav,
+    which imports only ventoryn.icons — never this module — so the
+    lazy import below cannot cycle.
+    """
     cls = f" class='{esc(body_class)}'" if body_class else ""
+    if sidebar:
+        from ventoryn.nav import SIDEBAR_CSS, SIDEBAR_JS
+
+        return (
+            "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+            f"<title>{esc(title)} — Ventoryn</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<meta name='theme-color' content='#0b0e1e'>"
+            f"<style>{BASE_CSS}{SIDEBAR_CSS}{extra_css}</style>{head_extra}"
+            f"</head><body{cls}><div class='app-layout'>{sidebar}"
+            f"<div class='app-content'>{page_head}"
+            f"<main class='app-main'>{inner}</main></div></div>"
+            f"{SIDEBAR_JS}</body></html>")
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         f"<title>{esc(title)} — Ventoryn</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta name='theme-color' content='#0b0e1e'>"
-        f"<style>{BASE_CSS}{HEADER_CSS}{extra_css}</style>{head_extra}"
+        f"<style>{BASE_CSS}{extra_css}</style>{head_extra}"
         f"</head><body{cls}>{header}<main class='v-main'>{inner}</main>"
         "</body></html>")

@@ -59,8 +59,8 @@ import urllib.parse
 from ventoryn.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
                        CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
 from ventoryn.totp import provisioning_uri
-from ventoryn.nav import HEADER_CSS, header_html
 from ventoryn import ui
+from ventoryn.icons import icon
 from ventoryn.ui import money
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
@@ -384,6 +384,16 @@ def create_app(
             return "Live Ops"
         if path.startswith("/portfolio"):
             return "Portfolio"
+        if path.startswith("/campaigns"):
+            return "Campaigns"
+        if path.startswith("/agents"):
+            return "Agents"
+        if path.startswith("/analytics"):
+            return "Analytics"
+        if path.startswith("/integrations"):
+            return "Integrations"
+        if path.startswith("/customers"):
+            return "Customers"
         if path.startswith("/approvals"):
             return "Approvals"
         if path.startswith("/report"):
@@ -601,7 +611,9 @@ def create_app(
 /* Customer Acquisition & Attribution report: progress ring, status
    donut, flow steps, trend chart. All SVG is hand-built; every
    figure comes from real store data. Base cards/buttons/forms come
-   from ventoryn/ui.py. */
+   from ventoryn/ui.py; the flow steps are white platform cards
+   with a purple accent, a green check badge when the step has
+   real evidence, a grey dot when it does not. */
 .v-report-grid { display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 16px; margin: 16px 0; }
 .v-report-grid .card { margin: 0; }
@@ -613,12 +625,19 @@ def create_app(
 .v-flow { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch;
   margin: 12px 0; }
 .v-flow-step { flex: 1 1 140px; border: 1px solid var(--v-line);
-  border-radius: 10px; padding: 10px 12px; background: #faf9fe; }
+  border-radius: var(--v-radius); padding: 12px; background: #fff;
+  box-shadow: var(--v-shadow); }
 .v-flow-step.done { border-color: #86efac; background: var(--v-green-soft); }
-.v-flow-step strong { display: block; font-size: 14px; }
+.v-flow-step strong { display: block; font-size: 14px; margin-top: 4px; }
 .v-flow-step span { font-size: 13px; color: var(--v-muted); }
-.v-flow-check { font-weight: bold; color: var(--v-green); }
-.v-flow-arrow { align-self: center; color: var(--v-violet-deep); font-weight: bold; }
+.v-flow-check { display: inline-flex; align-items: center;
+  justify-content: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--v-green); color: #fff; }
+.v-flow-check svg { width: 16px; height: 16px; display: block; }
+.v-flow-step:not(.done) .v-flow-check { background: #e5e7eb;
+  color: #9ca3af; }
+.v-flow-arrow { align-self: center; color: var(--v-violet-deep); }
+.v-flow-arrow svg { width: 18px; height: 18px; display: block; }
 .v-donut-wrap { display: flex; gap: 16px; align-items: center;
   flex-wrap: wrap; }
 .v-legend { list-style: none; padding: 0; margin: 0; }
@@ -637,6 +656,19 @@ def create_app(
 @media (max-width: 640px) {
   .v-report-grid { grid-template-columns: 1fr; }
 }
+"""
+
+    # Approvals: the pending/decided tables as platform cards —
+    # the same white-card language as /report. The decide flow
+    # (POST /approvals/{id}/decide, redirect with ?decided=, the
+    # Decided section) is unchanged.
+    _APPROVALS_CSS = """
+/* Approvals: platform cards around the pending / decided tables.
+   The tables themselves keep the shared table look (ui.BASE_CSS);
+   inside a card the outer border is dropped so the card is the
+   only frame. */
+.v-approvals .card table { margin: 0; border: 0; background: transparent; }
+.v-approvals .card h2 { margin-top: 0; }
 """
 
     _ADMIN_CSS = """
@@ -672,15 +704,49 @@ def create_app(
 .v-admin-foot a { color: var(--v-muted); }
 """
 
+    # Old _operator_page "current" keys -> platform sidebar keys.
+    # Pages with None get the sidebar with nothing active.
+    _PLATFORM_CURRENT = {
+        "live-ops": "overview", "portfolio": None, "businesses": None,
+        "approvals": "approvals", "reports": None, "report": "attribution",
+        "experiments": None, "experiment-001": None, "account": "settings",
+        "campaigns": "campaigns", "agents": "agents",
+        "analytics": "analytics", "integrations": "integrations",
+        "customers": "customers",
+    }
+
     def _operator_page(title: str, inner: str, account=None,
                        current: str | None = "live-ops",
                        is_operator: bool = False,
                        extra_css: str = "") -> str:
-        """Shell for the signed-in pages: the shared centered header
-        (brand + page title + hamburger menu) + content, mobile-first,
-        the same light styling as the Live Ops page."""
-        return ui.page(title, inner,
-                       header=header_html(current, is_operator, title),
+        """Shell for the signed-in pages: the platform shell (purple
+        sidebar + app header) + content, mobile-first, the same light
+        styling as the Live Ops page. Every caller passes its
+        account, so every signed-in page gets the sidebar; with no
+        account the old centered rendering is kept as a fallback —
+        no sidebar, no header — so nothing crashes."""
+        if account is None:
+            return ui.page(title, inner, extra_css=extra_css)
+        from ventoryn.nav import platform_head_html, sidebar_html
+
+        # Growth: verified count over the account's counted sites —
+        # the exact computation from the /report customer branch.
+        sites = _saas_store.list_sites(account["id"])
+        counted_ids = [s["id"] for s in sites if s.get("count_show", 1)]
+        verified = _saas_store.conversion_status_counts(
+            counted_ids)["verified"]
+        # Pending: per-account pending approvals — the filter from
+        # the /approvals handler.
+        owned = _owned_business_ids(account)
+        pending = len([a for a in state["approvals"].pending()
+                       if _approval_visible(account, a, owned)])
+        platform_current = _PLATFORM_CURRENT.get(current)
+        sidebar = sidebar_html(
+            platform_current, is_operator, verified=verified,
+            pending_approvals=pending,
+            account_email=account.get("email", ""))
+        head = platform_head_html(title, pending_approvals=pending)
+        return ui.page(title, inner, sidebar=sidebar, page_head=head,
                        extra_css=extra_css)
 
     # -- public landing page ----------------------------------------------
@@ -703,8 +769,8 @@ def create_app(
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-  sans-serif; margin: 0; color: var(--ink); background: var(--bg);
-  line-height: 1.55; }
+  sans-serif; margin: 0; overflow-x: hidden; color: var(--ink);
+  background: var(--bg); line-height: 1.55; }
 a { color: var(--violet-deep); }
 .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 .muted { color: var(--muted); font-size: 14px; }
@@ -750,7 +816,8 @@ a { color: var(--violet-deep); }
   padding: 0 16px; font-size: 15px; }
 .nav-toggle { display: none; background: none; border: 1px solid
   rgba(255,255,255,.35); border-radius: 8px; color: #fff; min-width: 44px;
-  min-height: 44px; font-size: 22px; cursor: pointer; margin-left: auto; }
+  min-height: 44px; font-size: 22px; cursor: pointer; margin-left: 0; }
+.nav-toggle svg { display: block; margin: auto; }
 /* -- hero (§4) — two columns on desktop: copy left, dashboard
    preview right (reference image 1). -- */
 .hero { background: radial-gradient(1100px 520px at 75% -10%, rgba(139,92,246,.45),
@@ -760,7 +827,10 @@ a { color: var(--violet-deep); }
 .hero .wrap { max-width: 1280px; }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   gap: 44px; align-items: start; }
-.hero-copy { min-width: 0; }
+.hero-copy { min-width: 0; text-align: left; }
+.hero h2.sub { text-align: left; }
+.hero p.lede { text-align: left; }
+.url-card h2 { text-align: left; }
 .eyebrow { display: inline-block; background: rgba(196,181,253,.16);
   border: 1px solid rgba(196,181,253,.45); color: var(--violet-soft);
   border-radius: 999px; padding: 6px 16px; font-weight: bold; font-size: 13px;
@@ -778,8 +848,8 @@ a { color: var(--violet-deep); }
   font-size: 17px; }
 .trust { list-style: none; padding: 0; margin: 0 0 8px; display: flex; gap: 8px 24px;
   flex-wrap: wrap; color: #b9b3dd; font-size: 14px; }
-.trust li::before { content: "\\2713  "; color: var(--violet-soft);
-  font-weight: bold; }
+.trust li { display: inline-flex; align-items: center; gap: 6px; }
+.trust li svg { flex: 0 0 auto; }
 .signed-banner { background: #ede9fe; border-bottom: 1px solid var(--line);
   padding: 10px 0; text-align: center; font-size: 15px; }
 .signed-banner .btn { min-height: 40px; line-height: 40px; margin-left: 8px; }
@@ -821,7 +891,7 @@ section.alt { background: var(--bg-tint); }
    content — NOT image 2's multi-business content. -- */
 .preview { border: 1px solid #d9d2f2; border-radius: 20px; overflow: hidden;
   background: #fff; box-shadow: 0 24px 60px rgba(11,14,30,.18);
-  text-align: left; }
+  text-align: left; min-width: 0; }
 .preview-bar { display: flex; align-items: center; gap: 8px;
   background: var(--navy); color: #fff; padding: 12px 16px; }
 .preview-bar .dot { width: 12px; height: 12px; border-radius: 50%; }
@@ -833,7 +903,7 @@ section.alt { background: var(--bg-tint); }
   font-size: 12px; font-weight: bold; border-radius: 999px; padding: 3px 10px; }
 .preview-bar .range { background: rgba(255,255,255,.08);
   border: 1px solid rgba(255,255,255,.2); border-radius: 8px; padding: 4px 10px;
-  font-size: 12px; }
+  font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 .preview-bar .avatar { width: 28px; height: 28px; border-radius: 50%;
   background: var(--violet); color: #fff; display: inline-flex;
   align-items: center; justify-content: center; font-size: 13px;
@@ -849,10 +919,13 @@ section.alt { background: var(--bg-tint); }
   border-radius: 999px; font-size: 11px; font-weight: bold; padding: 1px 7px; }
 .side-foot { margin-top: 16px; padding: 10px; border-top: 1px solid
   rgba(255,255,255,.12); font-size: 12px; color: #8f89b3; }
-.preview-main { flex: 1; min-width: 0; background: #f4f2fb; padding: 16px; }
-.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.preview-main { flex: 1; min-width: 0; background: #f4f2fb; padding: 16px;
+  /* Dark text on the light panels: the hero sets white text, and
+     without this the funnel numbers, queue titles, agent names and
+     trace labels inherit white and vanish on the light background. */ color: var(--ink); }
+.preview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .preview-cell { border: 1px solid #e5e0f5; border-radius: 12px;
-  padding: 16px; background: #fff; box-shadow: 0 1px 4px rgba(11,14,30,.06); }
+  padding: 16px; background: #fff; box-shadow: 0 1px 4px rgba(11,14,30,.06); min-width: 0; }
 .preview-cell h3 { margin: 0 0 10px; font-size: 15px; color: var(--ink); }
 .preview-cell.wide { grid-column: 1 / -1; }
 .ring-wrap { display: flex; gap: 16px; align-items: center; }
@@ -867,7 +940,7 @@ section.alt { background: var(--bg-tint); }
 .counter small { font-size: 16px; color: var(--muted); font-weight: 600; }
 .funnel-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0;
   font-size: 13px; }
-.funnel-bar .flabel { flex: 0 0 150px; color: #333; }
+.funnel-bar .flabel { flex: 0 1 150px; min-width: 0; color: #333; }
 .funnel-bar .ftrack { flex: 1; height: 12px; background: #e9e4fb;
   border-radius: 999px; overflow: hidden; }
 .funnel-bar .ffill { height: 100%; background: linear-gradient(90deg,
@@ -891,19 +964,27 @@ section.alt { background: var(--bg-tint); }
   font-size: 13px; }
 .trace .tstep { background: #fff; border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 10px; font-weight: 600; }
-.trace .tarrow { color: var(--violet-deep); font-weight: bold; }
+.trace .tarrow { color: var(--violet-deep); display: inline-flex;
+  align-items: center; flex: 0 0 auto; }
+.trace .tarrow svg { display: block; }
 .demo-note { background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
   border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 16px 0 0; }
 .demo-revenue { font-size: 15px; }
 .demo-revenue .hidden-amt { color: var(--muted); letter-spacing: .1em; }
 /* -- steps (§6) -- */
 .steps { list-style: none; padding: 0; margin: 0; display: grid;
-  grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  grid-template-columns: repeat(5, 1fr); gap: 28px; }
 .steps li { background: #fff; border: 1px solid var(--line); border-radius: 14px;
   padding: 18px 16px; position: relative; }
-.steps li:not(:last-child)::after { content: "\\2192"; position: absolute;
-  right: -14px; top: 50%; transform: translateY(-50%); color: var(--violet-deep);
-  font-weight: bold; font-size: 18px; z-index: 1; }
+/* Step connectors: an inline SVG arrow centred in the gap between
+   cards. The old font-glyph arrow rendered as "92" here before;
+   vector-only now. Hidden where the cards stack. */
+.steps li:not(:last-child)::after { content: ""; position: absolute;
+  right: -22px; top: 50%; transform: translateY(-50%); width: 16px;
+  height: 16px; pointer-events: none;
+  background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M2 8h11M9 4.5L12.5 8 9 11.5' fill='none' stroke='%236d28d9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+/* No connectors between step cards — the 5-card grid stands on its own
+   (text arrows rendered as tofu here before; vector-only now). */
 .step-icon { display: block; margin-bottom: 10px; }
 .step-icon svg { display: block; }
 .step-num { display: inline-block; width: 32px; height: 32px; border-radius: 50%;
@@ -926,13 +1007,13 @@ section.alt { background: var(--bg-tint); }
   padding: 12px 14px; font-size: 14px; font-weight: 600; text-align: center;
   max-width: 150px; }
 .flow .farrow { align-self: center; color: var(--violet-deep);
-  font-weight: bold; font-size: 20px; }
+  display: inline-flex; align-items: center; }
+.flow .farrow svg { display: block; }
 .rules { columns: 2; column-gap: 32px; max-width: 880px; margin: 0 auto;
   padding: 0; list-style: none; }
-.rules li { break-inside: avoid; margin: 0 0 10px; padding-left: 24px;
-  position: relative; font-size: 15px; color: #333; }
-.rules li::before { content: "\\2713  "; color: var(--violet-deep);
-  font-weight: bold; position: absolute; left: 0; }
+.rules li { break-inside: avoid; margin: 0 0 10px; font-size: 15px;
+  color: #333; }
+.rules li svg { vertical-align: -3px; margin-right: 6px; }
 /* -- differentiation (§9) + who (§10) -- */
 .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .principle { border-top: 4px solid var(--violet); background: #fff;
@@ -952,8 +1033,7 @@ section.alt { background: var(--bg-tint); }
 .price-card ul { list-style: none; padding: 0; margin: 16px auto;
   max-width: 460px; text-align: left; }
 .price-card li { margin: 8px 0; font-size: 16px; }
-.price-card li::before { content: "\\2713  "; color: var(--violet-deep);
-  font-weight: bold; }
+.price-card li svg { vertical-align: -3px; margin-right: 6px; }
 .credit-table { width: 100%; max-width: 460px; margin: 16px auto 0;
   border-collapse: collapse; font-size: 15px; background: #fff;
   border-radius: 10px; overflow: hidden; }
@@ -1029,7 +1109,8 @@ section.alt { background: var(--bg-tint); }
   .steps, .features, .principles, .who-grid { grid-template-columns: 1fr; }
   .url-card { padding: 18px 16px; }
   .url-card input[type=text], .url-card select { font-size: 16px; }
-  .preview-side { display: none; }
+  .preview-side { flex-basis: 96px; font-size: 11px; padding: 10px 6px; }
+  .side-foot { font-size: 10px; }
   .preview-grid { padding: 12px; }
   .funnel-bar .flabel { flex-basis: 110px; }
 }
@@ -1076,7 +1157,8 @@ section.alt { background: var(--bg-tint); }
             hero_signin_line = ""
         elif not _saas_config.google_configured:
             signed_banner = ""
-            nav_signin = "<span class='btn' aria-disabled='true'>Sign In</span>"
+            nav_signin = ("<span class='btn' id='landing-signin' "
+                          "aria-disabled='true'>Sign In</span>")
             hero_signin_line = (
                 "<p class='muted' style='color:#c9c4e8'>Sign-in with Google "
                 "is not set up yet. The Google sign-in is configured by "
@@ -1118,10 +1200,10 @@ section.alt { background: var(--bg-tint); }
 <script type="application/ld+json">{json_ld}</script>
 <style>{_LANDING_CSS}</style></head><body>
 <header class="site-nav"><div class="wrap">
+<button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 5h16M3 11h16M3 17h16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></button>
 <a class="brand" href="/">Ventoryn<span>.</span></a>
-<button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu">☰</button>
 <nav aria-label="Product"><ul class="nav-links" id="nav-links">
-<li class="nav-item"><button class="nav-drop-btn" id="nav-drop-btn" aria-expanded="false" aria-haspopup="true">Product \u2304</button>
+<li class="nav-item"><button class="nav-drop-btn" id="nav-drop-btn" aria-expanded="false" aria-haspopup="true">Product <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 <div class="nav-drop" id="nav-drop">
 <a href="#product">Features</a>
 <a href="#start">Dashboard preview</a>
@@ -1152,13 +1234,13 @@ attribution shows which efforts turn into paying customers.</p>
 <a class="btn btn-ghost" href="#how-it-works">See How It Works</a>
 </div>
 <ul class="trust">
-<li>Human-approved actions</li>
-<li>Verified customer attribution</li>
-<li>Revenue privacy controls</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#c4b5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Human-approved actions</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#c4b5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Verified customer attribution</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#c4b5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Revenue privacy controls</li>
 </ul>
 {hero_signin_line}
 <div class="card url-card">
-<h2>🔍 Analyze your site — free preview</h2>
+<h2><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:-4px;margin-right:6px"><circle cx="11" cy="11" r="7" fill="none" stroke="#6d28d9" stroke-width="2"/><line x1="16.5" y1="16.5" x2="21" y2="21" stroke="#6d28d9" stroke-width="2" stroke-linecap="round"/></svg>Analyze your site — free preview</h2>
 <p class="muted">The same analysis Ventoryn runs before it starts work:
 your site score, your answer-engine (GEO) score, and the top things
 to fix. Nothing is published.</p>
@@ -1186,7 +1268,7 @@ to fix. Nothing is published.</p>
 <span class="title">Ventoryn — Live Ops</span>
 <span class="meta">
 <span class="demo-tag">ILLUSTRATIVE DEMO DATA</span>
-<span class="range">Last 30 Days \u2304</span>
+<span class="range">Last 30 Days <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
 <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2 2 0 002-2h-4a2 2 0 002 2zM6 9a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9z" fill="none" stroke="#d9d4f5" stroke-width="2"/></svg>
 <span class="avatar">V</span>
 </span>
@@ -1240,7 +1322,7 @@ published until you approve it.</p>
 </div>
 <div class="preview-cell wide">
 <h3>Conversion attribution — example trace</h3>
-<div class="trace"><span class="tstep">Approved Campaign</span><span class="tarrow">→</span><span class="tstep">Signed Link</span><span class="tarrow">→</span><span class="tstep">Website Visit</span><span class="tarrow">→</span><span class="tstep">Stripe Checkout</span><span class="tarrow">→</span><span class="tstep">Verified Customer</span> <span class="pill green">Verified</span></div>
+<div class="trace"><span class="tstep">Approved Campaign</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Signed Link</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Website Visit</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Stripe Checkout</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Verified Customer</span> <span class="pill green">Verified</span></div>
 <p class="muted" style="margin:10px 0 0">Attribution: Reddit Campaign #RD-4827 — <span class="pill green">Verified</span></p>
 <p class="demo-revenue" style="margin:12px 0 0">Revenue for this example
 customer: <span class="hidden-amt" id="demo-revenue-value">$••• hidden</span>
@@ -1248,7 +1330,7 @@ customer: <span class="hidden-amt" id="demo-revenue-value">$••• hidden</sp
 <button class="btn" id="demo-revenue-toggle" type="button" style="min-height:36px;line-height:36px;margin-left:8px">Reveal example revenue</button></p>
 </div>
 </div>
-<p class="demo-note"><strong>Illustrative demo data.</strong> Every
+<p class="demo-note"><strong>Illustrative product preview — not live customer data.</strong> Every
 number in this preview is an example to show how the dashboard reads —
 not real customer data, not a result Ventoryn promises.</p>
 </div>
@@ -1291,21 +1373,21 @@ goes live without your approval.</p>
 checkout events, giving you evidence of which activities contributed to
 new paying customers.</p>
 <div class="flow">
-<span class="fstep">AI Recommendation</span><span class="farrow">→</span>
-<span class="fstep">Customer Approval</span><span class="farrow">→</span>
-<span class="fstep">Signed Campaign Link</span><span class="farrow">→</span>
-<span class="fstep">Website Visit</span><span class="farrow">→</span>
-<span class="fstep">Stripe Payment</span><span class="farrow">→</span>
+<span class="fstep">AI Recommendation</span><span class="farrow"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13M11 5.5L15.5 10 11 14.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+<span class="fstep">Customer Approval</span><span class="farrow"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13M11 5.5L15.5 10 11 14.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+<span class="fstep">Signed Campaign Link</span><span class="farrow"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13M11 5.5L15.5 10 11 14.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+<span class="fstep">Website Visit</span><span class="farrow"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13M11 5.5L15.5 10 11 14.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+<span class="fstep">Stripe Payment</span><span class="farrow"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13M11 5.5L15.5 10 11 14.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
 <span class="fstep">Verified Conversion</span>
 </div>
 <ul class="rules">
-<li>Every approved action carries a unique, tamper-resistant attribution identifier, bound to the campaign and the action that was approved.</li>
-<li>Stripe webhook signatures are validated on every payment notice, and payment events are processed idempotently — a payment delivered twice counts once.</li>
-<li>A customer is counted only after an eligible, successful payment event is verified.</li>
-<li>Repeat purchases are deduplicated per a documented customer identity policy; refunds, disputes, and reversed payments are reconciled.</li>
-<li>Protection against replay, manipulation, and unauthorized reassignment of attribution.</li>
-<li>Consent, privacy, and tracking requirements are respected; cross-device and cross-session attribution is shown as limited when deterministic evidence is unavailable.</li>
-<li>Ventoryn never claims every customer can be attributed with certainty — where the evidence is missing, a sale is shown as Unattributed or Verification Pending.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Every approved action carries a unique, tamper-resistant attribution identifier, bound to the campaign and the action that was approved.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Stripe webhook signatures are validated on every payment notice, and payment events are processed idempotently — a payment delivered twice counts once.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A customer is counted only after an eligible, successful payment event is verified.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Repeat purchases are deduplicated per a documented customer identity policy; refunds, disputes, and reversed payments are reconciled.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Protection against replay, manipulation, and unauthorized reassignment of attribution.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Consent, privacy, and tracking requirements are respected; cross-device and cross-session attribution is shown as limited when deterministic evidence is unavailable.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Ventoryn never claims every customer can be attributed with certainty — where the evidence is missing, a sale is shown as Unattributed or Verification Pending.</li>
 </ul>
 </div>
 </section>
@@ -1344,10 +1426,10 @@ customers.</p>
 <h2>$20/month</h2>
 <p><span class="big">$20</span> / month</p>
 <ul>
-<li>Your websites on Ventoryn</li>
-<li>100 credits every month</li>
-<li>A growth report per site</li>
-<li>Agents working daily toward your first 100 paying customers</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your websites on Ventoryn</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>100 credits every month</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A growth report per site</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Agents working daily toward your first 100 paying customers</li>
 </ul>
 <table class="credit-table">
 <thead><tr><th>What a credit buys</th><th>Cost</th></tr></thead>
@@ -1654,9 +1736,10 @@ sum of recorded paying customers per site.</p>{hidden_note}
                 f"data.</div>" if unclaimed else "")
         inner = f"""{note}<div class="table-wrap"><table>
 <tr><th>Name</th><th>Type</th><th>Status</th><th class="num">Net profit</th><th>Owner</th></tr>{rows}</table></div>
-<a class="v-back" href="/portfolio">&larr; My Portfolio</a>"""
+<a class="v-back" href="/portfolio">{icon('arrow_left', 15)} My Portfolio</a>"""
         return _operator_page(f"Businesses ({len(businesses)})", inner,
-                              current=None, is_operator=True)
+                              account=account, current=None,
+                              is_operator=True)
 
     @app.post("/businesses/{business_id}/claim")
     def business_claim(request: Request, business_id: str):
@@ -1699,13 +1782,13 @@ sum of recorded paying customers per site.</p>{hidden_note}
 <div class="v-kpi"><span class="label">Net margin</span><span class="value">{pnl.net_margin:.1%}</span></div>
 </div>
 <p class="muted">P&amp;L · {len(events)} audit events</p>
-<a class="v-back" href="/businesses">&larr; All businesses</a>"""
-        return _operator_page(biz.name, inner, current=None,
-                              is_operator=True)
+<a class="v-back" href="/businesses">{icon('arrow_left', 15)} All businesses</a>"""
+        return _operator_page(biz.name, inner, account=account,
+                              current=None, is_operator=True)
 
     @app.get("/experiments", response_class=HTMLResponse)
     def experiment_list(request: Request):
-        _, redirect = _need_operator(request)
+        account, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
         exp: ExperimentEngine = state["experiments"]
@@ -1717,9 +1800,9 @@ sum of recorded paying customers per site.</p>{hidden_note}
         ) or "<tr><td colspan='4' class='muted'>No experiments yet.</td></tr>"
         inner = f"""<div class="table-wrap"><table>
 <tr><th>ID</th><th>Business</th><th>Status</th><th>Recommendation</th></tr>
-{rows}</table></div><a class="v-back" href="/ops">&larr; Live Ops</a>"""
-        return _operator_page("Experiments", inner, current=None,
-                              is_operator=True)
+{rows}</table></div><a class="v-back" href="/ops">{icon('arrow_left', 15)} Live Ops</a>"""
+        return _operator_page("Experiments", inner, account=account,
+                              current=None, is_operator=True)
 
     @app.get("/approvals", response_class=HTMLResponse)
     def approval_queue(request: Request, decided: str = ""):
@@ -1774,16 +1857,17 @@ sum of recorded paying customers per site.</p>{hidden_note}
                 banner = (
                     f"<div class='v-notice v-notice-{kind}' role='status'>"
                     f"{verb} — nothing ships without your say-so.</div>")
-        inner = f"""{banner}<p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p>
-<h2>Pending ({len(pending)})</h2>
-<div class="table-wrap"><table>
+        inner = f"""<div class="v-approvals">{banner}<div class="card"><p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p></div>
+<div class="card"><h2>Pending ({len(pending)})</h2>
+<table>
 <tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
-<h2>Decided</h2>
-<div class="table-wrap"><table>
-<tr><th>Request</th><th>Decision</th><th>Decided</th><th>By</th></tr>{dec_rows}</table></div>"""
+<div class="card"><h2>Decided</h2>
+<table>
+<tr><th>Request</th><th>Decision</th><th>Decided</th><th>By</th></tr>{dec_rows}</table></div></div>"""
         return _operator_page(
             "Approvals", inner, account=account, current="approvals",
-            is_operator=_saas_config.is_operator(account["email"]))
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_APPROVALS_CSS)
 
     @app.post("/approvals/{approval_id}/decide")
     def decide_approval(request: Request, approval_id: str,
@@ -1831,7 +1915,7 @@ sum of recorded paying customers per site.</p>{hidden_note}
     @app.get("/reports", response_class=HTMLResponse)
     def reports_page(request: Request):
         """Mission reports (e.g. marketing missions), newest first."""
-        _, redirect = _need_operator(request)
+        account, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
         from ventoryn.reports import list_reports
@@ -1851,14 +1935,14 @@ nothing in them was published.</p>
 <div class="table-wrap"><table>
 <tr><th>Report</th><th>Mission</th><th>Date</th><th class="num">AI spend</th></tr>
 {rows}</table></div>
-<a class="v-back" href="/approvals">Go to Approvals &rarr;</a>"""
-        return _operator_page("Mission reports", inner, current=None,
-                              is_operator=True)
+<a class="v-back" href="/approvals">Go to Approvals {icon('arrow_right', 15)}</a>"""
+        return _operator_page("Mission reports", inner, account=account,
+                              current=None, is_operator=True)
 
     @app.get("/reports/{name}", response_class=HTMLResponse)
     def report_view(request: Request, name: str):
         """Render one mission report as safe HTML."""
-        _, redirect = _need_operator(request)
+        account, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
         from ventoryn.reports import render_report
@@ -1867,15 +1951,17 @@ nothing in them was published.</p>
         if result is None:
             raise HTTPException(404, "report not found")
         title, body = result
-        return ui.page(title, f"""<article class="card v-doc">{body}</article>
-<a class="v-back" href="/reports">&larr; Back to reports</a>""",
-                       header=header_html(None, True, ""),
-                       extra_css=ui.DOC_CSS)
+        return _operator_page(
+            title,
+            f"""<article class="card v-doc">{body}</article>
+<a class="v-back" href="/reports">{icon('arrow_left', 15)} Back to reports</a>""",
+            account=account, current=None, is_operator=True,
+            extra_css=ui.DOC_CSS)
 
     @app.get("/experiment-001", response_class=HTMLResponse)
     def experiment_001(request: Request):
         """Live Experiment 001 (Evergreen Planners / Etsy) status."""
-        _, redirect = _need_operator(request)
+        account, redirect = _need_operator(request)
         if redirect is not None:
             return redirect
         try:
@@ -1891,15 +1977,15 @@ nothing in them was published.</p>
                 f"<div class='v-notice v-notice-warn'>Etsy is not "
                 f"configured on this server.</div>"
                 f"<p class='muted'>{esc(exc)}</p>"
-                f"<a class='v-back' href='/ops'>&larr; Live Ops</a>",
-                current=None, is_operator=True)
+                f"<a class='v-back' href='/ops'>{icon('arrow_left', 15)} Live Ops</a>",
+                account=account, current=None, is_operator=True)
         except Exception as exc:  # noqa: BLE001 - dashboard must stay up
             return _operator_page(
                 "Experiment 001",
                 f"<div class='v-notice v-notice-bad'>Monitor error: "
                 f"{esc(exc)}</div>"
-                f"<a class='v-back' href='/ops'>&larr; Live Ops</a>",
-                current=None, is_operator=True)
+                f"<a class='v-back' href='/ops'>{icon('arrow_left', 15)} Live Ops</a>",
+                account=account, current=None, is_operator=True)
         triggers = "".join(
             f"<li>{esc(t)}</li>" for t in snapshot["stop_loss_triggers"]
         ) or "<li>none</li>"
@@ -1923,9 +2009,10 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
 <ul>{triggers}</ul>
 <h2>Weekly revenue (last 3 weeks)</h2>
 <p>{", ".join(money(w) for w in snapshot["weekly_revenue_usd"])}</p>
-<a class="v-back" href="/ops">&larr; Live Ops</a>"""
+<a class="v-back" href="/ops">{icon('arrow_left', 15)} Live Ops</a>"""
         return _operator_page("Experiment 001 — Evergreen Planners", inner,
-                              current=None, is_operator=True)
+                              account=account, current=None,
+                              is_operator=True)
 
     # -- Live Ops API (powers the /ops live view; /game is the old address) ---
     # All state transitions go through the real runtime components; these
@@ -1945,30 +2032,62 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         required — /ops is the post-sign-in home for every account,
         and the page is scoped to the signed-in account by the
         snapshot it polls. Not signed in -> the landing page. The
-        shared header (hamburger menu) is injected where the page
-        carries the <!--VENTORYN_HEADER--> placeholder — no page
-        title in it, the HUD already carries "Ventoryn — Live Ops"."""
+        platform shell (purple sidebar + app header) is injected
+        where the page carries the <!--VENTORYN_HEADER--> placeholder
+        — the HUD already carries "Ventoryn — Live Ops" as its title,
+        so the head title is "Live Ops". Both /game and /ops serve
+        this same file, so both get the shell."""
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
         page = static_dir / "game.html"
         if page.exists():
             text = page.read_text(encoding="utf-8")
-            header = header_html(
-                "live-ops",
-                _saas_config.is_operator(account["email"]), "")
-            text = text.replace("<!--VENTORYN_HEADER-->", header)
-            # The platform tokens + app bar styles, so Live Ops wears
+            from ventoryn.nav import (
+                SIDEBAR_CSS, SIDEBAR_JS, platform_head_html, sidebar_html)
+            # Growth + pending, as in _operator_page: verified over
+            # the account's counted sites, per-account pending
+            # approvals (the /approvals handler's filter).
+            sites = _saas_store.list_sites(account["id"])
+            counted_ids = [s["id"] for s in sites
+                           if s.get("count_show", 1)]
+            verified = _saas_store.conversion_status_counts(
+                counted_ids)["verified"]
+            owned = _owned_business_ids(account)
+            pending = len([a for a in state["approvals"].pending()
+                           if _approval_visible(account, a, owned)])
+            is_op = _saas_config.is_operator(account["email"])
+            sidebar = sidebar_html(
+                "overview", is_op, verified=verified,
+                pending_approvals=pending,
+                account_email=account.get("email", ""))
+            head = platform_head_html("Live Ops", "Ventoryn — Live Ops",
+                                      pending_approvals=pending)
+            text = text.replace(
+                "<!--VENTORYN_HEADER-->",
+                f"<div class='app-layout'>{sidebar}"
+                f"<div class='app-content'>{head}")
+            text = text.replace("</body>",
+                                "</div></div>" + SIDEBAR_JS + "</body>", 1)
+            # The platform tokens + shell styles, so Live Ops wears
             # the same navy/violet as the landing page and every
             # other page (one source: ventoryn/ui.py + nav.py).
             text = text.replace(
                 "</head>",
                 f"<meta name='theme-color' content='#0b0e1e'>"
-                f"<style>{ui.TOKENS_CSS}{HEADER_CSS}</style></head>", 1)
+                f"<style>{ui.TOKENS_CSS}{SIDEBAR_CSS}</style></head>", 1)
             # The market-country selector: every ISO country, ca
             # selected by default (core.countries.country_options).
             text = text.replace("<!--VENTORYN_COUNTRY_OPTIONS-->",
                                 country_options("ca"))
+            # The privacy toggles card: per-site forms posting to
+            # the existing privacy endpoint (fresh 2FA field when
+            # TOTP is enabled), rendered server-side — the snapshot
+            # poll carries no HTML. No live Plausible fetch here.
+            text = text.replace(
+                "<!--VENTORYN_PRIVACY_FORMS-->",
+                _attribution_data(account, check_visitors=False,
+                                  return_to="/ops")["privacy_forms"])
             return HTMLResponse(text)
         return HTMLResponse(
             "<html><body><h1>Live Ops view not built yet</h1>"
@@ -1989,6 +2108,304 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         orch = state["orchestrator"]
         aud: AuditLog = state["audit"]
         return agent_stats_from_audit(aud, orch.registry.agent_types())
+
+    # Inline SVG for a flow step with no evidence yet (a grey dot,
+    # matching the green check from ventoryn.icons).
+    _FLOW_DOT_SVG = (
+        "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' "
+        "aria-hidden='true'><circle cx='12' cy='12' r='5' "
+        "fill='currentColor' stroke='none'/></svg>")
+
+    def _attribution_data(account, *, check_visitors: bool,
+                          return_to: str = "/report") -> dict:
+        """The Acquisition & Attribution computation, in one place:
+        the /report customer branch, the new /campaigns page, the
+        /analytics page and the /api/snapshot payload all read it,
+        so the figures can never disagree.
+
+        ``check_visitors`` is True only for the /report page: the
+        "Website Visit" step then does a LIVE Plausible fetch and
+        is checked only where visitors were actually recorded. The
+        snapshot path (polled every 5s) and the other pages pass
+        False — there the step's evidence is the connection status
+        only ("Plausible is connected for this site"), and no
+        network fetch happens. Honest either way; nothing is
+        estimated.
+
+        ``return_to`` is where the privacy forms post back to."""
+        from ventoryn.saas import plausible_visitors
+
+        sites = _saas_store.list_sites(account["id"])
+        site_ids = [s["id"] for s in sites]
+        counted_ids = [s["id"] for s in sites
+                       if s.get("count_show", 1)]
+        counts = _saas_store.conversion_status_counts(counted_ids)
+        verified = counts["verified"]
+        total_conv = counts["total"]
+        last7 = _saas_store.verified_in_last_days(counted_ids, days=7)
+        trend = _saas_store.verified_trend(counted_ids, days=30)
+        any_count_hidden = len(counted_ids) != len(site_ids)
+
+        # Progress ring (SVG): verified / 100.
+        pct = min(verified, 100) / 100
+        circ = 326.7
+        ring = (
+            f"<svg width='140' height='140' viewBox='0 0 140 140' "
+            f"role='img' aria-label='Progress: {verified} of 100 "
+            f"verified customers'><circle cx='70' cy='70' r='52' "
+            f"fill='none' stroke='#e9e4fb' stroke-width='14'/>"
+            f"<circle cx='70' cy='70' r='52' fill='none' "
+            f"stroke='#8b5cf6' stroke-width='14' stroke-linecap='round' "
+            f"stroke-dasharray='{circ}' "
+            f"stroke-dashoffset='{circ * (1 - pct):.1f}' "
+            f"transform='rotate(-90 70 70)'/>"
+            f"<text x='70' y='66' text-anchor='middle' font-size='28' "
+            f"font-weight='800' fill='#6d28d9'>{verified}</text>"
+            f"<text x='70' y='86' text-anchor='middle' font-size='13' "
+            f"fill='#666'>/ 100</text></svg>")
+
+        # Attribution flow: a step shows a check only where this
+        # account has real evidence for it.
+        jobs = _saas_store.list_jobs(account["id"])
+        gate = state["approvals"]
+        site_biz_ids = {f"site:{s['id']}" for s in sites}
+        decided_here = [
+            a for a in gate.decided(limit=100)
+            if getattr(a, "business_id", None) in site_biz_ids]
+        any_sig = any(
+            _saas_store.list_signatures(s["id"]) for s in sites)
+        if check_visitors:
+            has_visitors = False
+            for s in sites:
+                conn = _saas_store.get_connection(s["id"], "plausible") or {}
+                if conn.get("status") == "connected":
+                    raw = conn.get("_detail_raw") or {}
+                    key = raw.get("api_key")
+                    if key:
+                        v = plausible_visitors(
+                            key, raw.get("site_domain") or s["host"])
+                        if v:
+                            has_visitors = True
+                            break
+            visit_ok = has_visitors
+            visit_note = "Plausible recorded visitors on a connected site."
+        else:
+            # No live fetch: the connection status is the evidence.
+            visit_ok = any(
+                (_saas_store.get_connection(s["id"], "plausible") or {}
+                 ).get("status") == "connected" for s in sites)
+            visit_note = "Plausible is connected for this site."
+        any_stripe = any(
+            c.get("stripe_event_id") or c.get("source") != "manual"
+            for s in sites
+            for c in _saas_store.list_conversions(s["id"], limit=1000))
+        _flow = [
+            ("AI Recommendation", bool(jobs),
+             "A job ran for this account."),
+            ("Customer Approval", bool(decided_here),
+             "An approval was decided by this account."),
+            ("Signed Campaign Link", any_sig,
+             "A signed Ventoryn link was created."),
+            ("Website Visit", visit_ok, visit_note),
+            ("Stripe Payment", any_stripe,
+             "A Stripe payment was recorded."),
+            ("Verified Conversion", verified > 0,
+             "A signed sale was verified."),
+        ]
+        flow_steps = [
+            {"label": label, "ok": ok,
+             "note": note if ok else "No evidence yet"}
+            for label, ok, note in _flow]
+
+        # Conversion status donut (SVG, three arcs + total).
+        if total_conv:
+            import math
+            dc = 2 * math.pi * 54
+            segs = [("Verified", counts["verified"], "#16a34a"),
+                    ("Pending", counts["pending"], "#d97706"),
+                    ("Unattributed", counts["unattributed"], "#9ca3af")]
+            arcs = ""
+            offset = 0.0
+            for _label, n, color in segs:
+                if n == 0:
+                    continue
+                length = dc * n / total_conv
+                arcs += (
+                    f"<circle cx='70' cy='70' r='54' fill='none' "
+                    f"stroke='{color}' stroke-width='22' "
+                    f"stroke-dasharray='{length:.1f} {dc - length:.1f}' "
+                    f"stroke-dashoffset='{-offset:.1f}' "
+                    f"transform='rotate(-90 70 70)'/>")
+                offset += length
+            donut = (
+                f"<svg width='140' height='140' viewBox='0 0 140 140' "
+                f"role='img' aria-label='Conversion status: "
+                f"{counts['verified']} verified, {counts['pending']} "
+                f"pending, {counts['unattributed']} unattributed'>"
+                f"<circle cx='70' cy='70' r='54' fill='none' "
+                f"stroke='#f3f4f6' stroke-width='22'/>{arcs}"
+                f"<text x='70' y='66' text-anchor='middle' "
+                f"font-size='26' font-weight='800' fill='#1a1a2e'>"
+                f"{total_conv}</text>"
+                f"<text x='70' y='84' text-anchor='middle' "
+                f"font-size='12' fill='#666'>total</text></svg>")
+            legend = "".join(
+                f"<li><span class='v-dot' style='background:{color}'>"
+                f"</span>{label}: <strong>{n}</strong> "
+                f"({(100 * n / total_conv):.1f}%)</li>"
+                for label, n, color in segs)
+        else:
+            donut = (
+                "<svg width='140' height='140' viewBox='0 0 140 140' "
+                "role='img' aria-label='Conversion status: no "
+                "conversions yet'><circle cx='70' cy='70' r='54' "
+                "fill='none' stroke='#f3f4f6' stroke-width='22'/>"
+                "<text x='70' y='75' text-anchor='middle' font-size='14' "
+                "fill='#666'>No data</text></svg>")
+            legend = "<li>No conversions recorded yet.</li>"
+
+        # Campaign performance: one row per signed action.
+        campaigns = {}
+        for s in sites:
+            for sig in _saas_store.list_signatures(s["id"], limit=1000):
+                key = sig["action_id"] or sig["tag"]
+                if key not in campaigns:
+                    campaigns[key] = {
+                        "url": sig["target_url"], "agent": sig["agent"],
+                        "verified": 0, "action_id": key}
+                campaigns[key]["verified"] += sum(
+                    1 for c in _saas_store.list_conversions(
+                        s["id"], limit=1000)
+                    if c.get("action_id") == sig["action_id"]
+                    and c.get("attribution") == "ventoryn")
+        campaign_list = list(campaigns.values())
+
+        # Acquisition trend: cumulative verified by day + Goal: 100.
+        # Real data only — no estimated/projection line is drawn.
+        if trend:
+            vmax = max(100, max(p["verified"] for p in trend))
+            tw, th = 600, 160
+            npts = len(trend)
+            pts = " ".join(
+                f"{(i * tw / max(npts - 1, 1)):.1f},"
+                f"{(th - (p['verified'] / vmax) * th):.1f}"
+                for i, p in enumerate(trend))
+            goal_y = th - (100 / vmax) * th
+            trend_svg = (
+                f"<svg viewBox='0 0 {tw} {th}' class='v-trend' "
+                f"role='img' aria-label='Acquisition trend: verified "
+                f"customers over the last 30 days, goal 100'>"
+                f"<line x1='0' y1='{goal_y:.1f}' x2='{tw}' "
+                f"y2='{goal_y:.1f}' stroke='#c4b5fd' stroke-width='1.5' "
+                f"stroke-dasharray='6 4'/>"
+                f"<text x='{tw - 4}' y='{goal_y - 6:.1f}' "
+                f"text-anchor='end' font-size='11' fill='#6d28d9'>"
+                f"Goal: 100</text>"
+                f"<polyline points='{pts}' fill='none' "
+                f"stroke='#8b5cf6' stroke-width='2.5'/></svg>"
+                f"<p class='muted'>Verified customers, cumulative, "
+                f"last 30 days. The dashed line is the goal of 100 — "
+                f"no projection is drawn, only real verified sales.</p>")
+        else:
+            trend_svg = ("<p class='muted'>No verified customers yet — "
+                         "the trend appears once the first signed sale "
+                         "lands.</p>")
+
+        # Conversion breakdown bars.
+        maxb = max(counts["verified"], counts["pending"],
+                   counts["unattributed"], 1)
+        breakdown_html = "".join(
+            f"<div class='v-bbar'><span class='v-bbar-label'>{label}"
+            f"</span><span class='v-bbar-track'><span "
+            f"class='v-bbar-fill' style='width:{(100 * n / maxb):.0f}%;"
+            f"background:{color}'></span></span>"
+            f"<span class='v-bbar-num'>{n}</span></div>"
+            for label, n, color in [
+                ("Verified", counts["verified"], "#16a34a"),
+                ("Pending", counts["pending"], "#d97706"),
+                ("Unattributed", counts["unattributed"], "#9ca3af")])
+
+        # Data & privacy controls: one form per site, posting to
+        # the same privacy endpoint as the site page (fresh 2FA
+        # code required there when 2FA is enabled).
+        def _chk(on):
+            return "checked" if on else ""
+        totp_field = ""
+        if account.get("totp_enabled"):
+            totp_field = (
+                "<label>Two-factor code (fresh — required to confirm "
+                "this change)</label><input type='text' "
+                "name='totp_code' inputmode='numeric' "
+                "autocomplete='one-time-code' maxlength='8'>")
+        privacy_forms = ""
+        for s in sites:
+            privacy_forms += (
+                f"<div class='card'><h3>{esc(s['url'])}</h3>"
+                f"<form method='post' action='/account/sites/{esc(s['id'])}/privacy'>"
+                f"<input type='hidden' name='return_to' value='{esc(return_to)}'>"
+                f"<label><input type='checkbox' name='revenue_show' "
+                f"{_chk(s.get('revenue_show'))}> Show my revenue on "
+                f"Ventoryn</label>"
+                f"<label><input type='checkbox' name='count_show' "
+                f"{_chk(s.get('count_show', 1))}> Show my customer "
+                f"count</label>"
+                f"<label><input type='checkbox' name='details_show' "
+                f"{_chk(s.get('details_show', 1))}> Show conversion "
+                f"details</label>"
+                f"{totp_field}"
+                "<p><button class='btn' type='submit'>Save privacy "
+                "settings</button></p></form></div>")
+        if not privacy_forms:
+            privacy_forms = ("<p class='muted'>No websites yet — add "
+                             "one to set its privacy controls.</p>")
+
+        # Your websites (revenue/count hidden per the toggles, via
+        # revenue_for_site) — the display-ready HTML per site.
+        site_list = []
+        for s in sites:
+            rev = _saas_store.revenue_for_site(s["id"])
+            conn = _saas_store.get_connection(s["id"], "stripe_sales") or {}
+            stripe_connected = conn.get("status") == "connected"
+            if rev is None:
+                count_html = ("<span class='unavailable'>"
+                              "unavailable</span>")
+                revenue_html = ("<span class='unavailable'>"
+                                "unavailable</span>")
+            else:
+                count_html = (
+                    f"{rev['paying_customers']:,}"
+                    if rev["paying_customers"] is not None else
+                    "<span class='unavailable'>hidden</span>")
+                if not stripe_connected:
+                    revenue_html = ("<span class='unavailable'>"
+                                    "unavailable — connect Stripe "
+                                    "sales</span>")
+                elif rev["revenue"] is None:
+                    revenue_html = ("<span class='unavailable'>"
+                                    "hidden</span>")
+                else:
+                    revenue_html = (
+                        f"${rev['revenue']['total_cents'] / 100:,.2f} "
+                        f"{rev['revenue']['currency'].upper()}")
+            site_list.append({
+                "id": s["id"], "url": s["url"], "host": s["host"],
+                "count_show": bool(s.get("count_show", 1)),
+                "revenue_show": bool(s.get("revenue_show")),
+                "details_show": bool(s.get("details_show", 1)),
+                "stripe_connected": stripe_connected,
+                "count_html": count_html,
+                "revenue_html": revenue_html,
+            })
+        return {
+            "counts": counts, "verified": verified,
+            "total": total_conv, "last7": last7, "trend": trend,
+            "any_count_hidden": any_count_hidden,
+            "ring_svg": ring, "donut_svg": donut,
+            "legend_html": legend, "flow_steps": flow_steps,
+            "campaigns": campaign_list, "trend_svg": trend_svg,
+            "breakdown_html": breakdown_html,
+            "sites": site_list, "privacy_forms": privacy_forms,
+        }
 
     def _snapshot(account=None) -> dict:
         """The Live Ops snapshot, scoped to the viewer.
@@ -2066,6 +2483,29 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
                            round(sum(r["net_profit"] for r in biz_rows), 2)),
             "businesses": len(biz_rows),
         }
+        # Attribution (DJINN reads /api/snapshot too): the JSON-safe
+        # subset of _attribution_data — counts, verified, last 7
+        # days, trend points, campaigns, flow steps. check_visitors
+        # is False here: the page polls this endpoint every 5s, so
+        # it must NEVER do a live Plausible fetch; the "Website
+        # Visit" step's evidence is the connection status only.
+        # Additive only — no existing key changes. With no account
+        # (tick/reset internals) there is no account to scope it
+        # to, so the key reads null.
+        attribution = None
+        if account is not None:
+            _att = _attribution_data(account, check_visitors=False)
+            attribution = {
+                "counts": _att["counts"],
+                "verified": _att["verified"],
+                "last7": _att["last7"],
+                "trend": _att["trend"],
+                "campaigns": [
+                    {"url": c["url"], "agent": c["agent"],
+                     "verified": c["verified"]}
+                    for c in _att["campaigns"]],
+                "flow_steps": _att["flow_steps"],
+            }
         return {
             "tick": game["tick"],
             "businesses": biz_rows,
@@ -2074,6 +2514,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             "events": events,
             "experiment_001": exp,
             "account": _account_json(account) if account else None,
+            "attribution": attribution,
         }
 
     @app.get("/api/snapshot")
@@ -2288,263 +2729,50 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             # product's attribution-first view. Every figure is real
             # and tagged with its source; the count toggle is
             # respected per site — a site with the count hidden
-            # contributes nothing to the displayed counts.
-            from ventoryn.saas import plausible_visitors
+            # contributes nothing to the displayed counts. The
+            # computation lives in _attribution_data (shared with
+            # /campaigns, /analytics and the snapshot); this branch
+            # only renders it. check_visitors=True here: the strict
+            # read — visitors actually recorded.
+            data = _attribution_data(account, check_visitors=True)
+            counts = data["counts"]
+            verified = data["verified"]
+            total_conv = data["total"]
+            last7 = data["last7"]
+            ring = data["ring_svg"]
+            donut = data["donut_svg"]
+            legend = data["legend_html"]
+            trend_svg = data["trend_svg"]
+            breakdown_html = data["breakdown_html"]
+            privacy_forms = data["privacy_forms"]
+            any_count_hidden = data["any_count_hidden"]
 
-            sites = _saas_store.list_sites(account["id"])
-            site_ids = [s["id"] for s in sites]
-            counted_ids = [s["id"] for s in sites
-                           if s.get("count_show", 1)]
-            counts = _saas_store.conversion_status_counts(counted_ids)
-            verified = counts["verified"]
-            total_conv = counts["total"]
-            last7 = _saas_store.verified_in_last_days(counted_ids, days=7)
-            trend = _saas_store.verified_trend(counted_ids, days=30)
-            any_count_hidden = len(counted_ids) != len(site_ids)
-
-            # Progress ring (SVG): verified / 100.
-            pct = min(verified, 100) / 100
-            circ = 326.7
-            ring = (
-                f"<svg width='140' height='140' viewBox='0 0 140 140' "
-                f"role='img' aria-label='Progress: {verified} of 100 "
-                f"verified customers'><circle cx='70' cy='70' r='52' "
-                f"fill='none' stroke='#e9e4fb' stroke-width='14'/>"
-                f"<circle cx='70' cy='70' r='52' fill='none' "
-                f"stroke='#8b5cf6' stroke-width='14' stroke-linecap='round' "
-                f"stroke-dasharray='{circ}' "
-                f"stroke-dashoffset='{circ * (1 - pct):.1f}' "
-                f"transform='rotate(-90 70 70)'/>"
-                f"<text x='70' y='66' text-anchor='middle' font-size='28' "
-                f"font-weight='800' fill='#6d28d9'>{verified}</text>"
-                f"<text x='70' y='86' text-anchor='middle' font-size='13' "
-                f"fill='#666'>/ 100</text></svg>")
-
-            # Attribution flow: a step shows a check only where this
-            # account has real evidence for it.
-            jobs = _saas_store.list_jobs(account["id"])
-            gate = state["approvals"]
-            site_biz_ids = {f"site:{s['id']}" for s in sites}
-            decided_here = [
-                a for a in gate.decided(limit=100)
-                if getattr(a, "business_id", None) in site_biz_ids]
-            any_sig = any(
-                _saas_store.list_signatures(s["id"]) for s in sites)
-            has_visitors = False
-            for s in sites:
-                conn = _saas_store.get_connection(s["id"], "plausible") or {}
-                if conn.get("status") == "connected":
-                    raw = conn.get("_detail_raw") or {}
-                    key = raw.get("api_key")
-                    if key:
-                        v = plausible_visitors(
-                            key, raw.get("site_domain") or s["host"])
-                        if v:
-                            has_visitors = True
-                            break
-            any_stripe = any(
-                c.get("stripe_event_id") or c.get("source") != "manual"
-                for s in sites
-                for c in _saas_store.list_conversions(s["id"], limit=1000))
-            flow_steps = [
-                ("AI Recommendation", bool(jobs),
-                 "A job ran for this account."),
-                ("Customer Approval", bool(decided_here),
-                 "An approval was decided by this account."),
-                ("Signed Campaign Link", any_sig,
-                 "A signed Ventoryn link was created."),
-                ("Website Visit", has_visitors,
-                 "Plausible recorded visitors on a connected site."),
-                ("Stripe Payment", any_stripe,
-                 "A Stripe payment was recorded."),
-                ("Verified Conversion", verified > 0,
-                 "A signed sale was verified."),
-            ]
+            # Attribution flow: inline SVG check for a step with
+            # evidence, a grey SVG dot without; an SVG arrow
+            # between steps — no text glyphs.
             flow_html = "".join(
-                f"<div class='v-flow-step{' done' if ok else ''}'>"
-                f"<span class='v-flow-check'>{'✓' if ok else '·'}</span> "
-                f"<strong>{esc(label)}</strong>"
-                f"<span>{esc(note if ok else 'No evidence yet')}</span></div>"
-                + ("<span class='v-flow-arrow'>→</span>" if i < 5 else "")
-                for i, (label, ok, note) in enumerate(flow_steps))
-
-            # Conversion status donut (SVG, three arcs + total).
-            if total_conv:
-                import math
-                dc = 2 * math.pi * 54
-                segs = [("Verified", counts["verified"], "#16a34a"),
-                        ("Pending", counts["pending"], "#d97706"),
-                        ("Unattributed", counts["unattributed"], "#9ca3af")]
-                arcs = ""
-                offset = 0.0
-                for _label, n, color in segs:
-                    if n == 0:
-                        continue
-                    length = dc * n / total_conv
-                    arcs += (
-                        f"<circle cx='70' cy='70' r='54' fill='none' "
-                        f"stroke='{color}' stroke-width='22' "
-                        f"stroke-dasharray='{length:.1f} {dc - length:.1f}' "
-                        f"stroke-dashoffset='{-offset:.1f}' "
-                        f"transform='rotate(-90 70 70)'/>")
-                    offset += length
-                donut = (
-                    f"<svg width='140' height='140' viewBox='0 0 140 140' "
-                    f"role='img' aria-label='Conversion status: "
-                    f"{counts['verified']} verified, {counts['pending']} "
-                    f"pending, {counts['unattributed']} unattributed'>"
-                    f"<circle cx='70' cy='70' r='54' fill='none' "
-                    f"stroke='#f3f4f6' stroke-width='22'/>{arcs}"
-                    f"<text x='70' y='66' text-anchor='middle' "
-                    f"font-size='26' font-weight='800' fill='#1a1a2e'>"
-                    f"{total_conv}</text>"
-                    f"<text x='70' y='84' text-anchor='middle' "
-                    f"font-size='12' fill='#666'>total</text></svg>")
-                legend = "".join(
-                    f"<li><span class='v-dot' style='background:{color}'>"
-                    f"</span>{label}: <strong>{n}</strong> "
-                    f"({(100 * n / total_conv):.1f}%)</li>"
-                    for label, n, color in segs)
-            else:
-                donut = (
-                    "<svg width='140' height='140' viewBox='0 0 140 140' "
-                    "role='img' aria-label='Conversion status: no "
-                    "conversions yet'><circle cx='70' cy='70' r='54' "
-                    "fill='none' stroke='#f3f4f6' stroke-width='22'/>"
-                    "<text x='70' y='75' text-anchor='middle' font-size='14' "
-                    "fill='#666'>No data</text></svg>")
-                legend = "<li>No conversions recorded yet.</li>"
+                f"<div class='v-flow-step{' done' if step['ok'] else ''}'>"
+                f"<span class='v-flow-check'>"
+                f"{icon('check', 16) if step['ok'] else _FLOW_DOT_SVG}"
+                f"</span> <strong>{esc(step['label'])}</strong>"
+                f"<span>{esc(step['note'])}</span></div>"
+                + (f"<span class='v-flow-arrow'>{icon('arrow_right', 18)}"
+                   f"</span>" if i < 5 else "")
+                for i, step in enumerate(data["flow_steps"]))
 
             # Campaign performance: one row per signed action.
-            campaigns = {}
-            for s in sites:
-                for sig in _saas_store.list_signatures(s["id"], limit=1000):
-                    key = sig["action_id"] or sig["tag"]
-                    if key not in campaigns:
-                        campaigns[key] = {
-                            "url": sig["target_url"], "agent": sig["agent"],
-                            "verified": 0}
-                    campaigns[key]["verified"] += sum(
-                        1 for c in _saas_store.list_conversions(
-                            s["id"], limit=1000)
-                        if c.get("action_id") == sig["action_id"]
-                        and c.get("attribution") == "ventoryn")
             camp_rows = "".join(
                 f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
                 f"<td>{c['verified']}</td><td>Active</td></tr>"
-                for c in campaigns.values()) or (
+                for c in data["campaigns"]) or (
                 "<tr><td colspan='4'>No signed campaigns yet — run agent "
                 "work from a site page.</td></tr>")
-
-            # Acquisition trend: cumulative verified by day + Goal: 100.
-            # Real data only — no estimated/projection line is drawn.
-            if trend:
-                vmax = max(100, max(p["verified"] for p in trend))
-                tw, th = 600, 160
-                npts = len(trend)
-                pts = " ".join(
-                    f"{(i * tw / max(npts - 1, 1)):.1f},"
-                    f"{(th - (p['verified'] / vmax) * th):.1f}"
-                    for i, p in enumerate(trend))
-                goal_y = th - (100 / vmax) * th
-                trend_svg = (
-                    f"<svg viewBox='0 0 {tw} {th}' class='v-trend' "
-                    f"role='img' aria-label='Acquisition trend: verified "
-                    f"customers over the last 30 days, goal 100'>"
-                    f"<line x1='0' y1='{goal_y:.1f}' x2='{tw}' "
-                    f"y2='{goal_y:.1f}' stroke='#c4b5fd' stroke-width='1.5' "
-                    f"stroke-dasharray='6 4'/>"
-                    f"<text x='{tw - 4}' y='{goal_y - 6:.1f}' "
-                    f"text-anchor='end' font-size='11' fill='#6d28d9'>"
-                    f"Goal: 100</text>"
-                    f"<polyline points='{pts}' fill='none' "
-                    f"stroke='#8b5cf6' stroke-width='2.5'/></svg>"
-                    f"<p class='muted'>Verified customers, cumulative, "
-                    f"last 30 days. The dashed line is the goal of 100 — "
-                    f"no projection is drawn, only real verified sales.</p>")
-            else:
-                trend_svg = ("<p class='muted'>No verified customers yet — "
-                             "the trend appears once the first signed sale "
-                             "lands.</p>")
-
-            # Conversion breakdown bars.
-            maxb = max(counts["verified"], counts["pending"],
-                       counts["unattributed"], 1)
-            breakdown_html = "".join(
-                f"<div class='v-bbar'><span class='v-bbar-label'>{label}"
-                f"</span><span class='v-bbar-track'><span "
-                f"class='v-bbar-fill' style='width:{(100 * n / maxb):.0f}%;"
-                f"background:{color}'></span></span>"
-                f"<span class='v-bbar-num'>{n}</span></div>"
-                for label, n, color in [
-                    ("Verified", counts["verified"], "#16a34a"),
-                    ("Pending", counts["pending"], "#d97706"),
-                    ("Unattributed", counts["unattributed"], "#9ca3af")])
-
-            # Data & privacy controls: one form per site, posting to
-            # the same privacy endpoint as the site page (fresh 2FA
-            # code required there when 2FA is enabled).
-            def _chk(on):
-                return "checked" if on else ""
-            totp_field = ""
-            if account.get("totp_enabled"):
-                totp_field = (
-                    "<label>Two-factor code (fresh — required to confirm "
-                    "this change)</label><input type='text' "
-                    "name='totp_code' inputmode='numeric' "
-                    "autocomplete='one-time-code' maxlength='8'>")
-            privacy_forms = ""
-            for s in sites:
-                privacy_forms += (
-                    f"<div class='card'><h3>{esc(s['url'])}</h3>"
-                    f"<form method='post' action='/account/sites/{esc(s['id'])}/privacy'>"
-                    f"<input type='hidden' name='return_to' value='/report'>"
-                    f"<label><input type='checkbox' name='revenue_show' "
-                    f"{_chk(s.get('revenue_show'))}> Show my revenue on "
-                    f"Ventoryn</label>"
-                    f"<label><input type='checkbox' name='count_show' "
-                    f"{_chk(s.get('count_show', 1))}> Show my customer "
-                    f"count</label>"
-                    f"<label><input type='checkbox' name='details_show' "
-                    f"{_chk(s.get('details_show', 1))}> Show conversion "
-                    f"details</label>"
-                    f"{totp_field}"
-                    "<p><button class='btn' type='submit'>Save privacy "
-                    "settings</button></p></form></div>")
-            if not privacy_forms:
-                privacy_forms = ("<p class='muted'>No websites yet — add "
-                                 "one to set its privacy controls.</p>")
-
             # Your websites + recent jobs (revenue/count hidden per
-            # the toggles, via revenue_for_site).
-            site_rows = ""
-            for s in sites:
-                rev = _saas_store.revenue_for_site(s["id"])
-                conn = _saas_store.get_connection(s["id"], "stripe_sales") or {}
-                stripe_connected = conn.get("status") == "connected"
-                if rev is None:
-                    count_html = "<span class='unavailable'>unavailable</span>"
-                    revenue_html = "<span class='unavailable'>unavailable</span>"
-                else:
-                    count_html = (
-                        f"{rev['paying_customers']:,}"
-                        if rev["paying_customers"] is not None else
-                        "<span class='unavailable'>hidden</span>")
-                    if not stripe_connected:
-                        revenue_html = ("<span class='unavailable'>"
-                                        "unavailable — connect Stripe "
-                                        "sales</span>")
-                    elif rev["revenue"] is None:
-                        revenue_html = ("<span class='unavailable'>"
-                                        "hidden</span>")
-                    else:
-                        revenue_html = (
-                            f"${rev['revenue']['total_cents'] / 100:,.2f} "
-                            f"{rev['revenue']['currency'].upper()}")
-                site_rows += (
-                    f"<tr><td>{esc(s['url'])}</td><td>{count_html}</td>"
-                    f"<td>{revenue_html}</td></tr>")
-            site_rows = site_rows or (
+            # the toggles — the display HTML comes from the helper).
+            site_rows = "".join(
+                f"<tr><td>{esc(s['url'])}</td><td>{s['count_html']}</td>"
+                f"<td>{s['revenue_html']}</td></tr>"
+                for s in data["sites"]) or (
                 "<tr><td colspan='3'>No websites yet.</td></tr>")
             job_rows = "".join(
                 f"<tr><td>{esc(j['job_type'].replace('_', ' '))}</td>"
@@ -2667,6 +2895,346 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
 {exp_block}
 </main></body></html>"""
 
+    # -- the five platform sections (sidebar items) -----------------------
+    # Each follows the /approvals handler as the template:
+    # _need_account, per-account scoping, _operator_page with the
+    # sidebar current key. All numbers are real; empty states are
+    # honest; nothing here is demo data. The forced-2FA middleware
+    # gates them automatically — they are NOT in _TOTP_FREE_PATHS.
+
+    @app.get("/campaigns", response_class=HTMLResponse)
+    def campaigns_page(request: Request):
+        """Signed campaigns: one row per signed action — target URL,
+        agent, verified conversions (attribution "ventoryn")."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        data = _attribution_data(account, check_visitors=False)
+        sites = _saas_store.list_sites(account["id"])
+        if not sites:
+            inner = ("<div class='card'><p>No websites yet — add one "
+                     "to run campaigns.</p><p><a class='btn btn-primary' "
+                     "href='/account/dashboard'>Add a website</a></p>"
+                     "</div>")
+        elif not data["campaigns"]:
+            inner = ("<div class='card'><p>No signed campaigns yet — "
+                     "run agent work from a site page.</p></div>")
+        else:
+            rows = "".join(
+                f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
+                f"<td>{c['verified']}</td><td>Active</td></tr>"
+                for c in data["campaigns"])
+            inner = f"""<div class="table-wrap"><table>
+<tr><th>Campaign</th><th>Source</th><th>Verified conversions</th>
+<th>Status</th></tr>{rows}</table></div>
+<p class='muted'>Clicks per campaign are not tracked yet — the table
+shows verified conversions only.</p>"""
+        return _operator_page(
+            "Campaigns", inner, account=account, current="campaigns",
+            is_operator=_saas_config.is_operator(account["email"]))
+
+    @app.get("/agents", response_class=HTMLResponse)
+    def agents_page(request: Request):
+        """The real agents from the orchestrator registry, with live
+        status from the audit log (agent_stats_from_audit): tasks
+        completed, tokens, cost, last task. Display name + role come
+        from the Live Ops crew cast; the registry description says
+        what each agent does. Status is honest: "Last did: …" when
+        the audit has a last run for the agent, "Standing by" when
+        it has none — never a "Running" pill that cannot be proved.
+        Display-only crew (Builder, Ledger) are not agent types and
+        are not listed here."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        agent_types = state["orchestrator"].registry.agent_types()
+        if not agent_types:
+            inner = ("<div class='card'><p>No agents registered yet."
+                     "</p></div>")
+        else:
+            stats = {s["type"]: s for s in agent_stats_from_audit(
+                state["audit"], agent_types)}
+            crew = {
+                "discovery": ("Scout", "Discovery"),
+                "research": ("Analyst", "Research"),
+                "creative": ("Studio", "Creative"),
+                "marketing": ("Growth", "Marketing"),
+                "support": ("Care", "Support"),
+                "operations": ("Ops", "Operations"),
+                "review": ("Review", "Review"),
+            }
+            cards = ""
+            for i, t in enumerate(agent_types):
+                name, role = crew.get(
+                    t, (t.replace("_", " ").title(), "Agent"))
+                reg = state["orchestrator"].registry.get(t)
+                desc = reg.description if reg else ""
+                s = stats.get(t, {})
+                last = s.get("last_task", "").replace(" · ", " — ")
+                status = (f"Last did: {last}" if last
+                          else "Standing by")
+                cards += (
+                    f"<article class='v-biz v-accent-{i % 4}'>"
+                    f"<h3>{esc(name)} "
+                    f"<span class='pill'>{esc(role)}</span></h3>"
+                    f"<p class='v-biz-url'>{esc(desc)}</p>"
+                    f"<p><strong>{esc(status)}</strong></p>"
+                    f"<dl><dt>Tasks completed</dt>"
+                    f"<dd>{s.get('tasks_completed', 0)}</dd>"
+                    f"<dt>Tokens</dt>"
+                    f"<dd>{s.get('tokens_used', 0):,}</dd>"
+                    f"<dt>Cost</dt>"
+                    f"<dd>${s.get('cost_usd', 0.0):,.4f}</dd></dl>"
+                    f"</article>")
+            inner = f"<div class='v-biz-grid'>{cards}</div>"
+        return _operator_page(
+            "Agents", inner, account=account, current="agents",
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS)
+
+    @app.get("/analytics", response_class=HTMLResponse)
+    def analytics_page(request: Request):
+        """The funnel, per site, from real sources only: visitors
+        from Plausible where connected, signups (no signup source
+        exists yet — the page says so), paying customers + revenue
+        from revenue_for_site respecting the privacy toggles, and
+        the verified / pending / unattributed counts + 30-day
+        verified trend from _attribution_data."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        from ventoryn.saas import plausible_visitors
+
+        data = _attribution_data(account, check_visitors=False)
+        counts = data["counts"]
+        rows = ""
+        for s in data["sites"]:
+            site = _saas_store.get_site(s["id"])
+            conn = _saas_store.get_connection(s["id"], "plausible") or {}
+            if conn.get("status") == "connected":
+                raw = conn.get("_detail_raw") or {}
+                key = raw.get("api_key")
+                v = (plausible_visitors(
+                    key, raw.get("site_domain") or site["host"])
+                    if key else None)
+                visitors_html = (
+                    f"{v:,}" if v is not None else
+                    "<span class='unavailable'>unavailable — "
+                    "Plausible did not answer</span>")
+            else:
+                visitors_html = ("<span class='unavailable'>"
+                                 "unavailable — connect Plausible</span>")
+            rows += (
+                f"<tr><td>{esc(s['url'])}</td><td>{visitors_html}</td>"
+                f"<td><span class='unavailable'>unavailable — signup "
+                f"tracking is not connected yet</span></td>"
+                f"<td>{s['count_html']}</td>"
+                f"<td>{s['revenue_html']}</td></tr>")
+        rows = rows or ("<tr><td colspan='5'>No websites yet — add one "
+                        "to see its funnel.</td></tr>")
+        inner = f"""<div class='v-stats'>
+<div class='v-stat v-stat-1'><span class='v-stat-label'>Verified</span>
+<span class='v-stat-value'>{counts['verified']}</span></div>
+<div class='v-stat v-stat-2'><span class='v-stat-label'>Pending</span>
+<span class='v-stat-value'>{counts['pending']}</span></div>
+<div class='v-stat v-stat-3'><span class='v-stat-label'>Unattributed</span>
+<span class='v-stat-value'>{counts['unattributed']}</span></div></div>
+<h2>Funnel — visitors to paying customers</h2>
+<div class="table-wrap"><table>
+<tr><th>Website</th><th>Visitors (30 days)</th><th>Signups</th>
+<th>Paying customers</th><th>Revenue</th></tr>{rows}</table></div>
+<p class='muted'>Every number here comes from a real source. Where a
+connection is missing the value reads "unavailable" — never invented.
+Signups read unavailable because no signup tracking is connected yet.</p>
+<div class='card'><h2>Acquisition trend</h2>{data['trend_svg']}</div>"""
+        return _operator_page(
+            "Analytics", inner, account=account, current="analytics",
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS)
+
+    @app.get("/integrations", response_class=HTMLResponse)
+    def integrations_page(request: Request):
+        """Per site, the real connections (Reddit, X, Plausible,
+        Stripe) with connected / not-connected state — the same
+        cards and the same form actions as the site-detail page
+        (POST /account/sites/{id}/connections/{kind}, disconnect
+        posts). Reddit/X posting needs the platform OAuth app
+        registrations first — until then the connection says "not
+        connected — app registration needed", never faked. X's API
+        is paid and rate-limited."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        from ventoryn.saas import (
+            CONNECTION_CONSENT, CONNECTION_SCOPES,
+            check_posting_allowed,
+        )
+
+        sites = _saas_store.list_sites(account["id"])
+        if not sites:
+            inner = ("<div class='card'><p>No websites yet — add one "
+                     "to connect it.</p><p><a class='btn btn-primary' "
+                     "href='/account/dashboard'>Add a website</a></p>"
+                     "</div>")
+        else:
+            totp_field = ""
+            if account.get("totp_enabled"):
+                totp_field = (
+                    "<label>Two-factor code (fresh — required to "
+                    "confirm this change)</label><input type='text' "
+                    "name='totp_code' inputmode='numeric' "
+                    "autocomplete='one-time-code' maxlength='8'>")
+            cards = ""
+            for s in sites:
+                plausible_raw = (
+                    _saas_store.get_connection(s["id"], "plausible")
+                    or {}).get("_detail_raw") or {}
+                for conn in _saas_store.get_connections(s["id"]):
+                    kind = conn["kind"]
+                    badge = (
+                        "<span class='badge badge-ok'>Connected</span>"
+                        if conn["status"] == "connected" else
+                        "<span class='badge badge-off'>Not connected"
+                        "</span>")
+                    consent = CONNECTION_CONSENT.get(kind, "")
+                    scopes = CONNECTION_SCOPES.get(kind, "")
+                    gate_html = ""
+                    if kind in ("reddit", "x"):
+                        _ok, gate_reason = check_posting_allowed(
+                            _saas_store, account, s["id"], kind,
+                            _saas_config)
+                        gate_html = f"<p>Posting: {esc(gate_reason)}</p>"
+                    disconnect_html = ""
+                    if conn["status"] == "connected":
+                        disconnect_html = (
+                            f"<form method='post' action='/account/sites/"
+                            f"{esc(s['id'])}/connections/{kind}/disconnect'>"
+                            f"{totp_field}<p><button class='btn' "
+                            f"type='submit'>Disconnect</button></p></form>")
+                    if kind == "plausible":
+                        form = (
+                            "<form method='post' "
+                            f"action='/account/sites/{esc(s['id'])}/connections/plausible'>"
+                            "<label for='plausible_domain'>Plausible site "
+                            "domain</label><input type='text' "
+                            "id='plausible_domain' name='site_domain' "
+                            f"value='{esc(plausible_raw.get('site_domain', s['host']))}'>"
+                            "<label for='plausible_key'>Plausible API "
+                            "key</label><input type='text' "
+                            "id='plausible_key' name='api_key' "
+                            "placeholder='Stored, never shown back'>"
+                            "<p><button class='btn' type='submit'>"
+                            "Connect Plausible</button></p></form>")
+                    elif kind == "stripe_sales":
+                        webhook_url = (
+                            f"{_saas_config.base_url}/account/billing/webhook")
+                        form = (
+                            f"<p class='muted'>Point your Stripe webhook "
+                            f"at <code>{esc(webhook_url)}</code> and add "
+                            f"<code>ventoryn_site_id</code> = "
+                            f"<code>{esc(s['id'])}</code> to your checkout "
+                            f"metadata, so sales are counted for this site."
+                            f"</p><form method='post' action='/account/sites/"
+                            f"{esc(s['id'])}/connections/stripe_sales'>"
+                            "<label for='stripe_secret'>Stripe webhook "
+                            "signing secret</label><input type='text' "
+                            "id='stripe_secret' name='webhook_secret' "
+                            "placeholder='Stored, never shown back'>"
+                            "<p><button class='btn' type='submit'>"
+                            "Connect Stripe sales</button></p></form>")
+                    else:
+                        # Reddit / X: honest about the missing app
+                        # registration — the operator registers
+                        # Ventoryn's app in the provider's developer
+                        # console first. Nothing is faked.
+                        form = (
+                            f"<p class='muted'>{esc(conn['note'])}</p>"
+                            "<p class='muted'>To connect, the operator "
+                            "first registers Ventoryn's app in the "
+                            "provider's developer console — that step is "
+                            "not built here and nothing is faked.</p>")
+                    cards += (
+                        f"<div class='card'><h3>{esc(s['url'])} — "
+                        f"{esc(kind.replace('_', ' '))} {badge}</h3>"
+                        f"<p>{esc(conn['note'])}</p>"
+                        f"<p>{esc(consent)}</p>"
+                        f"<p class='muted'>Scopes requested: "
+                        f"<code>{esc(scopes)}</code></p>"
+                        f"{gate_html}{form}{disconnect_html}</div>")
+            inner = ("""<p class='muted'>Reddit/X posting needs the
+platform OAuth app registrations first — until then the connection
+says "not connected — app registration needed", never faked. X's API
+is paid and rate-limited.</p>""" + cards)
+        return _operator_page(
+            "Integrations", inner, account=account,
+            current="integrations",
+            is_operator=_saas_config.is_operator(account["email"]))
+
+    @app.get("/customers", response_class=HTMLResponse)
+    def customers_page(request: Request):
+        """Real conversion records per site, with status verified /
+        pending / unattributed — the privacy toggles respected
+        exactly as /report does: a site with the count hidden
+        contributes nothing to the displayed counts; details are
+        hidden unless details_show is on; revenue is hidden unless
+        revenue_show is on (amounts are stripped by
+        revenue_for_site, so they cannot leak through the table)."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        sites = _saas_store.list_sites(account["id"])
+        counted_ids = [s["id"] for s in sites
+                       if s.get("count_show", 1)]
+        counts = _saas_store.conversion_status_counts(counted_ids)
+        rows = ""
+        for s in sites:
+            rev = _saas_store.revenue_for_site(s["id"])
+            if rev is None:
+                continue
+            if rev["conversions"]:
+                for c in rev["conversions"]:
+                    if c.get("attribution") == "ventoryn":
+                        label = "Verified"
+                    elif c.get("source") == "manual":
+                        label = "Pending"
+                    else:
+                        label = "Unattributed"
+                    amount = (
+                        f"${c['amount_cents'] / 100:,.2f} "
+                        f"{esc(c['currency'].upper())}"
+                        if c.get("amount_cents") is not None else
+                        "<span class='unavailable'>hidden</span>")
+                    rows += (
+                        f"<tr><td>{esc(s['url'])}</td><td>{amount}</td>"
+                        f"<td>{esc(c['source'])}</td><td>{label}</td>"
+                        f"<td>{esc(c.get('signature_tag') or '—')}</td>"
+                        f"<td>{esc(c['created_at'][:10])}</td></tr>")
+            elif not s.get("details_show", 1):
+                rows += (
+                    f"<tr><td>{esc(s['url'])}</td>"
+                    f"<td colspan='5'>Conversion details are hidden — "
+                    f"turn them on in Data &amp; privacy controls.</td>"
+                    f"</tr>")
+        rows = rows or ("<tr><td colspan='6'>No paying customers "
+                        "recorded yet.</td></tr>")
+        inner = f"""<div class='v-stats'>
+<div class='v-stat v-stat-1'><span class='v-stat-label'>Verified</span>
+<span class='v-stat-value'>{counts['verified']}</span></div>
+<div class='v-stat v-stat-2'><span class='v-stat-label'>Pending</span>
+<span class='v-stat-value'>{counts['pending']}</span></div>
+<div class='v-stat v-stat-3'><span class='v-stat-label'>Unattributed</span>
+<span class='v-stat-value'>{counts['unattributed']}</span></div></div>
+<div class="table-wrap"><table>
+<tr><th>Website</th><th>Amount</th><th>Source</th><th>Status</th>
+<th>Signature</th><th>Date</th></tr>{rows}</table></div>
+<p class='muted'>Verified — the Ventoryn signature reached the payment.
+Pending — owner-recorded, not yet verified by Stripe. Unattributed —
+a real Stripe payment, no signature.</p>"""
+        return _operator_page(
+            "Customers", inner, account=account, current="customers",
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS)
+
     @app.post("/api/tick")
     def api_tick(request: Request):
         """One orchestrator tick. Operator only — a customer must
@@ -2760,14 +3328,18 @@ per-sale details are separate settings.</p>{privacy_forms}</div>
         return True, None
 
     def _admin_page(title: str, inner: str, current: str) -> str:
-        """Admin shell: the shared centered header (operator menu,
-        with the Admin group) + the admin board look — Kay Ayiti's
-        light board blended with ShipItAyiti's slate/navy headers."""
+        """Admin shell: the small centered admin header (brand + page
+        title + link row to the 4 admin pages, no hamburger, no
+        sidebar) + the admin board look — Kay Ayiti's light board
+        blended with ShipItAyiti's slate/navy headers."""
+        from ventoryn.nav import ADMIN_HEADER_CSS, simple_header_html
+
         return ui.page(f"{title} (admin)", inner +
                        "<p class='v-admin-foot'>Signed in as admin · "
                        "<a href='/admin/logout'>Admin sign out</a></p>",
-                       header=header_html(current, True, title),
-                       extra_css=_ADMIN_CSS, body_class="v-admin")
+                       header=simple_header_html(title, current),
+                       extra_css=_ADMIN_CSS + ADMIN_HEADER_CSS,
+                       body_class="v-admin")
 
     def _admin_auth_page(title: str, inner: str) -> str:
         """Password-only login page: no header, no menu, no Google

@@ -1,10 +1,14 @@
 """Nav polish + admin refinement (Ventoryn).
 
-- One shared centered header with a hamburger menu at the FAR RIGHT
-  on every signed-in page; the pill nav row is gone — the customer
-  /report was rebuilt per the attribution reference (image 3) and uses
-  the shared header too; only the OPERATOR's agent & financial report
-  keeps the old shell untouched.
+- One shared platform shell on every signed-in page: a purple
+  sidebar (9 items, in order: Overview, Campaigns, Agents,
+  Approvals, Attribution, Analytics, Integrations, Customers,
+  Settings) + an app header with a mobile toggle and an avatar
+  dropdown. The hamburger menu and the pill nav row are both
+  gone — the customer /report was rebuilt per the attribution
+  reference (image 3) and uses the shared sidebar too; only the
+  OPERATOR's agent & financial report keeps the old shell
+  untouched, and /admin keeps its own simple header.
 - /portfolio in the Live Ops visual language (color).
 - Approvals decide redirects back with a confirmation; decided
   items leave pending and show under Decided with the time.
@@ -101,49 +105,52 @@ def test_no_pill_nav_on_signed_in_pages():
             # and the Live Ops page).
             assert "class='customer-nav'" not in r.text, path
             assert 'id="customer-nav"' not in r.text, path
-            # The hamburger header is there instead.
-            assert "v-burger" in r.text, path
-            assert "v-header" in r.text, path
-            assert "aria-label='Menu'" in r.text, path
+            # The purple sidebar is there instead of the hamburger.
+            assert "class='app-sidebar'" in r.text, path
+            assert "class='app-header'" in r.text, path
+            assert "sidebar-toggle" in r.text, path
+            assert "v-burger" not in r.text, path
+            assert "v-header" not in r.text, path
 
 
-def test_hamburger_is_far_right_brand_centered():
-    # The bar is spacer (left) — brand (center) — burger (right).
-    # The 44px spacer balances the 44px burger so the brand stays
-    # centered.
+def test_sidebar_brand_links_home_and_toggle_is_thumb_sized():
+    # The sidebar brand links home (/ops); the mobile toggle is a
+    # thumb-sized 44px button; there is no hamburger anywhere.
     app, store = _app_with()
     client_a, _a = _customer_client(app, store, CUSTOMER_A)
     r = client_a.get("/portfolio")
     assert r.status_code == 200
-    # Search inside the header element (the <style> block also
-    # mentions the class names, earlier in the page).
-    bar = r.text.split("<header class='v-header'>")[1].split("</header>")[0]
-    i_spacer = bar.index("v-bar-spacer")
-    i_brand = bar.index("v-brand")
-    i_burger = bar.index("v-burger")
-    assert i_spacer < i_brand < i_burger
-    # The button itself is thumb-sized (44px in the CSS).
-    assert "width: 44px" in r.text or "44px" in r.text
+    assert "class='app-sidebar'" in r.text
+    assert "href='/ops'" in r.text  # brand + Overview links
+    assert "sidebar-toggle" in r.text
+    assert "44px" in r.text
+    assert "v-burger" not in r.text
 
 
-def test_hamburger_menu_items_per_role():
+def test_sidebar_items_per_role():
     app, store = _app_with()
     client_a, _a = _customer_client(app, store, CUSTOMER_A)
     r = client_a.get("/portfolio")
-    for item in ("Live Ops", "My Portfolio", "Approvals", "Report",
-                 "My account", "Subscribe", "Sign out"):
+    for item in ("Overview", "Campaigns", "Agents", "Approvals",
+                 "Attribution", "Analytics", "Integrations",
+                 "Customers", "Settings", "Sign out"):
         assert item in r.text, item
+    # My account + Subscribe live in the avatar dropdown, not the
+    # sidebar — but they are still one tap away.
+    assert "My account" in r.text
+    assert "Subscribe" in r.text
     # A customer never sees the Admin group.
-    assert "<span class='v-group'>Admin</span>" not in r.text
+    assert "<span class='nav-group'>Admin</span>" not in r.text
     assert "/admin/subscribers" not in r.text
 
     client_op, _op = _operator_client(app, store)
     r = client_op.get("/portfolio")
-    for item in ("Live Ops", "My Portfolio", "Approvals", "Report",
-                 "My account", "Subscribe", "Sign out"):
+    for item in ("Overview", "Campaigns", "Agents", "Approvals",
+                 "Attribution", "Analytics", "Integrations",
+                 "Customers", "Settings", "Sign out"):
         assert item in r.text, item
     # The operator gets the Admin group on top of the customer menu.
-    assert "<span class='v-group'>Admin</span>" in r.text
+    assert "<span class='nav-group'>Admin</span>" in r.text
     for item in ("Live", "Subscribers", "Accounts", "Agents"):
         assert item in r.text, item
     assert "/admin/subscribers" in r.text
@@ -155,32 +162,40 @@ def test_current_page_is_not_a_clickable_menu_option():
     app, store = _app_with()
     client_a, _a = _customer_client(app, store, CUSTOMER_A)
     for path, href, label in (
-            ("/portfolio", "/portfolio", "My Portfolio"),
-            ("/ops", "/ops", "Live Ops"),
-            ("/account/dashboard", "/account/dashboard", "My account"),
-            ("/account/subscribe", "/account/subscribe", "Subscribe"),
+            ("/ops", "/ops", "Overview"),
+            ("/campaigns", "/campaigns", "Campaigns"),
+            ("/agents", "/agents", "Agents"),
             ("/approvals", "/approvals", "Approvals"),
-            ("/report", "/report", "Report")):
+            ("/report", "/report", "Attribution"),
+            ("/analytics", "/analytics", "Analytics"),
+            ("/integrations", "/integrations", "Integrations"),
+            ("/customers", "/customers", "Customers"),
+            ("/account/dashboard", "/account/dashboard", "Settings")):
         r = client_a.get(path)
         assert r.status_code == 200, path
         # The current page is a label, never a link to itself.
-        assert f"<a href='{href}'>" not in r.text, (path, href)
+        assert f"<a class='nav-item' href='{href}'>" not in r.text, \
+            (path, href)
         assert label in r.text, (path, label)
-        assert "current page" in r.text, path
+        assert "aria-current='page'" in r.text, path
+    # /portfolio is not a sidebar item: nothing is marked current.
+    r = client_a.get("/portfolio")
+    assert r.status_code == 200
+    assert "aria-current='page'" not in r.text
     # The admin pages too: the current admin page is a label.
     admin = _admin_client(app)
     r = admin.get("/admin/subscribers")
     assert r.status_code == 200
     assert "<a href='/admin/subscribers'>" not in r.text
     assert "Subscribers" in r.text
-    assert "current page" in r.text
+    assert "aria-current='page'" in r.text
 
 
-def test_header_js_syntax():
-    # The menu script is plain vanilla JS — it must parse cleanly.
+def test_sidebar_js_syntax():
+    # The sidebar script is plain vanilla JS — it must parse cleanly.
     if shutil.which("node") is None:
         pytest.skip("node is not available here")
-    script = nav.HEADER_JS
+    script = nav.SIDEBAR_JS
     assert script.strip().startswith("<script>")
     js = re.sub(r"</?script>", "", script)
     with tempfile.NamedTemporaryFile("w", suffix=".js",
@@ -336,9 +351,9 @@ def test_report_header_split_customer_vs_operator():
     store.create_site(account_a["id"], "https://ada.example.com")
     r = client_a.get("/report")
     assert r.status_code == 200
-    # The customer report: shared header, no pill nav.
-    assert "v-burger" in r.text
-    assert "v-header" in r.text
+    # The customer report: shared sidebar, no pill nav, no hamburger.
+    assert "class='app-sidebar'" in r.text
+    assert "v-burger" not in r.text
     assert "class='customer-nav'" not in r.text
     assert "ada.example.com" in r.text
     # The operator's agent & financial report keeps its shell.
@@ -347,6 +362,7 @@ def test_report_header_split_customer_vs_operator():
     assert r.status_code == 200
     assert "class='customer-nav'" in r.text
     assert "v-burger" not in r.text
+    assert "class='app-sidebar'" not in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -421,13 +437,15 @@ def test_admin_pages_carry_the_new_styling():
     r = admin.get("/admin")
     assert r.status_code == 200
     assert "v-admin-card" in r.text
-    assert "v-header" in r.text  # the shared header, operator menu
+    assert "admin-head" in r.text  # the simple admin header, no sidebar
+    assert "class='app-sidebar'" not in r.text
     assert "v-live-dot" in r.text or "Nobody is on the platform" in r.text
     for path in ("/admin/subscribers", "/admin/accounts", "/admin/agents"):
         r = admin.get(path)
         assert r.status_code == 200, path
         assert "v-admin-card" in r.text, path
-        assert "v-header" in r.text, path
+        assert "admin-head" in r.text, path
+        assert "class='app-sidebar'" not in r.text, path
 
 
 def test_admin_login_page_is_password_only():

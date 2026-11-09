@@ -226,10 +226,17 @@ def test_login_page_says_so_when_google_unconfigured(store):
     r = c.get("/")
     assert r.status_code == 200
     assert "not set up yet" in r.text
-    # No sign-in button is offered when Google is not configured
+    # No working sign-in is offered when Google is not configured
     # (the how-it-works prose may still name it, and the preview
-    # script holds the URL for after sign-in is configured).
-    assert "id='landing-signin'" not in r.text
+    # script holds the URL for after sign-in is configured). The
+    # page renders a DISABLED placeholder that carries the
+    # landing-signin id (so the analyze script can find it) — but
+    # no anchor to the Google start URL: the only occurrence of
+    # that URL is the JS template with a ?site_url= query, which
+    # only runs after sign-in is configured.
+    assert "id='landing-signin'" in r.text
+    assert "aria-disabled='true'" in r.text
+    assert "href='/account/auth/google/start'>" not in r.text
 
 
 # ---------------------------------------------------------------------------

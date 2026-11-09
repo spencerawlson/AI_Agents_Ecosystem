@@ -1,41 +1,59 @@
-"""One shared header for every signed-in page.
+"""The Ventoryn platform shell: purple sidebar + app header.
 
-Centered Ventoryn brand + page title, and a hamburger button that
-opens the ONLY navigation. The old pill row of links (Live Ops / My
-Portfolio / Approvals / Report / My account / Subscribe / Sign out)
-spread across the page is gone — the menu holds every section.
+This replaces the old hamburger header. Every signed-in page renders
+inside the platform shell (``ventoryn.ui.page`` with ``sidebar=`` +
+``page_head=``):
+
+- ``sidebar_html`` — the purple navigation sidebar (brand, the 9
+  platform sections, the Growth Plan card, the operator-only Admin
+  group, Sign out at the bottom).
+- ``platform_head_html`` — the app header (mobile sidebar toggle,
+  page title + subtitle, approvals bell, avatar dropdown).
+- ``SIDEBAR_CSS`` / ``SIDEBAR_JS`` — the shell styles + behaviour.
+- ``simple_header_html`` / ``ADMIN_HEADER_CSS`` — admin pages only.
+  Admin pages do NOT get the sidebar; they keep their existing board
+  look (``_ADMIN_CSS`` in app.py stays as-is).
 
 Rules (Spencer's):
-- The page you are already on is NOT a clickable option in the menu:
-  it renders as a non-clickable "current page" label instead. A dead
-  link is never shown.
-- Customer menu: Live Ops, My Portfolio, Approvals, Report, My
-  account, Subscribe, Sign out.
-- Operator menu: the same, plus an Admin group (Live, Subscribers,
-  Accounts, Agents).
-- The landing page (public, unsigned) does not use this header.
+- The page you are already on is NOT a clickable option: it renders
+  as a non-clickable ``<span class="nav-item active">`` with
+  ``aria-current="page"``, never a dead link.
+- No emoji, no font glyphs, no bitmaps — icons are inline SVG from
+  ``ventoryn.icons`` only.
 
-The header is pure HTML + a few lines of vanilla JS (toggle, close
-on tap-outside, close on Escape). No framework, no images.
+Circular-import note: this module imports only ``ventoryn.icons``
+(and stdlib ``html``). It never imports ``ventoryn.ui``. ``ui.page``
+imports ``SIDEBAR_CSS``/``SIDEBAR_JS`` from here lazily, inside the
+function, so there is no import cycle in either direction.
+
+The old hamburger header (``HEADER_CSS`` / ``HEADER_JS`` /
+``header_html``) is gone: its last callers (the operator
+mission-report page and the account pages' non-sidebar branch)
+now use the platform shell above.
 """
 
 from __future__ import annotations
 
 import html
 
-# (key, label, href) — the customer menu, in order.
-_CUSTOMER_ITEMS = (
-    ("live-ops", "Live Ops", "/ops"),
-    ("portfolio", "My Portfolio", "/portfolio"),
+from ventoryn.icons import icon
+
+# (key, label, href) — the platform sections, in order.
+PLATFORM_ITEMS = (
+    ("overview", "Overview", "/ops"),
+    ("campaigns", "Campaigns", "/campaigns"),
+    ("agents", "Agents", "/agents"),
     ("approvals", "Approvals", "/approvals"),
-    ("report", "Report", "/report"),
-    ("account", "My account", "/account/dashboard"),
-    ("subscribe", "Subscribe", "/account/subscribe"),
-    ("signout", "Sign out", "/account/logout"),
+    ("attribution", "Attribution", "/report"),
+    ("analytics", "Analytics", "/analytics"),
+    ("integrations", "Integrations", "/integrations"),
+    ("customers", "Customers", "/customers"),
+    ("settings", "Settings", "/account/dashboard"),
 )
 
-# The Admin group, operator only. /admin is the live feed; the other
-# three are the oversight pages.
+# The Admin group, operator only. Hrefs kept exactly as the old
+# hamburger menu had them: /admin is the live feed; the other three
+# are the oversight pages.
 _ADMIN_ITEMS = (
     ("admin-live", "Live", "/admin"),
     ("admin-subscribers", "Subscribers", "/admin/subscribers"),
@@ -48,121 +66,315 @@ def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-HEADER_CSS = """
-/* Ventoryn app bar: navy, full width, sticky — the same bar as the
-   public landing nav. Brand centered, hamburger far right; the 44px
-   spacer on the left balances the burger. One navigation for every
-   signed-in page. Colors come from ventoryn.ui tokens. */
-.v-header { position: sticky; top: 0; z-index: 40; width: 100%;
-  margin: 0; background: var(--v-navy, #0b0e1e);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 6px 20px rgba(11, 14, 30, .18); }
-.v-bar { position: relative; max-width: 1120px; margin: 0 auto;
-  padding: 8px 20px; min-height: 60px; display: flex; align-items: center;
-  gap: 12px; }
-.v-burger { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px;
-  margin: 0; padding: 0; font-size: 20px; line-height: 1;
-  border-radius: 10px; border: 1px solid rgba(255, 255, 255, .28);
-  background: transparent; color: #fff; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; }
-.v-burger:hover, .v-burger[aria-expanded='true'] {
-  background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .5);
-  color: #fff; }
-.v-brand { flex: 1; text-align: center; font-size: 22px; font-weight: 800;
-  color: #fff; text-decoration: none; letter-spacing: .02em; }
-.v-brand::after { content: "."; color: var(--v-violet-line, #c4b5fd); }
-.v-brand:hover { color: #fff; }
-.v-bar-spacer { flex: 0 0 44px; width: 44px; }
-.v-title { max-width: 1120px; margin: 26px auto 6px; padding: 0 20px;
-  font-size: 26px; font-weight: 800; color: var(--v-ink, #1a1a2e);
-  letter-spacing: -.01em; line-height: 1.25; }
-.v-menu { position: absolute; right: 20px; top: calc(100% + 6px);
-  z-index: 50; width: 300px; max-height: calc(100vh - 90px);
-  overflow-y: auto; background: #fff; border: 1px solid var(--v-line, #e7e3f3);
-  border-radius: 14px; box-shadow: 0 18px 48px rgba(11, 14, 30, .22);
-  padding: 8px; }
-.v-menu a { display: block; min-height: 44px; line-height: 44px;
+# ---------------------------------------------------------------------------
+# Platform shell CSS + JS (adapted from the UI reference:
+# white workspace, purple navigation sidebar, app header, cards).
+# Desktop (>=1041px): the sidebar is always visible in the grid.
+# Mobile (<=1040px): it is off-canvas, opened by the toggle (body
+# class ``sidebar-open``), with a tap-to-close overlay.
+# ---------------------------------------------------------------------------
+
+SIDEBAR_CSS = """
+/* Ventoryn platform shell: purple sidebar + white workspace.
+   Adapted from the UI reference (platform.html / styles.css). */
+.app-layout { display: grid; grid-template-columns: 252px minmax(0, 1fr);
+  min-height: 100vh; width: 100%; background: #fff; }
+.app-sidebar { background: linear-gradient(160deg, #8623ee, #5014a3 62%, #6a1fc0);
+  color: #fff; padding: 24px 13px; display: flex; flex-direction: column;
+  gap: 27px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-brand { display: inline-flex; align-items: center; gap: 12px;
+  font-size: 27px; font-weight: 800; letter-spacing: -1.2px; color: #fff;
+  text-decoration: none; white-space: nowrap; padding: 0 17px; }
+.sidebar-brand .brand-mark { display: inline-block; font-weight: 1000;
+  font-size: 40px; line-height: .8; letter-spacing: -8px; padding-right: 9px;
+  background: linear-gradient(135deg, #da50fa 8%, #7b4bff 58%, #51a8fa);
+  color: transparent; background-clip: text; transform: skew(-8deg); }
+.sidebar-brand:hover { color: #fff; }
+.app-nav { display: flex; flex-direction: column; gap: 4px; }
+.app-nav .nav-item { position: relative; display: flex; align-items: center;
+  gap: 17px; width: 100%; background: transparent; color: #fff; border: 0;
+  border-radius: 10px; text-align: left; padding: 14px 20px; font-size: 15px;
+  font-weight: 500; text-decoration: none; cursor: pointer; }
+.app-nav a.nav-item:hover, .app-nav .nav-item.active {
+  background: linear-gradient(100deg, #b344ff, #7e28f2);
+  box-shadow: inset 0 0 1px rgba(255, 255, 255, .5); }
+.app-nav .nav-item.active { font-weight: 700; cursor: default; }
+.app-nav .nav-item svg { flex: 0 0 auto; width: 18px; height: 18px; }
+.app-nav .nav-item .nav-label { flex: 1; min-width: 0; }
+.nav-count { margin-left: auto; background: #b936f5; color: #fff;
+  border-radius: 22px; font-size: 13px; font-weight: 700; padding: 4px 8px;
+  line-height: 1; }
+.nav-group { display: block; margin-top: 10px; padding: 12px 20px 4px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: rgba(255, 255, 255, .65); }
+.growth-plan { border: 1px solid #ad5bf9;
+  background: linear-gradient(140deg, #7a26d6, #4a078e);
+  border-radius: 15px; padding: 17px; margin-top: auto; }
+.growth-title { font-size: 18px; font-weight: 800; }
+.growth-plan p { font-size: 14px; margin: 13px 0 10px; }
+.growth-progress { height: 14px; border: 1px solid #d7a0fd;
+  border-radius: 100px; overflow: hidden; background: #57239a; }
+.growth-progress i { display: block; height: 100%;
+  background: linear-gradient(90deg, #e77bfe, #9c51fe); border-radius: inherit; }
+.growth-plan strong { display: block; text-align: right; margin: 8px 3px 17px; }
+.growth-plan .growth-owner { text-align: center; margin: 8px 0 0;
+  font-size: 13px; color: #e9d5ff; }
+.ghost-button { display: block; border: 1px solid #d4b5f6; background: transparent;
+  color: #fff; border-radius: 8px; padding: 11px; width: 100%;
+  text-align: center; text-decoration: none; font-weight: 600; font-size: 14px; }
+.ghost-button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.sidebar-foot { margin-top: auto; }
+.sidebar-foot .nav-item { border-top: 1px solid rgba(255, 255, 255, .25); }
+.sidebar-account { font-size: 12px; color: rgba(255, 255, 255, .7);
+  padding: 10px 20px 0; margin: 0; overflow-wrap: anywhere; }
+.sidebar-overlay { display: none; }
+.app-content { min-width: 0; background: #fff; }
+.app-header { min-height: 83px; display: flex; align-items: center;
+  justify-content: space-between; gap: 20px; padding: 12px 28px; }
+.app-page-head { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.app-header h1 { font-size: 28px; letter-spacing: -1px; line-height: 1.1; margin: 0; }
+.app-header p { margin: 5px 0 0; font-size: 14px; color: #2d2944; }
+.app-header-actions { display: flex; align-items: center; gap: 25px;
+  flex: 0 0 auto; }
+.sidebar-toggle { display: none; border: 0; background: none; color: #1f1938;
+  width: 44px; height: 44px; min-height: 44px; padding: 0; cursor: pointer;
+  align-items: center; justify-content: center; border-radius: 10px; }
+.sidebar-toggle:hover { background: #f1ebff; }
+.notification { position: relative; display: inline-flex; align-items: center;
+  justify-content: center; width: 44px; height: 44px; border-radius: 50%;
+  color: #1f1938; text-decoration: none; }
+.notification:hover { background: #f1ebff; }
+.header-badge { position: absolute; top: 2px; right: 0; min-width: 18px;
+  height: 18px; padding: 0 5px; border-radius: 999px; background: #9a2cf6;
+  color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
+  text-align: center; }
+.avatar-menu { position: relative; }
+.avatar { background: #7f36e7; border: 0; border-radius: 50%; width: 41px;
+  height: 41px; min-height: 41px; padding: 0; color: #fff; font-weight: 800;
+  font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;
+  justify-content: center; }
+.avatar-dropdown { position: absolute; right: 0; top: calc(100% + 8px);
+  z-index: 50; min-width: 200px; background: #fff;
+  border: 1px solid var(--v-line, #e7e3f3); border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(11, 14, 30, .22); padding: 8px; }
+.avatar-dropdown a { display: block; min-height: 44px; line-height: 44px;
   padding: 0 14px; border-radius: 8px; color: var(--v-ink, #1a1a2e);
   text-decoration: none; font-size: 15px; font-weight: 500; }
-.v-menu a:hover { background: var(--v-violet-soft, #ede9fe);
+.avatar-dropdown a:hover { background: var(--v-violet-soft, #ede9fe);
   color: var(--v-violet-deep, #6d28d9); }
-.v-current { display: block; min-height: 44px; line-height: 44px;
-  padding: 0 14px; border-radius: 8px; color: var(--v-violet-deep, #6d28d9);
-  font-size: 15px; font-weight: 700; background: var(--v-violet-soft, #ede9fe); }
-.v-current em { font-style: normal; font-weight: 500; font-size: 13px;
-  color: var(--v-muted, #5d5d78); }
-.v-group { display: block; margin-top: 6px; padding: 12px 14px 4px;
-  border-top: 1px solid var(--v-line, #e7e3f3); font-size: 11px;
-  font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--v-faint, #8b8ba3); }
+.app-main { padding: 0 26px 32px; max-width: 1800px; margin: 0 auto; }
+@media (max-width: 1040px) {
+  .app-layout { display: block; }
+  .app-sidebar { position: fixed; left: -270px; top: 0; width: 255px;
+    height: 100vh; z-index: 60; transition: left .2s;
+    box-shadow: 0 0 20px rgba(0, 0, 0, .2); }
+  body.sidebar-open .app-sidebar { left: 0; }
+  .sidebar-overlay { display: block; position: fixed; inset: 0; z-index: 55;
+    background: rgba(11, 14, 30, .45); border: 0; padding: 0; cursor: pointer; }
+  body:not(.sidebar-open) .sidebar-overlay { display: none; }
+  .sidebar-toggle { display: inline-flex; }
+  .app-header { padding: 13px 18px; align-items: flex-start; }
+  .app-header h1 { font-size: 22px; }
+  .app-header p { font-size: 12px; }
+  .app-header-actions { gap: 9px; }
+  .app-main { padding: 0 14px 22px; }
+}
 @media (max-width: 560px) {
-  .v-bar { padding: 8px 16px; min-height: 56px; }
-  .v-title { font-size: 22px; margin-top: 20px; padding: 0 16px; }
-  .v-menu { left: 12px; right: 12px; width: auto; }
+  .avatar { width: 32px; height: 32px; min-height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar { transition: none; }
 }
 """
 
-HEADER_JS = """
+SIDEBAR_JS = """
 <script>
 (function () {
-  var burger = document.querySelector('.v-burger');
-  var menu = document.querySelector('.v-menu');
-  if (!burger || !menu) return;
-  function closeMenu() {
-    menu.hidden = true;
-    burger.setAttribute('aria-expanded', 'false');
+  var toggle = document.querySelector('.sidebar-toggle');
+  var overlay = document.querySelector('.sidebar-overlay');
+  var avatarBtn = document.querySelector('.avatar-menu .avatar');
+  var dropdown = document.querySelector('.avatar-dropdown');
+  function closeSidebar() {
+    document.body.classList.remove('sidebar-open');
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
   }
-  burger.addEventListener('click', function (ev) {
-    ev.stopPropagation();
-    var open = menu.hidden;
-    menu.hidden = !open;
-    burger.setAttribute('aria-expanded', String(open));
-  });
+  function closeDropdown() {
+    if (dropdown) dropdown.hidden = true;
+    if (avatarBtn) avatarBtn.setAttribute('aria-expanded', 'false');
+  }
+  if (toggle) {
+    toggle.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var open = document.body.classList.toggle('sidebar-open');
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+  }
+  if (overlay) overlay.addEventListener('click', closeSidebar);
+  if (avatarBtn && dropdown) {
+    avatarBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var open = dropdown.hidden;
+      dropdown.hidden = !open;
+      avatarBtn.setAttribute('aria-expanded', String(open));
+    });
+  }
   document.addEventListener('click', function (ev) {
-    if (!menu.hidden && !menu.contains(ev.target)) closeMenu();
+    if (dropdown && !dropdown.hidden && avatarBtn &&
+        !avatarBtn.contains(ev.target) && !dropdown.contains(ev.target)) {
+      closeDropdown();
+    }
   });
   document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') closeMenu();
+    if (ev.key === 'Escape') { closeSidebar(); closeDropdown(); }
   });
 })();
 </script>
 """
 
 
-def _item_html(key: str, label: str, href: str, current: str | None) -> str:
+def _nav_item_html(key: str, label: str, href: str,
+                   current: str | None,
+                   badge: int = 0, icon_name: str | None = None) -> str:
+    """One sidebar item: a link, or a non-clickable span when it is
+    the current page. ``badge`` (Approvals) shows the pending count
+    when it is above zero. ``icon_name`` defaults to ``key`` (the
+    platform keys are all icon names); admin items pass their own."""
+    badge_html = (f"<b class='nav-count'>{badge}</b>"
+                  if badge > 0 else "")
+    inner = (f"{icon(icon_name or key)}<span class='nav-label'>"
+             f"{esc(label)}</span>{badge_html}")
     if key == current:
-        return (f"<span class='v-current' aria-current='page'>{esc(label)}"
-                f" <em>&middot; current page</em></span>")
-    return f"<a href='{esc(href)}'>{esc(label)}</a>"
+        return (f"<span class='nav-item active' aria-current='page'>"
+                f"{inner}</span>")
+    return f"<a class='nav-item' href='{esc(href)}'>{inner}</a>"
 
 
-def header_html(current: str | None, is_operator: bool,
-                title: str) -> str:
-    """The shared header for a signed-in page.
+def sidebar_html(current: str | None, is_operator: bool, *,
+                 verified: int = 0, pending_approvals: int = 0,
+                 account_email: str = "") -> str:
+    """The platform sidebar (``<aside class="app-sidebar">``) plus
+    the mobile tap-to-close overlay.
 
-    ``current`` is the key of the page being rendered (or None when
-    the page is not a menu item — an error page, say): that item
-    renders as a non-clickable label, never a dead link. An empty
-    ``title`` renders no heading — the Live Ops page carries its own
-    title in the HUD.
+    ``current`` is the PLATFORM_ITEMS key of the page being rendered
+    (or None when the page is not a sidebar item): that item renders
+    as a non-clickable span, never a dead link. ``verified`` is the
+    account's verified-customer count toward the first 100.
+    ``pending_approvals`` badges the Approvals item (and the header
+    bell) when above zero. The operator sees the Admin group and
+    "Owner account — permanent" instead of the Manage Plan button.
     """
-    title_html = (f"<h1 class='v-title'>{esc(title)}</h1>"
-                  if title else "")
+    verified = max(0, int(verified))
+    pct = min(verified, 100)
     items = "".join(
-        _item_html(key, label, href, current)
-        for key, label, href in _CUSTOMER_ITEMS)
-    admin = ""
+        _nav_item_html(key, label, href, current,
+                       badge=(pending_approvals if key == "approvals"
+                              else 0))
+        for key, label, href in PLATFORM_ITEMS)
     if is_operator:
-        admin = ("<span class='v-group'>Admin</span>" + "".join(
-            _item_html(key, label, href, current)
-            for key, label, href in _ADMIN_ITEMS))
+        growth_action = ("<p class='growth-owner'>Owner account — "
+                         "permanent</p>")
+        admin = ("<span class='nav-group'>Admin</span>" + "".join(
+            _nav_item_html(key, label, href, current,
+                           icon_name=icon_name)
+            for (key, label, href), icon_name in zip(
+                _ADMIN_ITEMS,
+                ("admin", "customers", "user", "agents"))))
+    else:
+        growth_action = ("<a class='ghost-button' "
+                         "href='/account/subscribe'>Manage Plan</a>")
+        admin = ""
+    email_html = (f"<p class='sidebar-account'>{esc(account_email)}</p>"
+                  if account_email else "")
     return (
-        f"<header class='v-header'>"
-        f"<div class='v-bar'>"
-        f"<span class='v-bar-spacer' aria-hidden='true'></span>"
-        f"<a class='v-brand' href='/ops'>Ventoryn</a>"
-        f"<button class='v-burger' type='button' aria-expanded='false' "
-        f"aria-controls='v-menu' aria-label='Menu'>&#9776;</button>"
-        f"<nav class='v-menu' id='v-menu' aria-label='Ventoryn' hidden>"
-        f"{items}{admin}</nav>"
+        f"<aside class='app-sidebar' id='app-sidebar'>"
+        f"<a class='sidebar-brand' href='/ops'>"
+        f"<span class='brand-mark'>V</span> Ventoryn</a>"
+        f"<nav class='app-nav' aria-label='Platform'>{items}{admin}</nav>"
+        f"<div class='growth-plan'>"
+        f"<div class='growth-title'>Growth Plan</div>"
+        f"<p>Goal: First 100 Customers</p>"
+        f"<div class='growth-progress'><i style='width:{pct}%'></i></div>"
+        f"<strong>{verified} / 100</strong>"
+        f"{growth_action}</div>"
+        f"<div class='sidebar-foot'>"
+        f"<a class='nav-item' href='/account/logout'>"
+        f"{icon('arrow_right')}<span class='nav-label'>Sign out</span></a>"
+        f"{email_html}</div>"
+        f"</aside>"
+        f"<div class='sidebar-overlay' aria-hidden='true'></div>")
+
+
+def platform_head_html(title: str, subtitle: str = "", *,
+                       pending_approvals: int = 0) -> str:
+    """The app header: mobile sidebar toggle, page title + subtitle,
+    approvals bell (badged when there are pending approvals), and an
+    avatar button ("V") opening a dropdown with My account /
+    Subscribe / Sign out."""
+    subtitle_html = (f"<p>{esc(subtitle)}</p>" if subtitle else "")
+    badge_html = (f"<b class='header-badge'>{int(pending_approvals)}</b>"
+                  if pending_approvals > 0 else "")
+    return (
+        f"<header class='app-header'>"
+        f"<div class='app-page-head'>"
+        f"<button class='sidebar-toggle' type='button' aria-expanded='false' "
+        f"aria-controls='app-sidebar' aria-label='Open menu'>"
+        f"{icon('menu', 23)}</button>"
+        f"<div><h1>{esc(title)}</h1>{subtitle_html}</div>"
         f"</div>"
-        f"</header>{title_html}{HEADER_JS}")
+        f"<div class='app-header-actions'>"
+        f"<a class='notification' href='/approvals' aria-label='Approvals'>"
+        f"{icon('bell', 23)}{badge_html}</a>"
+        f"<div class='avatar-menu'>"
+        f"<button class='avatar' type='button' aria-haspopup='true' "
+        f"aria-expanded='false' aria-label='Account menu'>V</button>"
+        f"<div class='avatar-dropdown' hidden>"
+        f"<a href='/account/dashboard'>My account</a>"
+        f"<a href='/account/subscribe'>Subscribe</a>"
+        f"<a href='/account/logout'>Sign out</a>"
+        f"</div></div>"
+        f"</div>"
+        f"</header>")
+
+
+# ---------------------------------------------------------------------------
+# Admin-only header (no sidebar on admin pages).
+# ---------------------------------------------------------------------------
+
+ADMIN_HEADER_CSS = """
+/* Admin pages only: centered brand + page title + a plain link row
+   to the 4 admin pages. The admin board itself keeps its existing
+   Kay Ayiti / ShipItAyiti look (_ADMIN_CSS stays as-is). */
+.admin-head { background: var(--v-navy, #0b0e1e); color: #fff;
+  text-align: center; padding: 18px 20px 14px; }
+.admin-head .admin-brand { font-size: 22px; font-weight: 800; color: #fff;
+  text-decoration: none; letter-spacing: .02em; }
+.admin-head h1 { font-size: 20px; color: #fff; margin: 10px 0 8px; }
+.admin-links { display: flex; flex-wrap: wrap; gap: 4px 18px;
+  justify-content: center; font-size: 14px; }
+.admin-links a { color: #c4b5fd; text-decoration: none; min-height: 44px;
+  display: inline-flex; align-items: center; }
+.admin-links a:hover { color: #fff; }
+.admin-links .admin-current { color: #fff; font-weight: 700;
+  min-height: 44px; display: inline-flex; align-items: center; }
+"""
+
+
+def simple_header_html(title: str, current: str | None) -> str:
+    """The small centered header for admin pages only: brand + page
+    title + a plain link row to the 4 admin pages + Admin sign out.
+    The current admin page renders as a non-clickable label."""
+    links = []
+    for key, label, href in _ADMIN_ITEMS:
+        if key == current:
+            links.append(f"<span class='admin-current' "
+                         f"aria-current='page'>{esc(label)}</span>")
+        else:
+            links.append(f"<a href='{esc(href)}'>{esc(label)}</a>")
+    links.append("<a href='/admin/logout'>Admin sign out</a>")
+    return (
+        f"<header class='admin-head'>"
+        f"<a class='admin-brand' href='/admin'>Ventoryn</a>"
+        f"<h1>{esc(title)}</h1>"
+        f"<nav class='admin-links' aria-label='Admin'>"
+        f"{''.join(links)}</nav>"
+        f"</header>")

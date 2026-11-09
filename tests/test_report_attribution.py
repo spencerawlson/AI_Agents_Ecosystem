@@ -166,8 +166,8 @@ def test_report_structure_per_reference():
     # No estimated/projection line is ever drawn — the trend is real
     # data only.
     assert "does not show estimated data" in text
-    # The shared header, not the old pill nav.
-    assert "v-burger" in text
+    # The shared sidebar, not the old pill nav.
+    assert "class='app-sidebar'" in text
     assert "class='customer-nav'" not in text
 
 

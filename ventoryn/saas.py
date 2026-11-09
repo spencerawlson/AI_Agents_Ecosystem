@@ -1311,9 +1311,11 @@ class SaasStore:
         [{"date": "2026-11-01", "verified": 3}, ...] over the last
         `days` days. Real conversion dates only — a day with no
         verified sale carries the previous total, and an empty
-        account returns []."""
-        from datetime import date as _date
-        today = _date.today()
+        account returns []. Dates are UTC throughout: conversions
+        are timestamped in UTC (see `_now`), so "today" is the UTC
+        date, or a sale made after 19:00 EST would land in
+        tomorrow's bucket and the last point would read 0."""
+        today = _now().date()
         start = today - timedelta(days=days)
         by_day: dict[str, int] = {}
         for site_id in site_ids:

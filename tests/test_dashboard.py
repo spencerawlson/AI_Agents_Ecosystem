@@ -55,8 +55,8 @@ def test_dashboard():
     assert r.status_code == 200
     assert "Test Store" in r.text
     assert "$800.00" in r.text  # net profit
-    assert "/ops" in r.text  # Live Ops link, not the old "game" tag
-    assert "Live Ops" in r.text
+    assert "/ops" in r.text  # Overview link, not the old "game" tag
+    assert "Overview" in r.text  # the sidebar's Live Ops item
     assert "v-biz" in r.text  # colored cards, not a bare table
     assert "v-stat" in r.text
 
@@ -185,6 +185,10 @@ def test_game_view_is_live_ops():
         for old in ("🔭", "🔬", "🛠️", "🎨", "📣", "💬", "⚙️", "📒"):
             assert old not in roster
         assert "char-emoji" not in r.text
+        # The poll-error banner is neutral: /ops and /game share
+        # this file, and "game server" reads wrong on Live Ops.
+        assert "Can't reach the server" in r.text
+        assert "game server" not in r.text
 
 
 def test_api_snapshot_feeds_live_ops():

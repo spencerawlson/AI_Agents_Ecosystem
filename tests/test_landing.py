@@ -225,8 +225,8 @@ def test_ops_serves_for_a_signed_in_customer():
     r = client.get("/ops")
     assert r.status_code == 200
     assert "Ventoryn — Live Ops" in r.text
-    # The customer nav, not the old operator link paragraph.
-    assert "My Portfolio" in r.text
+    # The customer sidebar, not the old operator link paragraph.
+    assert "Overview" in r.text
     assert "My account" in r.text
     assert "Sign out" in r.text
     # The operator simulation controls are hidden for customers
@@ -556,19 +556,25 @@ def test_customer_nav_exact_and_no_removed_links():
                  "/account/dashboard"):
         r = client_a.get(path)
         assert r.status_code == 200
-        for item in ("Live Ops", "My Portfolio", "Approvals", "Report",
-                     "My account", "Subscribe", "Sign out"):
+        # The 9 sidebar items, plus Sign out at the bottom.
+        for item in ("Overview", "Campaigns", "Agents", "Approvals",
+                     "Attribution", "Analytics", "Integrations",
+                     "Customers", "Settings", "Sign out"):
             assert item in r.text, (path, item)
+        # My account + Subscribe live in the avatar dropdown.
+        assert "My account" in r.text, path
+        assert "Subscribe" in r.text, path
         for gone in ("Experiments", "Experiment 001", "Daily plan",
-                     "for website owners", "Back to portfolio"):
+                     "for website owners", "Back to portfolio",
+                     "Live Ops", "Report"):
             assert gone not in r.text, (path, gone)
-        # "Attribution" is a removed NAV item, but the word legitimately
-        # appears on the rebuilt report page itself (its title is
-        # "Acquisition & Attribution"). Check the menu only.
-        menu = r.text.split("<nav class='v-menu'")[1].split("</nav>")[0]
-        assert "Attribution" not in menu, path
+        # "Attribution" is a real nav item now — check the menu only.
+        menu = r.text.split("<aside class='app-sidebar'")[1].split(
+            "</aside>")[0]
+        assert "Attribution" in menu, path
         # The nav never links the old /game address.
         assert 'href="/game"' not in r.text
+        assert "href='/game'" not in r.text
 
 
 def test_no_back_to_portfolio_anywhere_signed_in():
