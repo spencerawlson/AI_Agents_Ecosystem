@@ -76,7 +76,10 @@ cmd_build() {
     local tag
     tag="$(git -C "$REPO" rev-parse --short HEAD)"
     say "Building $IMAGE:$tag (the running app is not touched)"
-    docker build --build-arg APP_UID="$(id -u)" --build-arg APP_GID="$(id -g)" \
+    # --network host: on this Fedora host firewalld does not forward
+    # Docker's bridge network, so build steps could not reach Debian/PyPI.
+    docker build --network host \
+        --build-arg APP_UID="$(id -u)" --build-arg APP_GID="$(id -g)" \
         -t "$IMAGE:$tag" -t "$IMAGE:latest" "$REPO"
 }
 
