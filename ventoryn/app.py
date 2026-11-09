@@ -1257,7 +1257,9 @@ section.alt { background: var(--bg-tint); }
                             "which efforts turn into paying customers."),
             "offers": {"@type": "Offer", "price": "20",
                        "priceCurrency": "USD",
-                       "description": "$20/month, 100 credits per month"},
+                       "description": (f"$20/month, "
+                                       f"{_saas_config.monthly_credits:,} "
+                                       f"credits per month")},
             "url": _saas_config.base_url,
         })
         return f"""<!DOCTYPE html>
@@ -1499,7 +1501,7 @@ customers.</p>
 <p><span class="big">$20</span> / month</p>
 <ul>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your websites on Ventoryn</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>100 credits every month</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>{_saas_config.monthly_credits:,} credits every month</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A growth report per site</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Agents working daily toward your first 100 paying customers</li>
 </ul>

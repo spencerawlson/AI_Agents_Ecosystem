@@ -170,7 +170,8 @@ def test_features_attribution_differentiation_who():
 def test_pricing_from_verified_stripe_data():
     r = _landing()
     assert "$20/month" in r.text
-    assert "100 credits" in r.text
+    # The default monthly allowance (SAAS_MONTHLY_CREDITS overrides).
+    assert "1,000 credits" in r.text
     for row in ("Analyze", "GEO audit", "Community listening",
                 "Social report", "SEO article", "Video render"):
         assert row in r.text

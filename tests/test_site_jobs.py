@@ -167,3 +167,10 @@ def test_another_accounts_site_cannot_run_jobs(env):
     theirs = store.create_site(other["id"], "https://bob.example.com")
     r = _post(client, theirs, job_type="geo_audit")
     assert r.status_code == 404
+
+
+def test_monthly_allowance_is_1000_by_default():
+    from ventoryn.saas import SaasConfig
+    assert SaasConfig().monthly_credits == 1000
+    assert SaasConfig.from_env({}).monthly_credits == 1000
+    assert SaasConfig.from_env({"SAAS_MONTHLY_CREDITS": "250"}).monthly_credits == 250
