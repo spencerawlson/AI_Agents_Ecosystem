@@ -88,7 +88,7 @@ PLAN_PRICE_LABEL = "$20/month"
 #: Starting monthly credit allowance for the $20 plan. Configurable via
 #: SAAS_MONTHLY_CREDITS; this default is a starting number for Spencer
 #: to change, not a researched price point.
-MONTHLY_CREDIT_ALLOWANCE_DEFAULT = 100
+MONTHLY_CREDIT_ALLOWANCE_DEFAULT = 1000
 
 #: What one run of each kind of agent work costs, in credits. This is
 #: the starting table Spencer can change. Only "analyze" is runnable

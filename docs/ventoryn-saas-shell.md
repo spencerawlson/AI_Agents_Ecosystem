@@ -14,7 +14,7 @@ paying customers. The proof case is Road to CISSP (road2cissp.com).
   findings), an SVG dashboard preview (illustrative demo data, clearly
   labeled), the 5-step How It Works, six feature sections, the
   attribution explainer, differentiation, who-it's-for, pricing from
-  the verified Stripe data ($20/month, 100 credits), 10 FAQs, and a
+  the verified Stripe data ($20/month, 1,000 credits), 10 FAQs, and a
   dark final CTA. No sign-in needed to read it; it shows no internal
   data and links to no operator page. Every graphic is vector (inline
   SVG); there is no og-image (a bitmap would break the vector-only
@@ -202,7 +202,7 @@ reads those two endpoints, so it needs an operator session.)
 | SEO article draft | 10 credits | Coming soon |
 | Video render (script → MP4 + SRT) | 15 credits | Coming soon |
 
-Monthly allowance for the $20 plan: **100 credits** by default,
+Monthly allowance for the $20 plan: **1,000 credits** by default,
 configurable with `SAAS_MONTHLY_CREDITS`. The allowance is granted when
 a subscription starts and again on each renewal invoice.
 
@@ -257,7 +257,7 @@ GOOGLE_CLIENT_SECRET=...
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
 STRIPE_PRICE_ID=price_...
-SAAS_MONTHLY_CREDITS=100        # optional, default 100
+SAAS_MONTHLY_CREDITS=1000       # optional, default 1000
 SAAS_BASE_URL=https://ventoryn.app   # default http://localhost:8000
 SAAS_COOKIE_SECURE=1            # set to 1 when serving over HTTPS
 SAAS_OPERATOR_EMAIL=you@example.com  # the operator's Google email —
@@ -375,8 +375,8 @@ like the rest of the runtime.
   wants link previews to carry an image, that is his call — adding
   one means a bitmap file.
 - The **$20/month** price is set. The monthly credit allowance default
-  (100) is a starting number — change `SAAS_MONTHLY_CREDITS` if 100 is
-  wrong.
+  is 1,000 (raised from 100 on 2026-11-09) — `SAAS_MONTHLY_CREDITS`
+  overrides it per server.
 - **Where the service runs / its public host.** The redirect URI and
   the webhook URL both depend on it, and hosting is undecided.
 - Reddit/X posting: the connection records exist and honestly say "not
