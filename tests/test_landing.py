@@ -224,7 +224,7 @@ def test_ops_serves_for_a_signed_in_customer():
     client, _account = _customer_client(app, store, CUSTOMER_A)
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Live Ops — Ventoryn" in r.text
+    assert "Overview — Ventoryn" in r.text
     # The customer sidebar, not the old operator link paragraph.
     assert "Overview" in r.text
     assert "My account" in r.text
@@ -559,21 +559,22 @@ def test_customer_nav_exact_and_no_removed_links():
         r = client_a.get(path)
         assert r.status_code == 200
         # The 9 sidebar items, plus Sign out at the bottom.
-        for item in ("Overview", "Campaigns", "Agents", "Approvals",
-                     "Attribution", "Analytics", "Integrations",
-                     "Customers", "Settings", "Sign out"):
+        for item in ("Overview", "Websites", "Campaigns", "Approvals",
+                     "Agents", "Analytics", "Customers", "Integrations",
+                     "My account", "Sign out"):
             assert item in r.text, (path, item)
-        # My account + Subscribe live in the avatar dropdown.
+        # My account + Subscribe live in the avatar dropdown too.
         assert "My account" in r.text, path
         assert "Subscribe" in r.text, path
         for gone in ("Experiments", "Experiment 001", "Daily plan",
                      "for website owners", "Back to portfolio",
                      "Live Ops", "Report"):
             assert gone not in r.text, (path, gone)
-        # "Attribution" is a real nav item now — check the menu only.
+        # "Attribution" is a deep link under Analytics now — it is
+        # not a sidebar item. Check the menu only.
         menu = r.text.split("<aside class='app-sidebar'")[1].split(
             "</aside>")[0]
-        assert "Attribution" in menu, path
+        assert "Attribution" not in menu, path
         # The nav never links the old /game address.
         assert 'href="/game"' not in r.text
         assert "href='/game'" not in r.text

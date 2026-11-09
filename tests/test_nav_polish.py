@@ -131,12 +131,12 @@ def test_sidebar_items_per_role():
     app, store = _app_with()
     client_a, _a = _customer_client(app, store, CUSTOMER_A)
     r = client_a.get("/portfolio")
-    for item in ("Overview", "Campaigns", "Agents", "Approvals",
-                 "Attribution", "Analytics", "Integrations",
-                 "Customers", "Settings", "Sign out"):
+    for item in ("Overview", "Websites", "Campaigns", "Approvals",
+                 "Agents", "Analytics", "Customers", "Integrations",
+                 "My account", "Sign out"):
         assert item in r.text, item
-    # My account + Subscribe live in the avatar dropdown, not the
-    # sidebar — but they are still one tap away.
+    # My account + Subscribe live in the avatar dropdown too — but
+    # My account is a sidebar item now as well.
     assert "My account" in r.text
     assert "Subscribe" in r.text
     # A customer never sees the Admin group.
@@ -145,13 +145,13 @@ def test_sidebar_items_per_role():
 
     client_op, _op = _operator_client(app, store)
     r = client_op.get("/portfolio")
-    for item in ("Overview", "Campaigns", "Agents", "Approvals",
-                 "Attribution", "Analytics", "Integrations",
-                 "Customers", "Settings", "Sign out"):
+    for item in ("Overview", "Websites", "Campaigns", "Approvals",
+                 "Agents", "Analytics", "Customers", "Integrations",
+                 "My account", "Sign out"):
         assert item in r.text, item
     # The operator gets the Admin group on top of the customer menu.
     assert "<span class='nav-group'>Admin</span>" in r.text
-    for item in ("Live", "Subscribers", "Accounts", "Agents"):
+    for item in ("Live", "Subscribers", "Accounts", "Agent activity"):
         assert item in r.text, item
     assert "/admin/subscribers" in r.text
     assert "/admin/accounts" in r.text
@@ -166,14 +166,14 @@ def test_current_page_is_not_a_clickable_menu_option():
             ("/campaigns", "/campaigns", "Campaigns"),
             ("/agents", "/agents", "Agents"),
             ("/approvals", "/approvals", "Approvals"),
-            ("/report", "/report", "Attribution"),
+            # /report is a deep link under Analytics.
+            ("/report", "/analytics", "Analytics"),
             ("/analytics", "/analytics", "Analytics"),
             ("/integrations", "/integrations", "Integrations"),
             ("/customers", "/customers", "Customers"),
-            ("/account/dashboard", "/account/dashboard", "Settings"),
-            # /portfolio maps to the Overview item (it is a site list,
-            # not a sidebar item of its own).
-            ("/portfolio", "/ops", "Overview")):
+            ("/account/dashboard", "/account/dashboard", "My account"),
+            # /portfolio is the Websites item now.
+            ("/portfolio", "/portfolio", "Websites")):
         r = client_a.get(path)
         assert r.status_code == 200, path
         # The current page is a label, never a link to itself.
@@ -392,7 +392,7 @@ def test_admin_live_list_shows_recent_hides_stale():
     # A is on the site right now (any authenticated request stamps
     # the last-seen); B was last seen 10 minutes ago — stale.
     client_a.get("/ops")
-    store.touch_activity(account_b["id"], "Live Ops")
+    store.touch_activity(account_b["id"], "Overview")
     stale = (datetime.now(timezone.utc) - timedelta(minutes=10))
     with store._lock:
         store._conn.execute(
@@ -406,7 +406,7 @@ def test_admin_live_list_shows_recent_hides_stale():
     assert "active in the last 5 minutes" in r.text
     assert "ada@example.com" in r.text
     assert "ben@example.com" not in r.text
-    assert "Live Ops" in r.text  # A's last action
+    assert "Overview" in r.text  # A's last action
 
 
 def test_admin_recent_activity_feed_lists_real_events():

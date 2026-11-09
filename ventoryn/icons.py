@@ -104,8 +104,23 @@ _PATHS: dict[str, str] = {
         '<path d="M3 12h18"/>'
         '<path d="M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/>'
     ),
+    # Websites (sidebar): the same globe as "globe" — a site's
+    # world. "my-account" is the user icon under its sidebar name.
+    "websites": (
+        '<circle cx="12" cy="12" r="9"/>'
+        '<path d="M3 12h18"/>'
+        '<path d="M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/>'
+    ),
+    "my-account": (
+        '<circle cx="12" cy="8" r="4"/>'
+        '<path d="M4.5 21c.8-3.8 3.8-6 7.5-6s6.7 2.2 7.5 6"/>'
+    ),
     "chevron_down": '<path d="M6 9.5l6 6 6-6"/>',
     "play": '<path d="M8 5.5v13l11-6.5-11-6.5z"/>',
+    # Pause (the Overview header pill): two bars. "play" is reused
+    # for the pill's resume state, so the narrow-screen icon alone
+    # still says which way the toggle goes.
+    "pause": '<path d="M9 5v14M15 5v14"/>',
     "layers": (
         '<path d="M12 3l9 5-9 5-9-5 9-5z"/>'
         '<path d="M3 13l9 5 9-5"/>'

@@ -3,11 +3,13 @@ mobile crew carousel.
 
 The panel runs the same pipeline as the `analyze` CLI, in a background
 job: POST /api/analyze starts it, the page polls GET for the result,
-and the report is written to reports/analyze_<host>_<date>.md exactly
-like the CLI writes it. Nothing is published or posted anywhere. No
-network anywhere here — every fetch is fake, except the URL validator's
-best-effort DNS check (capped at 3s, and a failed lookup just lets the
-fetch report honestly).
+and the page shows the summary (site score, GEO score, top findings).
+The preview endpoint NEVER writes the full report file and never
+exposes one — the full report comes only from the paid Analyze job
+on a website page (5 credits). Nothing is published or posted
+anywhere. No network anywhere here — every fetch is fake, except the
+URL validator's best-effort DNS check (capped at 3s, and a failed
+lookup just lets the fetch report honestly).
 """
 
 import sys
@@ -181,6 +183,12 @@ def test_analyze_unknown_job_is_404(client):
 # -- Endpoint: job lifecycle (fake runner, no network) ------------------------
 
 def test_analyze_job_lifecycle(client, tmp_path, monkeypatch):
+    """A preview job runs the pipeline and returns the summary — but
+    never a report: no report_url, no report file, and the report
+    endpoint 404s. The full report comes only from the paid Analyze
+    job (see test_saas_shell.test_job_analyze_charges_and_reports).
+    The fake runner returns a report_name on purpose, to prove the
+    preview strips it rather than trusting the runner."""
     from ventoryn.reports import reports_dir
 
     report_name = "analyze_example-com_20261108.md"
@@ -214,13 +222,12 @@ def test_analyze_job_lifecycle(client, tmp_path, monkeypatch):
     assert job["result"]["site_score"] == 88
     assert job["result"]["geo_score"] == 71
     assert job["result"]["findings"][0]["issue"] == "a page is thin"
-    assert job["report_url"] == f"/api/analyze/{started['job_id']}/report"
-
-    r = client.get(job["report_url"])
-    assert r.status_code == 200
-    assert "Site score: **88/100**" in r.text
-    assert "GEO score: **71/100**" in r.text
-    assert (tmp_path / "reports" / report_name).is_file()
+    # Preview: no report, even though the runner returned one.
+    assert job["result"].get("report_name") is None
+    assert "report_url" not in job
+    assert job.get("report_name") is None
+    r = client.get(f"/api/analyze/{started['job_id']}/report")
+    assert r.status_code == 404
 
 
 def test_analyze_failed_runner_reports_failed(client):
@@ -238,9 +245,12 @@ def test_analyze_failed_runner_reports_failed(client):
 
 # -- Endpoint: real pipeline (fake fetches), real report file -----------------
 
-def test_analyze_real_pipeline_writes_report(client, tmp_path, monkeypatch):
-    """The default runner runs the CLI's pipeline in-process and writes
-    the same report file the CLI writes — both scores in the file."""
+def test_analyze_real_pipeline_writes_no_report(client, tmp_path, monkeypatch):
+    """The default runner runs the CLI's pipeline in-process — but a
+    preview job writes NO report file: the scores and findings come
+    back in the summary only, there is no report_url, and the report
+    endpoint 404s. The full report file is written only by the paid
+    Analyze job (test_saas_shell.test_job_analyze_charges_and_reports)."""
     monkeypatch.setattr(analyze, "http_fetch", _fake_fetch)
     r = client.post("/api/analyze",
                     json={"url": SITE, "country": "ca", "language": "en"})
@@ -249,17 +259,11 @@ def test_analyze_real_pipeline_writes_report(client, tmp_path, monkeypatch):
     assert job["status"] == "done", job.get("error")
     assert isinstance(job["result"]["site_score"], int)
     assert isinstance(job["result"]["geo_score"], int)
+    assert "report_url" not in job
     reports = list((tmp_path / "reports").glob("analyze_*.md"))
-    assert len(reports) == 1
-    assert "example-com" in reports[0].name
-    text = reports[0].read_text(encoding="utf-8")
-    assert "Site score: **" in text
-    assert "GEO score: **" in text
-    assert "no auto-publish" in text
-    assert "everything here is a draft for the owner to act on" in text
-    r = client.get(job["report_url"])
-    assert r.status_code == 200
-    assert "Site score: **" in r.text
+    assert reports == []
+    r = client.get(f"/api/analyze/{job['job_id']}/report")
+    assert r.status_code == 404
 
 
 def test_analyze_unreachable_site_has_no_scores(client, monkeypatch):
@@ -280,15 +284,15 @@ def test_analyze_unreachable_site_has_no_scores(client, monkeypatch):
 # -- No-publish guard ----------------------------------------------------------
 
 def test_analyze_publishes_nothing(client, tmp_path, monkeypatch):
-    """The job's only output is the local report file: no other file
-    appears, and the panel says so on the page."""
+    """The job's only output is the on-page summary: no report file
+    appears anywhere (the preview never writes one), and the panel
+    says nothing is published."""
     monkeypatch.setattr(analyze, "http_fetch", _fake_fetch)
     r = client.post("/api/analyze", json={"url": SITE, "country": "ca"})
     job = _poll_until_done(client, r.json()["job_id"], timeout=15.0)
     assert job["status"] == "done"
     written = [p for p in (tmp_path / "reports").rglob("*") if p.is_file()]
-    assert len(written) == 1
-    assert written[0].suffix == ".md"
+    assert written == []
 
     page = client.get("/ops")
     assert "Nothing is published" in page.text

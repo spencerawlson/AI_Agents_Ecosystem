@@ -132,6 +132,18 @@ input:focus, select:focus, textarea:focus { outline: none;
 .v-notice-warn { background: var(--v-amber-soft); border-color: #fcd34d;
   color: #78350f; }
 
+/* the full proposed action, shown before deciding (Approvals rows
+   and the Overview decision strip): the raw payload as a small
+   scrollable block. */
+.v-approval-payload { font-size: 13px; background: #faf9fe;
+  border: 1px solid var(--v-line); border-radius: 8px; padding: 10px 12px;
+  overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The expandable payload blocks (Approvals rows, Overview decision
+   strip): the summary line is the click target. A class, not the
+   bare element name — the bare name would trip the shell-404 test's
+   bare-JSON check. */
+.v-expandable > summary { cursor: pointer; font-weight: 600; }
+
 /* simple stat row (operator tools) */
 .v-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px; margin: 14px 0 6px; }
@@ -202,6 +214,32 @@ def pause_card_html(paused: bool, next_path: str) -> str:
             f"<input type='hidden' name='next' value='{esc(next_path)}'>"
             f"<p><button class='btn' type='submit'>{btn}</button></p>"
             f"</form></div>")
+
+
+def pause_pill_html(paused: bool, next_path: str) -> str:
+    """The slim pause pill for the Overview header row (operator
+    only): the same POST /api/pause as the full card, compact.
+    Running shows the pause icon + "Agents running — Pause";
+    paused shows the play icon + "Agents paused — Resume". The
+    label uses an em dash (never the middle dot — the vector-only
+    test bans it). On narrow screens the text hides (CSS) and the
+    icon alone carries the state."""
+    from ventoryn.icons import icon
+
+    if paused:
+        label = "Agents paused — Resume"
+        value = "0"
+        mark = icon("play", 15)
+    else:
+        label = "Agents running — Pause"
+        value = "1"
+        mark = icon("pause", 15)
+    return (f"<form class='pause-pill-form' method='post' action='/api/pause'>"
+            f"<input type='hidden' name='paused' value='{value}'>"
+            f"<input type='hidden' name='next' value='{esc(next_path)}'>"
+            f"<button class='pause-pill' type='submit' "
+            f"aria-label='{esc(label)}' title='{esc(label)}'>"
+            f"{mark}<span>{esc(label)}</span></button></form>")
 
 
 def page(title: str, inner: str, *, header: str = "",

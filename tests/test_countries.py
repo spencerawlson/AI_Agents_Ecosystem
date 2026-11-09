@@ -115,8 +115,12 @@ def test_landing_and_ops_and_site_add_carry_the_full_selector():
 
 
 def test_analyze_accepts_a_spread_of_codes_end_to_end():
-    app, _store = _app_with()
+    # Signed in on purpose: the anonymous preview is rate-limited
+    # to 5 per IP per hour, and this test starts six — signing in
+    # exercises the same country validation without the limit.
+    app, store = _app_with()
     client = TestClient(app)
+    sign_in(client, store)
     for code in ("ht", "br", "ng", "jp", "fr", "us"):
         r = client.post("/api/analyze",
                         json={"url": "https://example.com",

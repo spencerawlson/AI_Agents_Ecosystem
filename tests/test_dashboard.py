@@ -162,7 +162,7 @@ def test_game_redirects_to_live_ops():
     assert r.headers["location"] == "/ops"
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Live Ops — Ventoryn" in r.text
+    assert "Overview — Ventoryn" in r.text
     assert "Live game view" not in r.text
     assert "Your crew" not in r.text
     assert "What the team is doing" not in r.text
@@ -298,7 +298,7 @@ def test_live_ops_is_ventoryn_and_professional():
         registry=BusinessRegistry(), ledger=Ledger())
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Live Ops — Ventoryn" in r.text
+    assert "Overview — Ventoryn" in r.text
     assert "Ecosystem Tycoon" not in r.text
     assert "Your crew" not in r.text
     assert "scroll-snap-type: x mandatory" not in r.text

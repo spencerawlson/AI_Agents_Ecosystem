@@ -36,9 +36,9 @@ NEW_PAGES = ("/campaigns", "/agents", "/analytics",
              "/integrations", "/customers")
 SIDEBAR_PAGES = ("/ops", "/portfolio", "/approvals", "/report",
                  "/account/dashboard", "/account/subscribe") + NEW_PAGES
-SIDEBAR_ITEMS = ("Overview", "Campaigns", "Agents", "Approvals",
-                 "Attribution", "Analytics", "Integrations",
-                 "Customers", "Settings")
+SIDEBAR_ITEMS = ("Overview", "Websites", "Campaigns", "Approvals",
+                 "Agents", "Analytics", "Customers", "Integrations",
+                 "My account")
 # Font-glyph arrows / icon glyphs / emoji that must never appear in
 # server-rendered platform HTML (the "92" bug came from \2192).
 BANNED_GLYPHS = ("→", "←", "✓", "☰", "🔍", "·", "»", "▸", "⌄",
@@ -105,10 +105,10 @@ def test_sidebar_all_nine_items_on_every_signed_in_page():
                 assert item in aside, (path, item)
             # The current page (when it is a sidebar item) is a
             # non-clickable span, never a dead link. /portfolio maps
-            # to Overview; /account/subscribe is not a sidebar
-            # item, so nothing is marked current there.
-            assert "aria-current='page'" in aside or path in (
-                "/account/subscribe",), path
+            # to Websites; /report is a deep link under Analytics;
+            # /account/dashboard and /account/subscribe map to
+            # My account — every page here has a current item.
+            assert "aria-current='page'" in aside, path
     # The operator's /report renders through the platform shell too
     # (step 4 of the unification): sidebar, no pill nav.
     op_client, _op = _operator_client(app, store)
@@ -288,11 +288,15 @@ def test_ops_overview_real_empty_state():
     assert r.status_code == 200
     assert "class='app-sidebar'" in r.text
     # The Overview cards are present with real (empty) numbers.
+    # "Conversion breakdown" is NOT here any more — the merged
+    # Results section's donut already is the breakdown, so the
+    # duplicate card went (it still lives on /report).
     for label in ("Verified", "Pending", "Unattributed",
                   "Attribution flow", "Conversion status",
                   "Campaign performance", "Acquisition trend",
-                  "Conversion breakdown"):
+                  "Results"):
         assert label in r.text, label
+    assert "Conversion breakdown" not in r.text
     # No crew on Overview: agents live only on /agents.
     assert "Your crew" not in r.text
     assert "No signed campaigns yet" in r.text

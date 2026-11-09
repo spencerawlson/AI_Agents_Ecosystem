@@ -1,9 +1,14 @@
 # AI Agents Ecosystem — systemd user service (Fedora / Proxmox VM)
 #
+# NOTE: the live FedServ deployment does NOT run through this unit —
+# it runs the dashboard with a manual `python launch.py all` from
+# ~/Projects/AI_Agents_Ecosystem. This file is the template for a
+# systemd-managed install; the paths below already match that
+# checkout — edit them if yours differs.
+#
 # Install:
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/ecosystem.service ~/.config/systemd/user/
-#   # edit WorkingDirectory/ExecStart below to match your checkout path
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now ecosystem.service
 #   # keep it running after logout (headless VM):
@@ -15,7 +20,7 @@
 #   systemctl --user restart ecosystem.service
 #
 # With Postgres (optional):
-#   cd ~/AI_Agents_Ecosystem && docker compose -f infra/docker-compose.yml up -d
+#   cd ~/Projects/AI_Agents_Ecosystem && docker compose -f infra/docker-compose.yml up -d
 #   systemctl --user set-environment DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
 #   # then add --use-postgres to ExecStart below
 
@@ -26,13 +31,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/AI_Agents_Ecosystem
-ExecStart=%h/AI_Agents_Ecosystem/.venv/bin/python launch.py all
+WorkingDirectory=%h/Projects/AI_Agents_Ecosystem
+ExecStart=%h/Projects/AI_Agents_Ecosystem/.venv/bin/python launch.py all
 Restart=always
 RestartSec=10
 # Uncomment for Postgres persistence instead of the in-memory store:
 # Environment=DATABASE_URL=postgresql://ecosystem:ecosystem@localhost:5432/ecosystem
-# ExecStart=%h/AI_Agents_Ecosystem/.venv/bin/python launch.py all --use-postgres
+# ExecStart=%h/Projects/AI_Agents_Ecosystem/.venv/bin/python launch.py all --use-postgres
 
 [Install]
 WantedBy=default.target

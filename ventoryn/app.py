@@ -380,13 +380,13 @@ def create_app(
 
     def _activity_label(path: str) -> str:
         """What the admin's "Live now" list shows as the last action
-        for a request path. Live Ops and /api/snapshot (the
-        Overview's data source, read by DJINN too) count as Live
-        Ops — that is how an open page stays live."""
+        for a request path. Overview and /api/snapshot (the
+        Overview's data source, read by DJINN too) count as
+        Overview — that is how an open page stays live."""
         if path in ("/ops", "/game", "/api/snapshot"):
-            return "Live Ops"
+            return "Overview"
         if path.startswith("/portfolio"):
-            return "Portfolio"
+            return "Websites"
         if path.startswith("/campaigns"):
             return "Campaigns"
         if path.startswith("/agents"):
@@ -566,7 +566,9 @@ def create_app(
 .v-biz dt { color: var(--v-muted); }
 .v-biz dd { margin: 0; font-weight: 700; text-align: right;
   font-variant-numeric: tabular-nums; }
-/* Analyze box (Overview, Portfolio, Businesses): the same URL +
+.v-biz-extra { margin: 12px 0 0; font-size: 14px;
+  border-top: 1px solid var(--v-line); padding-top: 12px; }
+/* Analyze box (Overview only — its one home): the same URL +
    market-country form as the landing page's free preview, in
    platform card styling. Nothing is published; the report is
    saved locally and shown here. */
@@ -647,6 +649,11 @@ def create_app(
 .v-report-grid { display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 16px; margin: 16px 0; }
 .v-report-grid .card { margin: 0; }
+/* The merged Results section on Overview: donut + campaign table
+   side by side in one card, stacking on narrow screens. */
+.v-results-pair { display: grid; grid-template-columns: 1fr 1fr;
+  gap: 16px; margin: 16px 0; }
+@media (max-width: 760px) { .v-results-pair { grid-template-columns: 1fr; } }
 .v-progress { text-align: center; }
 .v-bar-track { height: 12px; background: var(--v-violet-soft);
   border-radius: 999px; overflow: hidden; margin: 12px 0; }
@@ -745,18 +752,19 @@ def create_app(
 """
 
     # Old _operator_page "current" keys -> platform sidebar keys.
-    # /portfolio + /businesses are the overview's site lists, so
-    # Overview is active there; /reports is the attribution
-    # archive, so Attribution is active there. /experiments +
-    # /experiment-001 are direct-URL-only operator tools: they
-    # deliberately get the sidebar with nothing active (no sidebar
-    # item for them), and that is by design, not an oversight.
+    # /portfolio is Websites (its own item); /businesses is
+    # reachable from Websites, so it deliberately gets the sidebar
+    # with nothing active, and so does /reports (reachable from
+    # Analytics). /report is a deep link under Analytics, not a
+    # sidebar item. /experiments + /experiment-001 are direct-URL
+    # operator tools: nothing active there by design, not an
+    # oversight.
     _PLATFORM_CURRENT = {
-        "live-ops": "overview", "portfolio": "overview",
-        "businesses": "overview",
-        "approvals": "approvals", "reports": "attribution",
-        "report": "attribution",
-        "experiments": None, "experiment-001": None, "account": "settings",
+        "live-ops": "overview", "portfolio": "websites",
+        "businesses": None,
+        "approvals": "approvals", "reports": None,
+        "report": "analytics",
+        "experiments": None, "experiment-001": None, "account": "my-account",
         "campaigns": "campaigns", "agents": "agents",
         "analytics": "analytics", "integrations": "integrations",
         "customers": "customers",
@@ -792,7 +800,14 @@ def create_app(
             platform_current, is_operator, verified=verified,
             pending_approvals=pending,
             account_email=account.get("email", ""))
-        head = platform_head_html(title, pending_approvals=pending)
+        # The slim pause pill in the header row, Overview only,
+        # operator only: the full Pause card lives in My account.
+        pause_pill = ""
+        if current == "live-ops" and is_operator:
+            pause_pill = ui.pause_pill_html(
+                _saas_store.get_global_pause(), "/ops")
+        head = platform_head_html(title, pending_approvals=pending,
+                                  pause_pill=pause_pill)
         return ui.page(title, inner, sidebar=sidebar, page_head=head,
                        extra_css=extra_css)
 
@@ -1696,17 +1711,22 @@ if (demoToggle && demoValue) {{
         """Public front door — no sign-in, no internal data."""
         return _landing_page(_current_account(request))
 
-    # -- My Portfolio: the account's own sites/businesses ---------------
-    # Styled like Live Ops (stat cards + a styled list), not the bare
+    # -- Websites: the account's own sites/businesses -----------------
+    # Styled like Overview (stat cards + a styled list), not the bare
     # table it used to be. The operator sees his registry businesses
     # plus his own SaaS sites; a customer sees only their sites.
+    # The page is "Websites" (renamed from "My Portfolio") and the
+    # analyze box has exactly one home — Overview — so it does not
+    # live here. Registry businesses stay as a clearly-labeled
+    # second group, "Operator businesses".
     @app.get("/portfolio", response_class=HTMLResponse)
     def portfolio(request: Request):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
-        biz_rows = ([_biz_row(b) for b in _visible_businesses(account)]
-                    + _site_business_rows(account))
+        reg_rows = [_biz_row(b) for b in _visible_businesses(account)]
+        site_rows = _site_business_rows(account)
+        biz_rows = reg_rows + site_rows
 
         def _money(value):
             return "hidden" if value is None else money(value)
@@ -1715,27 +1735,38 @@ if (demoToggle && demoValue) {{
                             if r["revenue"] is not None)
         total_profit = sum(r["net_profit"] for r in biz_rows
                            if r["net_profit"] is not None)
-        cards = "".join(
-            f"<article class='v-biz v-accent-{i % 4}'>"
-            f"<h3>{esc(r['name'])}</h3>"
-            f"<p class='v-biz-url'>{esc(r['business_type'])} · "
-            f"{esc(r['status'])}"
-            + (" · <a class='pill' href='/businesses'>Unclaimed — claim"
-               "</a>" if r.get("owner_email", "x") is None else "")
-            + f"</p>"
-            f"<dl><dt>Revenue</dt><dd>{_money(r['revenue'])}</dd>"
-            f"<dt>Costs</dt><dd>{money(r['total_costs'])}</dd>"
-            f"<dt>Net profit</dt><dd>{_money(r['net_profit'])}</dd></dl>"
-            f"</article>"
-            for i, r in enumerate(biz_rows)) or (
-            "<div class='card'><p>No websites yet. "
-            "<a href='/account/sites/new'>Add your first website</a> — "
-            "Ventoryn works to bring it its first 100 paying "
-            "customers.</p></div>")
+
+        def _cards(rows) -> str:
+            return "".join(
+                f"<article class='v-biz v-accent-{i % 4}'>"
+                f"<h3>{esc(r['name'])}</h3>"
+                f"<p class='v-biz-url'>{esc(r['business_type'])} · "
+                f"{esc(r['status'])}"
+                + (" · <a class='pill' href='/businesses'>Unclaimed — claim"
+                   "</a>" if r.get("owner_email", "x") is None else "")
+                + f"</p>"
+                f"<dl><dt>Revenue</dt><dd>{_money(r['revenue'])}</dd>"
+                f"<dt>Costs</dt><dd>{money(r['total_costs'])}</dd>"
+                f"<dt>Net profit</dt><dd>{_money(r['net_profit'])}</dd></dl>"
+                f"</article>"
+                for i, r in enumerate(rows)) or (
+                "<div class='card'><p>No websites yet. "
+                "<a href='/account/sites/new'>Add your first website</a> — "
+                "Ventoryn works to bring it its first 100 paying "
+                "customers.</p></div>")
         hidden_note = ("<p class='muted'>Revenue from a site whose "
                        "revenue display is off is not included in these "
                        "totals — the site shows &quot;hidden&quot; instead.</p>"
                        if any_hidden else "")
+        # Registry businesses are a second, clearly-labeled group —
+        # never mixed into the customer's own websites.
+        reg_group = ""
+        if reg_rows:
+            reg_group = (f"<h2>Operator businesses</h2>"
+                         f"<p class='muted'>Registry businesses managed "
+                         f"from this account. "
+                         f"<a href='/businesses'>View all businesses</a></p>"
+                         f"<div class='v-biz-grid'>{_cards(reg_rows)}</div>")
         inner = f"""<div class='v-stats'>
 <div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>
 <span class='v-stat-value'>{len(biz_rows)}</span></div>
@@ -1746,11 +1777,12 @@ if (demoToggle && demoValue) {{
 <p class='muted'>Costs per website read $0 here: the site's own costs
 are its credits, and credits are not dollars. Revenue is real — the
 sum of recorded paying customers per site.</p>{hidden_note}
-{_analyze_box_html()}
 <p><a class='btn' href='/account/sites/new'>Add a website</a></p>
-<div class='v-biz-grid'>{cards}</div>"""
+<h2>Your websites</h2>
+<div class='v-biz-grid'>{_cards(site_rows)}</div>
+{reg_group}"""
         return _operator_page(
-            "My Portfolio", inner, account=account, current="portfolio",
+            "Websites", inner, account=account, current="portfolio",
             is_operator=_saas_config.is_operator(account["email"]),
             extra_css=_PORTFOLIO_CSS)
 
@@ -1783,9 +1815,9 @@ sum of recorded paying customers per site.</p>{hidden_note}
                 f"account ({esc(account['email'])}). Only the owning "
                 f"account sees a business, its approvals and its "
                 f"data.</div>" if unclaimed else "")
-        inner = f"""{note}{_analyze_box_html()}<div class="table-wrap"><table>
+        inner = f"""{note}<div class="table-wrap"><table>
 <tr><th>Name</th><th>Type</th><th>Status</th><th class="num">Net profit</th><th>Owner</th></tr>{rows}</table></div>
-<a class="v-back" href="/portfolio">{icon('arrow_left', 15)} My Portfolio</a>"""
+<a class="v-back" href="/portfolio">{icon('arrow_left', 15)} Websites</a>"""
         return _operator_page(f"Businesses ({len(businesses)})", inner,
                               account=account, current="businesses",
                               is_operator=True)
@@ -1849,9 +1881,26 @@ sum of recorded paying customers per site.</p>{hidden_note}
         ) or "<tr><td colspan='4' class='muted'>No experiments yet.</td></tr>"
         inner = f"""<div class="table-wrap"><table>
 <tr><th>ID</th><th>Business</th><th>Status</th><th>Recommendation</th></tr>
-{rows}</table></div><a class="v-back" href="/ops">{icon('arrow_left', 15)} Live Ops</a>"""
+{rows}</table></div><a class="v-back" href="/ops">{icon('arrow_left', 15)} Overview</a>"""
         return _operator_page("Experiments", inner, account=account,
                               current=None, is_operator=True)
+
+    def _decide_banner_html(gate, decided: str) -> str:
+        """The confirmation after a decide: "Approved — nothing
+        ships without your say-so." Shared by /approvals and the
+        Overview decision strip — both post to the same decide
+        endpoint and redirect back with ?decided=<id>."""
+        if not decided:
+            return ""
+        item = gate.get(decided)
+        if item is not None and item.status.value in ("approved",
+                                                      "rejected"):
+            verb = ("Approved" if item.status.value == "approved"
+                    else "Rejected")
+            kind = ("ok" if item.status.value == "approved" else "bad")
+            return (f"<div class='v-notice v-notice-{kind}' role='status'>"
+                    f"{verb} — nothing ships without your say-so.</div>")
+        return ""
 
     @app.get("/approvals", response_class=HTMLResponse)
     def approval_queue(request: Request, decided: str = ""):
@@ -1871,8 +1920,16 @@ sum of recorded paying customers per site.</p>{hidden_note}
             return _approval_visible(account, a, owned)
         pending = [a for a in gate.pending() if _sees(a)]
         decided_list = [a for a in gate.decided(20) if _sees(a)]
+        # Pending rows are expandable: the human-readable summary is
+        # always visible, and the full proposed action (raw payload)
+        # is one click away — visible before Approve. The decide
+        # endpoint is unchanged; the row only shows more.
         pend_rows = "".join(
-            f"<tr><td>{_approval_summary(a, reg)}</td>"
+            f"<tr><td>{_approval_summary(a, reg)}"
+            f"<details class='v-expandable'><summary>Full payload</summary>"
+            f"<pre class='v-approval-payload'>"
+            f"{esc(json.dumps(a.details or {}, indent=2, default=str))}"
+            f"</pre></details></td>"
             f"<td><form method='post' action='/approvals/{esc(a.id)}/decide'>"
             f"<button name='approved' value='true'>Approve</button>"
             f"<button name='approved' value='false'>Reject</button></form></td></tr>"
@@ -1890,22 +1947,11 @@ sum of recorded paying customers per site.</p>{hidden_note}
             f"<td>{esc(a.decided_by or '—')}</td></tr>"
             for a in decided_list
         ) or "<tr><td colspan='4'>No decisions yet.</td></tr>"
-        # Confirmation after a decide: the POST redirects back here
-        # with ?decided=<id>, and the decided item is already out of
+        # Confirmation after a decide: the POST redirects back with
+        # ?decided=<id>, and the decided item is already out of
         # pending and in the Decided section below. Nothing may still
         # look pending after it was decided.
-        banner = ""
-        if decided:
-            item = gate.get(decided)
-            if item is not None and item.status.value in ("approved",
-                                                          "rejected"):
-                verb = ("Approved" if item.status.value == "approved"
-                        else "Rejected")
-                kind = ("ok" if item.status.value == "approved"
-                        else "bad")
-                banner = (
-                    f"<div class='v-notice v-notice-{kind}' role='status'>"
-                    f"{verb} — nothing ships without your say-so.</div>")
+        banner = _decide_banner_html(gate, decided)
         inner = f"""<div class="v-approvals">{banner}<div class="card"><p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p></div>
 <div class="card"><h2>Pending ({len(pending)})</h2>
 <table>
@@ -1920,7 +1966,17 @@ sum of recorded paying customers per site.</p>{hidden_note}
 
     @app.post("/approvals/{approval_id}/decide")
     def decide_approval(request: Request, approval_id: str,
-                        approved: str = Form(...)):
+                        approved: str = Form(...),
+                        next_path: str = Form("", alias="next")):
+        """The ONE decide endpoint — the /approvals rows and the
+        Overview decision strip both post here, with the same
+        ownership check and the same gate.decide call. ``next`` is a
+        same-site return path (the Overview strip sends /ops); any
+        other value falls back to /approvals, so an external URL can
+        never be injected as a redirect."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1956,9 +2012,14 @@ sum of recorded paying customers per site.</p>{hidden_note}
                     is_operator=_saas_config.is_operator(account["email"])),
                 status_code=400,
             )
-        # Redirect back to the list — the item is out of pending and
-        # under Decided with a confirmation, never still pending.
-        return RedirectResponse(f"/approvals?decided={approval_id}",
+        # Redirect back — to the page that sent the decision (the
+        # Overview strip's /ops, or /approvals by default) — the item
+        # is out of pending and under Decided with a confirmation,
+        # never still pending.
+        dest = (next_path if (next_path.startswith("/")
+                             and not next_path.startswith("//"))
+                else "/approvals")
+        return RedirectResponse(f"{dest}?decided={approval_id}",
                                 status_code=303)
 
     @app.get("/reports", response_class=HTMLResponse)
@@ -2042,14 +2103,14 @@ nothing in them was published.</p>
                 f"<div class='v-notice v-notice-warn'>Etsy is not "
                 f"configured on this server.</div>"
                 f"<p class='muted'>{esc(exc)}</p>"
-                f"<a class='v-back' href='/ops'>{icon('arrow_left', 15)} Live Ops</a>",
+                f"<a class='v-back' href='/ops'>{icon('arrow_left', 15)} Overview</a>",
                 account=account, current=None, is_operator=True)
         except Exception as exc:  # noqa: BLE001 - dashboard must stay up
             return _operator_page(
                 "Experiment 001",
                 f"<div class='v-notice v-notice-bad'>Monitor error: "
                 f"{esc(exc)}</div>"
-                f"<a class='v-back' href='/ops'>{icon('arrow_left', 15)} Live Ops</a>",
+                f"<a class='v-back' href='/ops'>{icon('arrow_left', 15)} Overview</a>",
                 account=account, current=None, is_operator=True)
         triggers = "".join(
             f"<li>{esc(t)}</li>" for t in snapshot["stop_loss_triggers"]
@@ -2074,7 +2135,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
 <ul>{triggers}</ul>
 <h2>Weekly revenue (last 3 weeks)</h2>
 <p>{", ".join(money(w) for w in snapshot["weekly_revenue_usd"])}</p>
-<a class="v-back" href="/ops">{icon('arrow_left', 15)} Live Ops</a>"""
+<a class="v-back" href="/ops">{icon('arrow_left', 15)} Overview</a>"""
         return _operator_page("Experiment 001 — Evergreen Planners", inner,
                               account=account, current=None,
                               is_operator=True)
@@ -2091,14 +2152,51 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             return redirect
         return RedirectResponse("/ops", status_code=303)
 
+    def _decision_strip_html(pending, reg) -> str:
+        """The "Needs your decision" strip on Overview: the top
+        pending approval, inline, with Approve/Reject. The buttons
+        post to the SAME /approvals/{id}/decide endpoint as the
+        Approvals page (same ownership check, same gate.decide),
+        with next=/ops so the confirmation lands back here. The
+        full proposed action is visible before Approve — the
+        human-readable summary plus the raw payload one click away.
+        When nothing is pending, a quiet line instead of an empty
+        card."""
+        if not pending:
+            return ("<div class='card'><h2>Needs your decision</h2>"
+                    "<p class='muted'>Nothing awaiting approval. The "
+                    "agents will bring the next draft here.</p></div>")
+        a = pending[0]
+        more = ""
+        if len(pending) > 1:
+            more = (f"<p><a href='/approvals'>View all {len(pending)} "
+                    f"pending approvals</a></p>")
+        else:
+            more = "<p><a href='/approvals'>View on Approvals</a></p>"
+        return (f"<div class='card'><h2>Needs your decision</h2>"
+                f"{_approval_summary(a, reg)}"
+                f"<details class='v-expandable'><summary>Full payload</summary>"
+                f"<pre class='v-approval-payload'>"
+                f"{esc(json.dumps(a.details or {}, indent=2, default=str))}"
+                f"</pre></details>"
+                f"<form method='post' action='/approvals/{esc(a.id)}/decide'>"
+                f"<input type='hidden' name='next' value='/ops'>"
+                f"<button class='btn btn-primary' name='approved' "
+                f"value='true'>Approve</button> "
+                f"<button class='btn' name='approved' value='false'>"
+                f"Reject</button></form>"
+                f"{more}</div>")
+
     @app.get("/ops", response_class=HTMLResponse)
-    def live_ops_page(request: Request):
-        """The professional Overview (Live Ops): the top summary
-        (progress ring + verified/pending stats), the pause control
-        (operator only), the analyze-the-site box, the businesses,
-        the attribution sections, and the Live activity feed — all
-        server-rendered through the platform shell, all from real
-        store data. No game design: no crew, no HUD, no runtime
+    def live_ops_page(request: Request, decided: str = ""):
+        """The professional Overview: the top summary (progress ring
+        + verified/pending stats), the "Needs your decision" strip,
+        the websites, the analyze-the-site box, the merged Results,
+        and the Live activity feed — all server-rendered through the
+        platform shell, all from real store data. The full Pause
+        card is gone from here (a slim pill in the header row is the
+        operator's pause control); the analyze box has exactly one
+        home here. No game design: no crew, no HUD, no runtime
         controls, no Experiment 001, no tasks/spend bars here
         (those live on the Agents page). Sign-in required — /ops
         is the post-sign-in home for every account."""
@@ -2113,6 +2211,28 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
 
         def _money(value):
             return "hidden" if value is None else money(value)
+
+        def _biz_extra(b: dict) -> str:
+            """One line per website card: verified customers for
+            that site + a View link to the site page. Registry
+            businesses get a View link to the business page
+            instead — they have no SaaS verified count."""
+            if str(b["id"]).startswith("site:"):
+                site_id = str(b["id"])[5:]
+                site = _saas_store.get_site(site_id)
+                if site is not None and site.get("count_show", 1):
+                    v = _saas_store.conversion_status_counts(
+                        [site_id])["verified"]
+                    line = (f"{v} verified customer"
+                            f"{'s' if v != 1 else ''}")
+                else:
+                    line = "Verified customers hidden"
+                return (f"<p class='v-biz-extra'>{esc(line)} — "
+                        f"<a href='/account/sites/{esc(site_id)}'>"
+                        f"View</a></p>")
+            return (f"<p class='v-biz-extra'><a href='/businesses/"
+                    f"{esc(b['id'])}'>View</a></p>")
+
         biz_cards = "".join(
             f"<article class='v-biz v-accent-{i % 4}'>"
             f"<h3>{esc(b['name'])}</h3>"
@@ -2124,14 +2244,13 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             f"<dl><dt>Revenue</dt><dd>{_money(b['revenue'])}</dd>"
             f"<dt>Costs</dt><dd>{money(b['total_costs'])}</dd>"
             f"<dt>Net profit</dt><dd>{_money(b['net_profit'])}</dd></dl>"
+            f"{_biz_extra(b)}"
             f"</article>"
             for i, b in enumerate(snap["businesses"])) or (
             "<div class='card'><p>No websites yet. "
             "<a href='/account/sites/new'>Add your first website</a> — "
             "Ventoryn works to bring it its first 100 paying "
             "customers.</p></div>")
-        pause_card = (ui.pause_card_html(
-            _saas_store.get_global_pause(), "/ops") if is_op else "")
         # The landing funnel: a visitor who typed a URL on the
         # landing page arrives here with ?site_url= — prefill the
         # analyze box with it and, for a customer who has not
@@ -2142,15 +2261,39 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             ("http://", "https://")) else ""
         show_prompt = bool(prefill) and not is_op and \
             account["subscription_status"] != "active"
-        inner = f"""{_progress_grid_html(data)}
-{pause_card}
-{_analyze_box_html(prefill, show_prompt)}
-<h2>Businesses</h2>
-<div class='v-biz-grid'>{biz_cards}</div>
-{_attribution_sections_html(data)}
-{_live_activity_feed_html(snap["events"])}"""
+        # The decision strip: the top pending approval the viewer
+        # may decide (same visibility rule as /approvals).
+        gate = state["approvals"]
+        owned = _owned_business_ids(account)
+        pending_here = [a for a in gate.pending()
+                        if _approval_visible(account, a, owned)]
+        decision_html = _decision_strip_html(pending_here,
+                                             state["registry"])
+        banner = _decide_banner_html(gate, decided)
+        # Data & privacy controls are a single quiet link here,
+        # opening the site page — the full controls live there.
+        footer = ""
+        if data["sites"]:
+            footer = (f"<p class='muted'><a href='/account/sites/"
+                      f"{esc(data['sites'][0]['id'])}'>Data &amp; privacy "
+                      f"controls</a></p>")
+        websites_section = (f"<h2>Your websites</h2>"
+                            f"<div class='v-biz-grid'>{biz_cards}</div>")
+        analyze_html = _analyze_box_html(prefill, show_prompt)
+        # A customer with zero sites sees the analyze box first —
+        # it is the way in. Everyone else reads websites first.
+        if not snap["businesses"]:
+            middle = f"{analyze_html}\n{websites_section}"
+        else:
+            middle = f"{websites_section}\n{analyze_html}"
+        inner = f"""{banner}{_progress_grid_html(data)}
+{decision_html}
+{middle}
+{_results_html(data)}
+{_live_activity_feed_html(snap["events"])}
+{footer}"""
         return _operator_page(
-            "Live Ops", inner, account=account, current="live-ops",
+            "Overview", inner, account=account, current="live-ops",
             is_operator=is_op,
             extra_css=_PORTFOLIO_CSS + _REPORT_CSS)
 
@@ -2268,14 +2411,16 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             return s if len(s) <= 140 else s[:140] + "…"
         return str(r)
 
-    def _live_activity_feed_html(events: list[dict]) -> str:
+    def _live_activity_feed_html(events: list[dict],
+                                 limit: int = 8) -> str:
         """The Live activity feed: one structured row per event —
         time, actor, event, business/task, cost + tokens, result.
         The Overview's own card (the feed lives here, not inside
         the "What the team is doing" panel — that panel moved to
-        the Agents page)."""
+        the Agents page). The latest 8 rows, with a link to the
+        full feed on the Agents page."""
         rows = ""
-        for e in events[:30]:
+        for e in events[:limit]:
             ids = " — ".join(x for x in (e.get("business_id"),
                                          e.get("task_id")) if x)
             cost = ""
@@ -2301,7 +2446,8 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         if not rows:
             rows = ("<p class='muted'>Nothing yet — agent work will "
                     "show up here.</p>")
-        return f"<div class='card'><h2>Live activity</h2>{rows}</div>"
+        return (f"<div class='card'><h2>Live activity</h2>{rows}"
+                f"<p><a href='/agents'>View all on Agents</a></p></div>")
 
     def _team_doing_html(stats: list[dict], events: list[dict]) -> str:
         """What the team is doing (Agents page only): tasks & spend
@@ -2375,14 +2521,16 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         """The analyze-the-site box: URL + market country (+ optional
         language), POSTs to /api/analyze and polls for the result —
         the same async job as the landing page's free preview, in
-        platform card styling. Nothing is published; the report is
-        saved locally and shown here. The element ids match the old
-        Live Ops panel (analyze-panel, analyze-form, analyze-url,
-        analyze-country, analyze-language, analyze-submit,
-        analyze-status, analyze-result) so the box works the same
-        everywhere it appears. `prefill` fills the URL from the
-        landing funnel (?site_url=) so it is never retyped; when
-        `show_subscribe_prompt` is true the box also offers the
+        platform card styling. Nothing is published; the summary
+        (scores and top findings) is shown here. The full written
+        report comes only from the paid Analyze job on a website
+        page (5 credits), never from this box. The element ids match
+        the old Live Ops panel (analyze-panel, analyze-form,
+        analyze-url, analyze-country, analyze-language,
+        analyze-submit, analyze-status, analyze-result) so the box
+        works the same everywhere it appears. `prefill` fills the URL
+        from the landing funnel (?site_url=) so it is never retyped;
+        when `show_subscribe_prompt` is true the box also offers the
         subscribe step for that URL."""
         prefill_attr = f" value='{esc(prefill)}'" if prefill else ""
         prompt = ""
@@ -2397,7 +2545,8 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
 <h2>Analyze a site</h2>
 <p class='muted'>Paste a website URL and a market country — the same
 analysis as the <code>analyze</code> command. Nothing is published;
-the report is saved locally and shown here.</p>
+the scores and top findings show here. The full written report comes
+from the Analyze job on your website page (5 credits).</p>
 <form id="analyze-form">
 <div class='analyze-row'>
 <label class='analyze-field analyze-url'>
@@ -2459,9 +2608,6 @@ id="analyze-submit">Analyze</button>
       html += "</ul>";
     }} else if (r.fetchable !== false) {{
       html += "<p>No findings — the site is in good shape for this market.</p>";
-    }}
-    if (job.report_url) {{
-      html += '<a class="analyze-report-link" href="' + esc(job.report_url) + '" target="_blank" rel="noopener">Full report (' + esc(job.report_name || "report.md") + ")</a>";
     }}
     box.innerHTML = html;
     box.hidden = false;
@@ -3037,12 +3183,21 @@ id="analyze-submit">Analyze</button>
     # -- Site analysis jobs (powers the /ops "Analyze a site" panel) ---
     # The same pipeline as the `analyze` CLI, run in a background
     # thread: POST starts the job, the page polls GET for the result.
-    # Nothing is published or posted — the only output is the local
-    # report file (the same file the CLI writes) plus the on-page
-    # summary. `app.state.analyze_runner` is None in production;
+    # Nothing is published or posted — the only output is the on-page
+    # summary (site score, GEO score, top findings). This endpoint
+    # NEVER writes or serves the full report file: that comes only
+    # from the paid Analyze job on a website page (5 credits, POST
+    # /account/sites/{site_id}/jobs). Anonymous previews are
+    # rate-limited per client IP (see
+    # ventoryn.analyze_jobs.PREVIEW_PER_IP_PER_HOUR); signed-in
+    # users are not limited here — their usage is attributed to an
+    # account. `app.state.analyze_runner` is None in production;
     # tests inject a fast fake runner.
     from ventoryn.analyze_jobs import get_job as _analyze_get_job
     from ventoryn.analyze_jobs import new_job_store as _analyze_new_store
+    from ventoryn.analyze_jobs import preview_allowed as _preview_allowed
+    from ventoryn.analyze_jobs import preview_client_ip as _preview_ip
+    from ventoryn.analyze_jobs import record_preview_hit as _preview_hit
     from ventoryn.analyze_jobs import start_job as _analyze_start_job
     from ventoryn.analyze_jobs import validate_country as _validate_country
     from ventoryn.analyze_jobs import validate_language as _validate_language
@@ -3052,7 +3207,14 @@ id="analyze-submit">Analyze</button>
     app.state.analyze_runner = None
 
     @app.post("/api/analyze")
-    def api_analyze_start(payload: dict):
+    def api_analyze_start(request: Request, payload: dict):
+        # The preview endpoint: summary only, for everyone. The full
+        # report comes only from the paid Analyze job on a website
+        # page — this endpoint never writes or serves one (enforced
+        # in ventoryn.analyze_jobs: preview jobs carry no report).
+        # Anonymous previews are rate-limited per client IP so the
+        # free endpoint cannot be hammered; signed-in usage is
+        # attributed to an account and is not limited here.
         payload = payload or {}
         try:
             url = _validate_analyze_url(payload.get("url", ""))
@@ -3060,9 +3222,26 @@ id="analyze-submit">Analyze</button>
             language = _validate_language(payload.get("language", ""))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+        anonymous = _current_account(request) is None
+        ip = None
+        if anonymous:
+            ip = _preview_ip(
+                request.headers,
+                request.client.host if request.client else "unknown")
+            allowed, retry_after = _preview_allowed(
+                app.state.analyze_jobs, ip)
+            if not allowed:
+                return JSONResponse(
+                    {"detail": "Free preview limit reached — 5 previews "
+                     "per hour from this address. Sign in to run the "
+                     "full analysis, or try again later."},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)})
         job = _analyze_start_job(
             app.state.analyze_jobs, url, country, language,
-            runner=app.state.analyze_runner)
+            runner=app.state.analyze_runner, preview=True)
+        if anonymous:
+            _preview_hit(app.state.analyze_jobs, ip)
         return JSONResponse(
             {"job_id": job["job_id"], "status": job["status"],
              "url": job["url"], "country": job["country"],
@@ -3118,13 +3297,12 @@ id="analyze-submit">Analyze</button>
 <p class='muted'>Real Stripe payment, no signature.</p></div>
 </div>"""
 
-    def _attribution_sections_html(data: dict) -> str:
-        """The attribution sections shared by the customer /report
-        and the professional Overview: the flow, the conversion
-        donut + campaign table, the privacy controls, the trend +
-        breakdown + data-source legend. Every figure comes from
-        _attribution_data — this only renders it."""
-        flow_html = "".join(
+    def _flow_html(data: dict) -> str:
+        """The attribution flow as a horizontal stepper: one card
+        per step, a green check where this account has real evidence,
+        a grey dot where it does not. Shared by /report and the
+        Overview Results section."""
+        return "".join(
             f"<div class='v-flow-step{' done' if step['ok'] else ''}'>"
             f"<span class='v-flow-check'>"
             f"{icon('check', 16) if step['ok'] else _FLOW_DOT_SVG}"
@@ -3133,12 +3311,54 @@ id="analyze-submit">Analyze</button>
             + (f"<span class='v-flow-arrow'>{icon('arrow_right', 18)}"
                f"</span>" if i < 5 else "")
             for i, step in enumerate(data["flow_steps"]))
-        camp_rows = "".join(
+
+    def _campaign_rows_html(data: dict) -> str:
+        """The campaign table rows: one row per signed campaign
+        (url, agent, verified conversions), or the honest empty row.
+        Shared by /report and the Overview Results section."""
+        return "".join(
             f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
             f"<td>{c['verified']}</td><td>Active</td></tr>"
             for c in data["campaigns"]) or (
             "<tr><td colspan='4'>No signed campaigns yet — run agent "
             "work from a site page.</td></tr>")
+
+    def _results_html(data: dict) -> str:
+        """The merged Results section on Overview: the attribution
+        flow as a horizontal stepper, the conversion donut + campaign
+        table side by side in one card, then the trend chart, then
+        one muted data-source line. The privacy card and the
+        duplicate "Conversion breakdown" card do NOT live here — the
+        donut already is the breakdown, and privacy is a quiet
+        footer link on Overview. /report keeps
+        _attribution_sections_html unchanged."""
+        return f"""<div class='card'><h2>Results</h2>
+<h3>Attribution flow</h3><div class='v-flow'>{_flow_html(data)}</div>
+<p class='muted'>A step shows a check only where this account has real
+evidence for it. Steps without evidence read "No evidence yet" — nothing
+is assumed.</p>
+<div class='v-results-pair'>
+<div><h3>Conversion status</h3>
+<div class='v-donut-wrap'>{data['donut_svg']}<ul class='v-legend'>{data['legend_html']}</ul></div></div>
+<div><h3>Campaign performance</h3>
+<div class='table-wrap'><table>
+<tr><th>Campaign</th><th>Source</th><th>Verified conversions</th><th>Status</th></tr>
+{_campaign_rows_html(data)}</table></div>
+<p class='muted'>Clicks per campaign are not tracked yet — the table shows
+verified conversions only.</p></div>
+</div>
+<h3>Acquisition trend</h3>{data['trend_svg']}
+<p class='muted'>All figures are real or marked unavailable — nothing is
+estimated.</p></div>"""
+
+    def _attribution_sections_html(data: dict) -> str:
+        """The attribution sections shared by the customer /report
+        and the professional Overview: the flow, the conversion
+        donut + campaign table, the privacy controls, the trend +
+        breakdown + data-source legend. Every figure comes from
+        _attribution_data — this only renders it."""
+        flow_html = _flow_html(data)
+        camp_rows = _campaign_rows_html(data)
         return f"""<div class='card'><h2>Attribution flow</h2><div class='v-flow'>{flow_html}</div>
 <p class='muted'>A step shows a check only where this account has real
 evidence for it. Steps without evidence read "No evidence yet" — nothing
@@ -3298,20 +3518,23 @@ per-sale details are separate settings.</p>{data['privacy_forms']}</div>
             return redirect
         data = _attribution_data(account, check_visitors=False)
         sites = _saas_store.list_sites(account["id"])
+        intro = ("<p class='muted'>Work that's live, and what it "
+                 "earned. Campaigns start from a website — pick a "
+                 "site, run agent work, approve the draft.</p>")
         if not sites:
-            inner = ("<div class='card'><p>No websites yet — add one "
+            inner = (f"{intro}<div class='card'><p>No websites yet — add one "
                      "to run campaigns.</p><p><a class='btn btn-primary' "
                      "href='/account/dashboard'>Add a website</a></p>"
                      "</div>")
         elif not data["campaigns"]:
-            inner = ("<div class='card'><p>No signed campaigns yet — "
+            inner = (f"{intro}<div class='card'><p>No signed campaigns yet — "
                      "run agent work from a site page.</p></div>")
         else:
             rows = "".join(
                 f"<tr><td>{esc(c['url'])}</td><td>{esc(c['agent'])}</td>"
                 f"<td>{c['verified']}</td><td>Active</td></tr>"
                 for c in data["campaigns"])
-            inner = f"""<div class="table-wrap"><table>
+            inner = f"""{intro}<div class="table-wrap"><table>
 <tr><th>Campaign</th><th>Source</th><th>Verified conversions</th>
 <th>Status</th></tr>{rows}</table></div>
 <p class='muted'>Clicks per campaign are not tracked yet — the table
@@ -3396,7 +3619,10 @@ shows verified conversions only.</p>"""
         if not feed_rows:
             feed_rows = ("<p class='muted'>Quiet — for now. Your "
                          "websites' work will show up here.</p>")
-        inner = (f"{roster_html}"
+        inner = (f"<p class='muted'>Agents research and draft. "
+                 f"Nothing is published until you approve it on "
+                 f"<a href='/approvals'>Approvals</a>.</p>"
+                 f"{roster_html}"
                  f"{_team_doing_html(stats_list, events)}"
                  f"<div class='card'><h2>What just happened</h2>"
                  f"{feed_rows}</div>")
@@ -3489,11 +3715,13 @@ shows verified conversions only.</p>"""
 connection is missing the value reads "unavailable" — never invented.
 Signups read unavailable because no signup tracking is connected yet.</p>
 <div class='card'><h2>Acquisition trend</h2>{data['trend_svg']}</div>
+<div class='card'><h2>Conversion status</h2>
+<div class='v-donut-wrap'>{data['donut_svg']}<ul class='v-legend'>{data['legend_html']}</ul></div></div>
 {report_section}"""
         return _operator_page(
             "Analytics", inner, account=account, current="analytics",
             is_operator=_saas_config.is_operator(account["email"]),
-            extra_css=_PORTFOLIO_CSS)
+            extra_css=_PORTFOLIO_CSS + _REPORT_CSS)
 
     @app.get("/integrations", response_class=HTMLResponse)
     def integrations_page(request: Request):
@@ -3529,6 +3757,17 @@ Signups read unavailable because no signup tracking is connected yet.</p>
                     "autocomplete='one-time-code' maxlength='8'>")
             cards = ""
             for s in sites:
+                # Recommended next, at the top of this site's group:
+                # without Stripe sales connected, the funnel cannot
+                # verify paying customers — say so plainly.
+                stripe_conn = (_saas_store.get_connection(
+                    s["id"], "stripe_sales") or {})
+                if stripe_conn.get("status") != "connected":
+                    cards += (
+                        f"<div class='v-notice v-notice-warn'>"
+                        f"Connect Stripe sales for {esc(s['host'])} to "
+                        f"count paying customers — the funnel cannot "
+                        f"verify sales without it.</div>")
                 plausible_raw = (
                     _saas_store.get_connection(s["id"], "plausible")
                     or {}).get("_detail_raw") or {}
@@ -3648,10 +3887,19 @@ is paid and rate-limited.</p>""" + cards)
                         f"{esc(c['currency'].upper())}"
                         if c.get("amount_cents") is not None else
                         "<span class='unavailable'>hidden</span>")
+                    # The signature tag links to its campaign where
+                    # one exists — the tag is the proof of which
+                    # campaign earned this customer.
+                    tag = c.get("signature_tag") or "—"
+                    if c.get("action_id"):
+                        tag_html = (f"<a href='/campaigns'>"
+                                    f"{esc(tag)}</a>")
+                    else:
+                        tag_html = esc(tag)
                     rows += (
                         f"<tr><td>{esc(s['url'])}</td><td>{amount}</td>"
                         f"<td>{esc(c['source'])}</td><td>{label}</td>"
-                        f"<td>{esc(c.get('signature_tag') or '—')}</td>"
+                        f"<td>{tag_html}</td>"
                         f"<td>{esc(c['created_at'][:10])}</td></tr>")
             elif not s.get("details_show", 1):
                 rows += (
@@ -4242,10 +4490,14 @@ a real Stripe payment, no signature.</p>"""
     # Two-factor is mandatory from the first sign-in. A session whose
     # account has not finished setup, or whose session has not passed
     # the code, is limited to the setup / verify pages (and logout, the
-    # landing page, the public analyze API, and static assets); every
-    # other signed-in route redirects there. A session deleted
-    # server-side (or expired) is simply no session — the route itself
-    # redirects unsigned visitors to the landing page.
+    # landing page, and static assets); every other signed-in route
+    # redirects there. A session deleted server-side (or expired) is
+    # simply no session — the route itself redirects unsigned visitors
+    # to the landing page. The analyze preview needs no carve-out:
+    # anonymous requests carry no session, so the gate passes them
+    # through like any unsigned visitor, while a signed-in session
+    # that has not finished 2FA is sent to setup like everywhere
+    # else.
     _TOTP_FREE_PATHS = ("/", "/account/two-factor/setup",
                         "/account/two-factor/verify", "/account/logout",
                         "/account/auth/google/start",
@@ -4257,7 +4509,7 @@ a real Stripe payment, no signature.</p>"""
         path = request.url.path
         if path.startswith("/admin") or path.startswith("/static"):
             return await call_next(request)
-        if path in _TOTP_FREE_PATHS or path.startswith("/api/analyze"):
+        if path in _TOTP_FREE_PATHS:
             return await call_next(request)
         token = request.cookies.get(SESSION_COOKIE, "")
         session = _saas_store.get_session(token) if token else None
@@ -4289,7 +4541,7 @@ a real Stripe payment, no signature.</p>"""
         inner = (f"<div class='card'><h2>{esc(title)}</h2>"
                  f"<p>{esc(message)}</p>"
                  f"<p><a class='btn btn-primary' href='/ops'>"
-                 f"Back to Live Ops</a></p></div>")
+                 f"Back to Overview</a></p></div>")
         try:
             account = _current_account(request)
         except Exception:  # noqa: BLE001 - error page never crashes
@@ -4311,14 +4563,14 @@ a real Stripe payment, no signature.</p>"""
         return await _shell_error_page(
             request, 404, "Page not found",
             "That page does not exist — check the address, or go back "
-            "to Live Ops.")
+            "to Overview.")
 
     @app.exception_handler(500)
     async def _server_error_handler(request: Request, exc):
         return await _shell_error_page(
             request, 500, "Something went wrong",
             "Ventoryn hit an unexpected error. Try again, or go back "
-            "to Live Ops.")
+            "to Overview.")
 
     return app
 

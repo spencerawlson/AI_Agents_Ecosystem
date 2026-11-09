@@ -112,6 +112,16 @@ _SAAS_CSS = """
          line-height: 1.9; background: #faf9fe; border: 1px solid var(--v-line);
          border-radius: 10px; padding: 12px 16px; }
 .v-main { max-width: 820px; }
+/* The My account sub-nav (My account · Security · Subscribe):
+   small, plain, the current page a non-clickable span — like the
+   sidebar. Separators are CSS, not characters. */
+.v-subnav { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 4px 0 18px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--v-line); }
+.v-subnav-item { font-weight: 600; color: var(--v-violet-deep);
+  text-decoration: none; min-height: 44px; display: inline-flex;
+  align-items: center; }
+.v-subnav-item.active { color: var(--v-ink); cursor: default;
+  font-weight: 800; }
 """
 
 
@@ -136,10 +146,10 @@ def _page(title: str, inner: str, account: dict | None = None,
     this function is module-level, so neither is in scope here) and
     feed the sidebar's Growth Plan card and Approvals badge. The
     sidebar ``current`` maps from the old ``current`` arg where
-    sensible ("account" -> "settings"); anything else gets the
-    sidebar with nothing active. The ``sidebar`` parameter is kept
-    for callers that pass it; every account-bearing page gets the
-    sidebar now."""
+    sensible ("account" / "subscribe" -> "my-account"); anything
+    else gets the sidebar with nothing active. The ``sidebar``
+    parameter is kept for callers that pass it; every account-bearing
+    page gets the sidebar now."""
     from ventoryn import ui
 
     if account is None:
@@ -150,7 +160,8 @@ def _page(title: str, inner: str, account: dict | None = None,
     # come from _signed_page.
     from ventoryn.nav import platform_head_html, sidebar_html
 
-    platform_current = {"account": "settings"}.get(current)
+    platform_current = {"account": "my-account",
+                        "subscribe": "my-account"}.get(current)
     sb = sidebar_html(platform_current, is_operator,
                       verified=verified,
                       pending_approvals=pending_approvals,
@@ -159,6 +170,25 @@ def _page(title: str, inner: str, account: dict | None = None,
                               pending_approvals=pending_approvals)
     return ui.page(title, inner, sidebar=sb, page_head=head,
                    extra_css=_SAAS_CSS)
+
+
+def _account_subnav_html(active: str) -> str:
+    """The My account sub-nav: My account · Security · Subscribe.
+    The current page is a non-clickable span with
+    aria-current="page", like the sidebar — never a dead link."""
+    items = (("dashboard", "My account", "/account/dashboard"),
+             ("security", "Security", "/account/security"),
+             ("subscribe", "Subscribe", "/account/subscribe"))
+    parts = []
+    for key, label, href in items:
+        if key == active:
+            parts.append(f"<span class='v-subnav-item active' "
+                         f"aria-current='page'>{label}</span>")
+        else:
+            parts.append(f"<a class='v-subnav-item' href='{href}'>"
+                         f"{label}</a>")
+    return (f"<nav class='v-subnav' aria-label='Account'>"
+            f"{''.join(parts)}</nav>")
 
 
 def _credit_table() -> str:
@@ -504,7 +534,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      "only this once.</p>"
                      f"<div class='codes'>{codes_html}</div>"
                      f"<p><a class='btn btn-primary' href='{esc(dest)}'>"
-                     "Continue to Live Ops</a></p></div>")
+                     "Continue to Overview</a></p></div>")
             return HTMLResponse(_signed_page("Two-factor is on", inner,
                                             account, current="account"))
         return HTMLResponse(
@@ -585,7 +615,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                   f"{_totp_field(account)}"
                   "<p><button class='btn' type='submit'>Delete my "
                   "account</button></p></form></div>")
-        inner = (f"<div class='card'><h2>Two-factor authentication</h2>"
+        inner = (f"{_account_subnav_html('security')}"
+                 f"<div class='card'><h2>Two-factor authentication</h2>"
                  f"{twofa}</div>{pause}{delete}")
         return _signed_page("Security", inner, account, current="account")
 
@@ -728,7 +759,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 f"<p><a class='btn' href='{esc(add_site_href)}'>"
                 "Add a website</a></p></div>")
             pause_card = ""
-        inner = f"""{notice}
+        inner = f"""{_account_subnav_html('dashboard')}{notice}
 {plan_card}
 {pause_card}
 <h2>Your websites</h2>{site_rows}
@@ -749,7 +780,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # the permanent subscription and no checkout button. Regular
         # customers see the pitch and the credit table below.
         if config.is_operator(account["email"]):
-            inner = ("<div class='card'><p><span class='badge "
+            inner = (f"{_account_subnav_html('subscribe')}"
+                     "<div class='card'><p><span class='badge "
                      "badge-ok'>Permanent — owner</span></p>"
                      "<p>The owner's account — no $20/month plan, no "
                      "charge, nothing to subscribe to.</p></div>")
@@ -773,7 +805,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             notice = ("<div class='card'><p>Checkout was cancelled — "
                       "nothing was charged.</p></div>")
         if account["subscription_status"] == "active":
-            inner = (f"{notice}<div class='card'><p>You are subscribed "
+            inner = (f"{_account_subnav_html('subscribe')}{notice}"
+                     f"<div class='card'><p>You are subscribed "
                      f"to {esc(PLAN_NAME)} at {esc(PLAN_PRICE_LABEL)}."
                      "</p><p>Your monthly credits arrive with each "
                      "billing cycle.</p></div>")
@@ -785,7 +818,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
         if not config.stripe_configured:
-            inner = (f"{notice}<div class='card'><h2>{esc(PLAN_NAME)} — "
+            inner = (f"{_account_subnav_html('subscribe')}{notice}"
+                     f"<div class='card'><h2>{esc(PLAN_NAME)} — "
                      f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                      f"<ul><li>{config.monthly_credits} credits every "
                      f"month</li><li>Your websites on Ventoryn, working "
@@ -798,7 +832,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      f"<h2>What a credit buys</h2>{_credit_table()}")
             return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
-        inner = (f"{notice}<div class='card'><h2>{esc(PLAN_NAME)} — "
+        inner = (f"{_account_subnav_html('subscribe')}{notice}"
+                 f"<div class='card'><h2>{esc(PLAN_NAME)} — "
                  f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                  f"<ul><li>{config.monthly_credits} credits every month"
                  f"</li><li>Your websites on Ventoryn, working toward "
@@ -1051,8 +1086,6 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
-{privacy_card}
-{signature_card}
 <h2>Run agent work</h2>
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
 <form method='post' action='/account/sites/{esc(site_id)}/jobs'>
@@ -1080,7 +1113,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <label for='amount'>Amount (USD)</label>
 <input type='text' id='amount' name='amount_usd' placeholder='19.00'>
 <p><button class='btn' type='submit'>Record sale</button></p></form></div>
-<h2>Connections</h2>{conn_rows}"""
+<h2>Connections</h2>{conn_rows}
+{privacy_card}
+{signature_card}"""
         return _signed_page(site["url"], inner, account, current="account")
 
     @app.post("/account/sites/{site_id}/connections/{kind}")

@@ -161,14 +161,22 @@ def test_agents_roster_only_on_agents():
         assert "What the team is doing" not in content, path
 
 
-def test_portfolio_has_analyze_box_and_add_site():
+def test_portfolio_has_no_analyze_box_but_keeps_add_site():
+    """The rearrangement: the analyze box has exactly one home —
+    Overview. /portfolio keeps "Add a website" and the website
+    cards, but no analyze panel."""
     app, store = _app_with()
     client, _account = _customer_client(app, store)
     r = client.get("/portfolio")
     assert r.status_code == 200
+    assert 'id="analyze-panel"' not in r.text
+    assert 'id="analyze-url"' not in r.text
+    assert "Add a website" in r.text
+    # Overview still has it.
+    r = client.get("/ops")
+    assert r.status_code == 200
     assert 'id="analyze-panel"' in r.text
     assert 'id="analyze-url"' in r.text
-    assert "Add a website" in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -321,23 +329,42 @@ def test_pause_toggle_is_operator_only():
 
 
 def test_pause_button_reflects_state_on_ops_and_dashboard():
+    """The rearrangement: Overview carries the slim pause PILL in
+    the header row (operator only), not the full card; My account
+    (the dashboard) keeps the full Pause card."""
     app, store = _app_with()
     client = _operator_client(app, store)
-    # Running: the button offers to pause.
-    for path in ("/ops", "/account/dashboard"):
-        r = client.get(path)
-        assert r.status_code == 200, path
-        assert "Pause all agents" in r.text, path
-        assert "Resume all agents" not in r.text, path
-        assert "Agents are running." in r.text, path
-    # Paused: the button offers to resume.
+    # Running: the Overview pill offers to pause; the dashboard
+    # card offers the same.
+    r = client.get("/ops")
+    assert r.status_code == 200
+    assert "Agents running — Pause" in r.text
+    assert "Pause all agents" not in r.text
+    assert "Agents are running." not in r.text
+    r = client.get("/account/dashboard")
+    assert r.status_code == 200
+    assert "Pause all agents" in r.text
+    assert "Resume all agents" not in r.text
+    assert "Agents are running." in r.text
+    # Paused: the pill offers to resume; so does the card.
     store.set_global_pause(True)
-    for path in ("/ops", "/account/dashboard"):
-        r = client.get(path)
-        assert r.status_code == 200, path
-        assert "Resume all agents" in r.text, path
-        assert "Pause all agents" not in r.text, path
-        assert "Agents are paused." in r.text, path
+    r = client.get("/ops")
+    assert r.status_code == 200
+    assert "Agents paused — Resume" in r.text
+    assert "Resume all agents" not in r.text
+    assert "Agents are paused." not in r.text
+    r = client.get("/account/dashboard")
+    assert r.status_code == 200
+    assert "Resume all agents" in r.text
+    assert "Pause all agents" not in r.text
+    assert "Agents are paused." in r.text
+    # A customer never sees the pill (or the card) at all.
+    customer, _c = _customer_client(app, store)
+    r = customer.get("/ops")
+    assert r.status_code == 200
+    assert "Agents running — Pause" not in r.text
+    assert "Agents paused — Resume" not in r.text
+    assert "Pause all agents" not in r.text
 
 
 def test_pause_does_not_block_customer_analyze():

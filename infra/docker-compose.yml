@@ -9,7 +9,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    # No initdb.d mount: the schema is created by `launch.py initdb`
+    # (python -m infra.init_db), not by Postgres init scripts.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ecosystem"]
       interval: 5s

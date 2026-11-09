@@ -42,27 +42,34 @@ import html
 
 from ventoryn.icons import icon
 
-# (key, label, href) — the platform sections, in order.
+# (key, label, href) — the platform sections, in order. The order
+# a customer reads the product: Overview first, then the thing they
+# own (Websites), then the work (Campaigns, Approvals, Agents), then
+# the proof (Analytics — which absorbed Attribution; /report stays
+# as a deep link, not a menu item), then Customers and Integrations,
+# then My account. No route moves: only labels and order change.
 PLATFORM_ITEMS = (
     ("overview", "Overview", "/ops"),
+    ("websites", "Websites", "/portfolio"),
     ("campaigns", "Campaigns", "/campaigns"),
-    ("agents", "Agents", "/agents"),
     ("approvals", "Approvals", "/approvals"),
-    ("attribution", "Attribution", "/report"),
+    ("agents", "Agents", "/agents"),
     ("analytics", "Analytics", "/analytics"),
-    ("integrations", "Integrations", "/integrations"),
     ("customers", "Customers", "/customers"),
-    ("settings", "Settings", "/account/dashboard"),
+    ("integrations", "Integrations", "/integrations"),
+    ("my-account", "My account", "/account/dashboard"),
 )
 
 # The Admin group, operator only. Hrefs kept exactly as the old
 # hamburger menu had them: /admin is the live feed; the other three
-# are the oversight pages.
+# are the oversight pages. "Agent activity" (not "Agents"): the
+# customer Agents page is the roster; this is the operator's view
+# of what the agents are doing across accounts.
 _ADMIN_ITEMS = (
     ("admin-live", "Live", "/admin"),
     ("admin-subscribers", "Subscribers", "/admin/subscribers"),
     ("admin-accounts", "Accounts", "/admin/accounts"),
-    ("admin-agents", "Agents", "/admin/agents"),
+    ("admin-agents", "Agent activity", "/admin/agents"),
 )
 
 
@@ -152,6 +159,18 @@ SIDEBAR_CSS = """
   height: 18px; padding: 0 5px; border-radius: 999px; background: #9a2cf6;
   color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
   text-align: center; }
+/* The slim pause pill (Overview header, operator only): the same
+   POST /api/pause as the full card, compact. On narrow screens the
+   text hides and the icon alone carries it — pause icon while
+   running, play icon while paused. */
+.pause-pill-form { margin: 0; }
+.pause-pill { display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--v-line, #e7e3f3); background: #fff;
+  color: #1f1938; font-size: 14px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; }
+.pause-pill:hover { background: #f1ebff; }
+.pause-pill svg { width: 15px; height: 15px; display: block; }
 .avatar-menu { position: relative; }
 .avatar { background: #7f36e7; border: 0; border-radius: 50%; width: 41px;
   height: 41px; min-height: 41px; padding: 0; color: #fff; font-weight: 800;
@@ -185,6 +204,8 @@ SIDEBAR_CSS = """
 }
 @media (max-width: 560px) {
   .avatar { width: 32px; height: 32px; min-height: 32px; }
+  .pause-pill span { display: none; }
+  .pause-pill { padding: 0 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-sidebar { transition: none; }
@@ -309,11 +330,13 @@ def sidebar_html(current: str | None, is_operator: bool, *,
 
 
 def platform_head_html(title: str, subtitle: str = "", *,
-                       pending_approvals: int = 0) -> str:
+                       pending_approvals: int = 0,
+                       pause_pill: str = "") -> str:
     """The app header: mobile sidebar toggle, page title + subtitle,
     approvals bell (badged when there are pending approvals), and an
     avatar button ("V") opening a dropdown with My account /
-    Subscribe / Sign out."""
+    Subscribe / Sign out. ``pause_pill`` is the operator-only slim
+    pause control (Overview only) — it renders before the bell."""
     subtitle_html = (f"<p>{esc(subtitle)}</p>" if subtitle else "")
     badge_html = (f"<b class='header-badge'>{int(pending_approvals)}</b>"
                   if pending_approvals > 0 else "")
@@ -326,6 +349,7 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"<div><h1>{esc(title)}</h1>{subtitle_html}</div>"
         f"</div>"
         f"<div class='app-header-actions'>"
+        f"{pause_pill}"
         f"<a class='notification' href='/approvals' aria-label='Approvals'>"
         f"{icon('bell', 23)}{badge_html}</a>"
         f"<div class='avatar-menu'>"
