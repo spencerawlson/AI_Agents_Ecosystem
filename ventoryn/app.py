@@ -3607,7 +3607,7 @@ a real Stripe payment, no signature.</p>"""
                 f"<tr><td>{esc(account['email'])}</td>"
                 f"<td>{esc(account['name'] or '—')}</td>"
                 f"<td>{len(sites)}</td><td>{paying}</td>"
-                f"<td>{account['credits_balance']}</td></tr>")
+                f"<td>{'Unlimited' if _saas_config.is_operator(account['email']) else account['credits_balance']}</td></tr>")
         inner = ("<div class='v-admin-card'>"
                  "<p class='muted'>Every account with an active "
                  "$20/month subscription. Counts only — no site URLs, "
@@ -3638,7 +3638,7 @@ a real Stripe payment, no signature.</p>"""
                 f"<td>{esc(account['name'] or '—')}</td>"
                 f"<td>{esc(account['subscription_status'])}</td>"
                 f"<td>{len(sites)}</td>"
-                f"<td>{account['credits_balance']}</td>"
+                f"<td>{'Unlimited' if _saas_config.is_operator(account['email']) else account['credits_balance']}</td>"
                 f"<td>{esc((account['created_at'] or '')[:10])}</td>"
                 f"<td>{'Enabled' if totp['enabled'] else 'Not set up'}</td>"
                 f"<td>{reset_cell}</td></tr>")

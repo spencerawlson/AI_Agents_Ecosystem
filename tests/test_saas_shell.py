@@ -8,6 +8,7 @@ import hmac
 import json
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,27 @@ def test_credits_grant_charge_and_refusal(store):
     assert store.credit_balance(account["id"]) < 5
     with pytest.raises(saas.SaasError):
         store.charge_credits(account["id"], "nope", "site-1")
+
+
+def test_operator_charge_credits_never_blocked(store):
+    # The operator never pays: zero balance, no deduction, no ledger.
+    account = _account(store)
+    assert store.credit_balance(account["id"]) == 0
+    job = store.charge_credits(account["id"], "analyze", "site-1",
+                               is_operator=True)
+    assert job["credits_charged"] == 0
+    assert job["status"] == "queued"
+    assert store.credit_balance(account["id"]) == 0
+    assert store.list_credit_entries(account["id"]) == []
+    # Again: still free, still zero.
+    job = store.charge_credits(account["id"], "analyze", "site-1",
+                               is_operator=True)
+    assert job["credits_charged"] == 0
+    assert store.credit_balance(account["id"]) == 0
+    assert store.list_credit_entries(account["id"]) == []
+    # The same account as a non-operator is still refused at zero.
+    with pytest.raises(saas.InsufficientCredits):
+        store.charge_credits(account["id"], "analyze", "site-1")
 
 
 def test_site_defaults_to_honest_connections(store):
@@ -466,6 +488,118 @@ def test_job_insufficient_credits_refused(client, store):
     assert r.status_code == 402
     assert "balance is 0" in r.text
     assert store.list_jobs(account["id"]) == []
+
+
+def _operator_client(store, config):
+    """A TestClient whose config names the operator (unlimited credits)."""
+    op_config = replace(config, operator_email="operator@example.com")
+    return TestClient(create_app(saas_store=store, saas_config=op_config))
+
+
+def _operator_account(client, store):
+    account = _account(store, sub="google-sub-op",
+                       email="operator@example.com")
+    return _login(client, store, account)
+
+
+def _fake_analysis_ok(url, country, language):
+    return {"url": url, "country": country, "language": language,
+            "at": "2026-11-08T00:00:00+00:00", "site_score": 85,
+            "geo_score": 72, "site": {"pages_checked": 1,
+                                      "sitemap_urls": 1},
+            "geo": {"pages_checked": 1},
+            "market": {"fetched": False, "findings": []},
+            "community_result": None,
+            "app_result": None,
+            "findings": [{"severity": "low", "area": "x",
+                          "issue": "i", "fix": "f"}],
+            "community": "", "keywords": [], "app_id": ""}
+
+
+def test_operator_job_runs_with_zero_balance(store, config, tmp_path,
+                                            monkeypatch):
+    client = _operator_client(store, config)
+    account = _operator_account(client, store)
+    assert store.credit_balance(account["id"]) == 0
+    site = store.create_site(account["id"], "https://road2cissp.com")
+    monkeypatch.setattr("ecosystem.analyze.run_analysis", _fake_analysis_ok)
+    monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
+    r = client.post(f"/account/sites/{site['id']}/jobs",
+                    data={"job_type": "analyze"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert store.credit_balance(account["id"]) == 0
+    assert store.list_credit_entries(account["id"]) == []
+    jobs = store.list_jobs(account["id"], site_id=site["id"])
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "done"
+    assert jobs[0]["credits_charged"] == 0
+    assert "Site 85/100" in jobs[0]["result"]
+
+
+def test_operator_failed_job_refunds_nothing(store, config, tmp_path,
+                                            monkeypatch):
+    client = _operator_client(store, config)
+    account = _operator_account(client, store)
+    site = store.create_site(account["id"], "https://road2cissp.com")
+
+    def _boom(url, country, language):
+        raise RuntimeError("analysis broke")
+
+    monkeypatch.setattr("ecosystem.analyze.run_analysis", _boom)
+    monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
+    r = client.post(f"/account/sites/{site['id']}/jobs",
+                    data={"job_type": "analyze"}, follow_redirects=False)
+    assert r.status_code == 500
+    assert "Nothing was charged" in r.text
+    assert store.credit_balance(account["id"]) == 0
+    assert store.list_credit_entries(account["id"]) == []
+    jobs = store.list_jobs(account["id"], site_id=site["id"])
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "failed"
+    assert "refunded" not in jobs[0]["result"]
+    assert jobs[0]["result"] == "Failed (analysis broke)"
+
+
+def test_customer_failed_job_refunds_exactly(client, store, tmp_path,
+                                            monkeypatch):
+    # The refund path the operator change touches: a paying customer
+    # still gets the exact pre-change message and the full refund.
+    account = _login(client, store)
+    store.grant_credits(account["id"], 100, "test grant")
+    site = store.create_site(account["id"], "https://road2cissp.com")
+
+    def _boom(url, country, language):
+        raise RuntimeError("analysis broke")
+
+    monkeypatch.setattr("ecosystem.analyze.run_analysis", _boom)
+    monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
+    r = client.post(f"/account/sites/{site['id']}/jobs",
+                    data={"job_type": "analyze"}, follow_redirects=False)
+    assert r.status_code == 500
+    assert "and the 5 credits were refunded" in r.text
+    assert store.credit_balance(account["id"]) == 100
+    jobs = store.list_jobs(account["id"], site_id=site["id"])
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "failed"
+    assert jobs[0]["result"] == "Failed — refunded 5 credits (analysis broke)"
+
+
+def test_operator_dashboard_shows_unlimited(store, config):
+    client = _operator_client(store, config)
+    _operator_account(client, store)
+    r = client.get("/account/dashboard")
+    assert r.status_code == 200
+    assert "Unlimited" in r.text
+    assert "Credit balance: <span class='big'>0</span>" not in r.text
+
+
+def test_operator_site_page_shows_unlimited(store, config):
+    client = _operator_client(store, config)
+    account = _operator_account(client, store)
+    site = store.create_site(account["id"], "https://road2cissp.com")
+    r = client.get(f"/account/sites/{site['id']}")
+    assert r.status_code == 200
+    assert "Credit balance: <strong>Unlimited</strong>" in r.text
 
 
 def test_job_not_available_yet_is_not_charged(client, store):

@@ -992,10 +992,13 @@ class SaasStore:
         return self.credit_balance(account_id)
 
     def charge_credits(self, account_id: str, job_type: str,
-                       site_id: str) -> dict:
+                       site_id: str, *, is_operator: bool = False) -> dict:
         """Charge one job's credits and record the job, atomically.
         Raises InsufficientCredits (balance shown, nothing charged)
-        or SaasError for an unknown job type. Balances never go negative."""
+        or SaasError for an unknown job type. Balances never go negative.
+        The operator never pays: with ``is_operator`` the job is still
+        recorded, but nothing is checked, deducted, or ledgered, and
+        the job carries credits_charged 0."""
         cost = CREDIT_COSTS.get(job_type)
         if cost is None:
             raise SaasError(f"Unknown job type: {job_type}")
@@ -1008,22 +1011,26 @@ class SaasStore:
                     "SELECT credits_balance FROM saas_accounts WHERE id = ?",
                     (account_id,)).fetchone()
                 balance = int(row[0]) if row else 0
-                if balance < cost:
-                    raise InsufficientCredits(cost, balance)
-                self._conn.execute(
-                    "UPDATE saas_accounts SET credits_balance ="
-                    " credits_balance - ? WHERE id = ?",
-                    (cost, account_id))
-                self._conn.execute(
-                    "INSERT INTO saas_credit_ledger (id, account_id, delta,"
-                    " reason, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (_new_id(), account_id, -cost,
-                     f"{job_type} job", now))
+                if is_operator:
+                    charged = 0
+                else:
+                    if balance < cost:
+                        raise InsufficientCredits(cost, balance)
+                    self._conn.execute(
+                        "UPDATE saas_accounts SET credits_balance ="
+                        " credits_balance - ? WHERE id = ?",
+                        (cost, account_id))
+                    self._conn.execute(
+                        "INSERT INTO saas_credit_ledger (id, account_id, delta,"
+                        " reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (_new_id(), account_id, -cost,
+                         f"{job_type} job", now))
+                    charged = cost
                 self._conn.execute(
                     "INSERT INTO saas_jobs (id, account_id, site_id, job_type,"
                     " credits_charged, status, created_at)"
                     " VALUES (?, ?, ?, ?, ?, 'queued', ?)",
-                    (job_id, account_id, site_id, job_type, cost, now))
+                    (job_id, account_id, site_id, job_type, charged, now))
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()

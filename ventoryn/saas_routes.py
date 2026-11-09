@@ -702,8 +702,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 "</span></p>"
                 "<p>The owner's account — no $20/month plan, no "
                 "charge.</p>"
-                f"<p>Credit balance: <span class='big'>"
-                f"{account['credits_balance']}</span> credits.</p>"
+                "<p>Credit balance: <span class='big'>Unlimited</span>.</p>"
                 f"{totp_line}"
                 f"<p><a class='btn' href='{esc(add_site_href)}'>"
                 "Add a website</a></p></div>")
@@ -1033,6 +1032,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                           "and the tag follows to checkout. A sale without "
                           "the tag is reported as unattributed — never "
                           "guessed.</p></div>")
+        balance_text = ("Unlimited"
+                        if config.is_operator(account["email"])
+                        else str(account["credits_balance"]))
         inner = f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
@@ -1040,7 +1042,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 {privacy_card}
 {signature_card}
 <h2>Run agent work</h2>
-<div class='card'><p>Credit balance: <strong>{account['credits_balance']}</strong></p>
+<div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
 <form method='post' action='/account/sites/{esc(site_id)}/jobs'>
 <label for='job_type'>Job</label>
 <select id='job_type' name='job_type'>
@@ -1209,8 +1211,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account),
                 status_code=400)
+        is_op = config.is_operator(account["email"])
         balance = store.credit_balance(account["id"])
-        if balance < cost:
+        if not is_op and balance < cost:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>That job costs {cost} credits and the balance is "
@@ -1223,7 +1226,8 @@ funnel counts it. This is the owner-recorded fallback.</p>
         # run second; a failed run is refunded, so nobody pays for work
         # that did not happen.
         try:
-            job = store.charge_credits(account["id"], job_type, site_id)
+            job = store.charge_credits(account["id"], job_type, site_id,
+                                       is_operator=is_op)
         except InsufficientCredits as exc:
             return HTMLResponse(
                 _signed_page(site["url"],
@@ -1252,14 +1256,24 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"site {result['site_score']}/100, "
                 f"GEO {result['geo_score']}/100")
         except Exception as exc:  # noqa: BLE001 - refund and say so
-            store.grant_credits(account["id"], cost,
-                                f"Refund — {job_type} job failed")
-            store.set_job_result(job["id"], "failed",
-                                 f"Failed — refunded {cost} credits ({exc})")
+            # Only refund what was actually charged: the operator's job
+            # charged 0, so there is nothing to give back and no ledger
+            # entry to write. Customers keep the exact message as before.
+            charged = job["credits_charged"]
+            if charged:
+                store.grant_credits(account["id"], charged,
+                                    f"Refund — {job_type} job failed")
+                note = f"Failed — refunded {charged} credits ({exc})"
+                detail = (f"<p>The job failed ({esc(exc)}) and the {charged} "
+                          f"credits were refunded.</p>")
+            else:
+                note = f"Failed ({exc})"
+                detail = (f"<p>The job failed ({esc(exc)}). Nothing was "
+                          f"charged.</p>")
+            store.set_job_result(job["id"], "failed", note)
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>The job failed ({esc(exc)}) and the {cost} "
-                      f"credits were refunded.</p>"
+                      detail +
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account),
                 status_code=500)
