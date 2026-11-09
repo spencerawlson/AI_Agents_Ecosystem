@@ -55,7 +55,9 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Form, Request
+from fastapi import File, Form, Request, UploadFile
+
+from ventoryn import site_jobs
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
@@ -1088,16 +1090,38 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 connection is missing the value reads "unavailable" — never invented.</p></div>
 <h2>Run agent work</h2>
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
-<form method='post' action='/account/sites/{esc(site_id)}/jobs'>
+<form method='post' action='/account/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
 <label for='job_type'>Job</label>
-<select id='job_type' name='job_type'>
-<option value='analyze'>Analyze my site — 5 credits (available now)</option>
-<option value='seo_article' disabled>SEO article draft — 10 credits (coming soon)</option>
-<option value='video_render' disabled>Video render — 15 credits (coming soon)</option>
-<option value='community_listening' disabled>Community listening — 5 credits (coming soon)</option>
-</select>
+<select id='job_type' name='job_type'>{_job_options()}</select>
+<div class='v-job-field' data-jobs='community_listening seo_article'>
+<label for='job_keywords'>Keywords <span class='muted'>(comma-separated — required for community listening, optional for SEO)</span></label>
+<input id='job_keywords' name='keywords' type='text' maxlength='300' placeholder='e.g. cissp exam, security certification'></div>
+<div class='v-job-field' data-jobs='community_listening'>
+<label for='job_community'>Communities <span class='muted'>(optional — e.g. r/cissp, r/cybersecurity; all of Reddit if empty)</span></label>
+<input id='job_community' name='community' type='text' maxlength='300' placeholder='r/cissp, r/cybersecurity'></div>
+<div class='v-job-field' data-jobs='social_report'>
+<label for='job_export'>Social export file <span class='muted'>(CSV or JSON, up to 5 MB)</span></label>
+<input id='job_export' name='export' type='file' accept='.csv,.json,text/csv,application/json'></div>
+<p id='job_hint' class='muted'></p>
 <p><button class='btn btn-primary' type='submit'>Run job</button></p></form>
 <p class='muted'>Nothing is published or posted without your approval.</p></div>
+<script>
+(function () {{
+  var sel = document.getElementById('job_type');
+  var hint = document.getElementById('job_hint');
+  if (!sel) return;
+  function sync() {{
+    var job = sel.value;
+    document.querySelectorAll('.v-job-field').forEach(function (el) {{
+      el.hidden = (el.getAttribute('data-jobs') || '').split(' ').indexOf(job) < 0;
+    }});
+    var opt = sel.options[sel.selectedIndex];
+    hint.textContent = (opt && opt.getAttribute('data-hint')) || '';
+  }}
+  sel.addEventListener('change', sync);
+  sync();
+}})();
+</script>
 <h2>Jobs for this site</h2>
 <div class='table-wrap'><table>
 <tr><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>
@@ -1234,9 +1258,24 @@ funnel counts it. This is the owner-recorded fallback.</p>
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(_signed_page(site["url"], inner, account, current="account"))
 
+    def _job_options() -> str:
+        """Every job, with its credit cost; a job this server cannot run
+        yet says why (running it then charges nothing)."""
+        out = []
+        for jt, label in site_jobs.JOB_LABELS.items():
+            cost = CREDIT_COSTS[jt]
+            blocker = site_jobs.server_blocker(jt)
+            note = f" — {blocker}" if blocker else ""
+            hint = site_jobs.JOB_HINTS.get(jt, "")
+            out.append(f"<option value='{esc(jt)}' data-hint='{esc(hint)}'>"
+                       f"{esc(label)} — {cost} credits{esc(note)}</option>")
+        return "".join(out)
+
     @app.post("/account/sites/{site_id}/jobs")
-    def run_job(request: Request, site_id: str,
-                job_type: str = Form(...)):
+    async def run_job(request: Request, site_id: str,
+                      job_type: str = Form(...),
+                      keywords: str = Form(""), community: str = Form(""),
+                      export: UploadFile | None = File(None)):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1249,15 +1288,21 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"], "<p>Unknown job type.</p>", account, current="account"),
                 status_code=400)
-        if job_type not in RUNNABLE_JOB_TYPES:
+        inputs = {"keywords": keywords[:300], "community": community[:300]}
+        if export is not None and job_type == "social_report":
+            inputs["export_bytes"] = await export.read(
+                site_jobs.MAX_UPLOAD_BYTES + 1)
+            inputs["export_name"] = export.filename or "export.csv"
+        try:
+            site_jobs.preflight(job_type, inputs)
+        except (site_jobs.JobInputError, site_jobs.JobUnavailable) as exc:
+            code = 503 if isinstance(exc, site_jobs.JobUnavailable) else 400
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(job_type.replace('_', ' '))} is not "
-                      f"available yet — it will cost {cost} credits when it "
-                      f"lands. Nothing was charged.</p>"
+                      f"<p>{esc(exc)}</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
-                status_code=400)
+                status_code=code)
         is_op = config.is_operator(account["email"])
         balance = store.credit_balance(account["id"])
         if not is_op and balance < cost:
@@ -1282,26 +1327,20 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"{esc(site_id)}'>Back</a>.</p>", account, current="account"),
                 status_code=402)
         try:
-            from ecosystem.analyze import render_report, run_analysis
+            import asyncio
 
-            result = run_analysis(site["url"], site["country"],
-                                  site["language"])
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            report_name = (f"analyze_{slug_for_url(site['url'])}_{date}.md")
-            (REPORTS_DIR / report_name).write_text(
-                render_report(result), encoding="utf-8")
-            summary = (f"Site {result['site_score']}/100 · "
-                       f"GEO {result['geo_score']}/100 · "
-                       f"{len(result['findings'])} findings · "
-                       f"report {report_name}")
+            orchestrator = app.state.ecosystem["orchestrator"]
+            # The work is blocking (HTTP fetches, LLM calls, ffmpeg):
+            # run it off the event loop.
+            summary, _report = await asyncio.to_thread(
+                site_jobs.run, job_type, site, inputs,
+                orchestrator=orchestrator, reports_dir=REPORTS_DIR)
             store.set_job_result(job["id"], "done", summary)
-            # The admin's recent-activity feed: a real analyze ran.
+            # The admin's recent-activity feed: a real job ran.
             store.record_activity_event(
                 account["id"], "job",
-                f"Analyze ran on {site['url']}: "
-                f"site {result['site_score']}/100, "
-                f"GEO {result['geo_score']}/100")
+                f"{site_jobs.JOB_LABELS[job_type].split(' — ')[0]} ran on "
+                f"{site['url']}: {summary.split(' · report')[0]}")
         except Exception as exc:  # noqa: BLE001 - refund and say so
             # Only refund what was actually charged: the operator's job
             # charged 0, so there is nothing to give back and no ledger
