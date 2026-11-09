@@ -48,11 +48,25 @@ def preview_client_ip(headers, peer_host: str) -> str:
 
     Production runs behind the Cloudflare tunnel, which sets
     ``CF-Connecting-IP`` to the real visitor — Cloudflare overwrites
-    it, so a visitor cannot spoof it through the tunnel. Otherwise
-    fall back to the TCP peer. ``X-Forwarded-For`` is deliberately
-    NOT trusted: any direct caller can forge it, and the tunnel
-    already supplies the real IP.
+    it, so a visitor cannot spoof it through the tunnel. The header
+    is trusted ONLY when the TCP peer is loopback, i.e. the local
+    cloudflared daemon: the app also listens on 0.0.0.0, and a caller
+    reaching that port directly could otherwise set any
+    CF-Connecting-IP and get a fresh allowance on every request.
+    Otherwise fall back to the TCP peer. ``X-Forwarded-For`` is
+    deliberately NOT trusted: any direct caller can forge it, and the
+    tunnel already supplies the real IP.
     """
+    import ipaddress as _ip
+
+    def _is_loopback(host: str) -> bool:
+        try:
+            return _ip.ip_address((host or "").split("%", 1)[0]).is_loopback
+        except ValueError:
+            return False
+
+    if not _is_loopback(peer_host):
+        return (peer_host or "unknown").strip() or "unknown"
     try:
         items = headers.items() if hasattr(headers, "items") else []
     except Exception:  # noqa: BLE001 - a bare mapping is fine too
@@ -118,22 +132,11 @@ def _resolved_addresses(host: str, timeout: float = 3.0) -> list[str]:
 
 
 def _is_private_address(value: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    # 198.18.0.0/15 is IANA benchmarking space, never a LAN — but the
-    # sandbox egress proxy resolves every hostname into it, so it must
-    # not count as "private" here. A hostname resolving there is either
-    # that proxy (and the fetch reports honestly) or a non-routable
-    # answer (and the fetch fails honestly); neither is an internal
-    # service.
-    if ip in ipaddress.ip_network("198.18.0.0/15"):
-        return False
-    return bool(
-        ip.is_private or ip.is_loopback or ip.is_link_local
-        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-    )
+    """Internal / reserved address? One rule for the whole platform:
+    core.netguard (the fetcher enforces it again at connect time)."""
+    from core.netguard import is_blocked_address
+
+    return is_blocked_address(value)
 
 
 def _normalize_scheme(raw: str) -> str:
@@ -150,8 +153,8 @@ def validate_url(raw: object) -> str:
 
     A bare domain works — https:// is added when no scheme is
     present. http/https only; rejects empty input, non-URLs, and
-    localhost / private addresses (literal IPs and hostnames that
-    resolve only to private addresses). A hostname that does not
+    localhost / private addresses (literal IPs and hostnames with
+    any private DNS answer). A hostname that does not
     resolve is allowed through — the analysis fetch reports that
     honestly.
     """
@@ -185,9 +188,9 @@ def validate_url(raw: object) -> str:
             raise ValueError("private addresses are not websites to analyze")
     else:
         resolved = _resolved_addresses(host)
-        if resolved and all(_is_private_address(a) for a in resolved):
+        if any(_is_private_address(a) for a in resolved):
             raise ValueError(
-                f"{host} resolves only to private addresses")
+                f"{host} resolves to a private address")
     return url
 
 

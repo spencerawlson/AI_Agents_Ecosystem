@@ -237,6 +237,16 @@ def test_preview_client_ip_falls_back_to_peer():
     assert preview_client_ip({}, "") == "unknown"
 
 
+def test_cf_header_from_a_direct_caller_is_ignored():
+    """Only the local tunnel (a loopback peer) may name the client.
+    A caller hitting the 0.0.0.0 port directly cannot pick its own
+    rate-limit key with a forged CF-Connecting-IP."""
+    assert preview_client_ip({"cf-connecting-ip": "203.0.113.7"},
+                             "198.51.100.20") == "198.51.100.20"
+    assert preview_client_ip({"cf-connecting-ip": "203.0.113.7"},
+                             "::1") == "203.0.113.7"
+
+
 def test_preview_allowed_allows_five_then_denies():
     store = new_job_store()
     for _ in range(5):

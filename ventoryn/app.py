@@ -3204,6 +3204,12 @@ id="analyze-submit">Analyze</button>
     from ventoryn.analyze_jobs import validate_url as _validate_analyze_url
 
     app.state.analyze_jobs = _analyze_new_store()
+    # The free analysis is public and makes outbound fetches: cap it
+    # per client, and cap how many run at once across everyone.
+    # (Anonymous previews: 5 per client IP per hour, in analyze_jobs.)
+    from ventoryn.security import RateLimiter
+    app.state.analyze_limit_account = RateLimiter(limit=30, window=600)
+    app.state.analyze_max_running = 4
     app.state.analyze_runner = None
 
     @app.post("/api/analyze")
@@ -3214,7 +3220,8 @@ id="analyze-submit">Analyze</button>
         # in ventoryn.analyze_jobs: preview jobs carry no report).
         # Anonymous previews are rate-limited per client IP so the
         # free endpoint cannot be hammered; signed-in usage is
-        # attributed to an account and is not limited here.
+        # attributed to an account and gets a generous per-account
+        # limit; and at most a few analyses run at once overall.
         payload = payload or {}
         try:
             url = _validate_analyze_url(payload.get("url", ""))
@@ -3222,6 +3229,24 @@ id="analyze-submit">Analyze</button>
             language = _validate_language(payload.get("language", ""))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+        store = app.state.analyze_jobs
+        with store["lock"]:
+            running = sum(1 for j in store["jobs"].values()
+                          if j["status"] in ("queued", "running"))
+        if running >= app.state.analyze_max_running:
+            return JSONResponse(
+                {"detail": "Ventoryn is busy analyzing other sites — "
+                           "try again in a minute."},
+                status_code=429, headers={"Retry-After": "60"})
+        account = _current_account(request)
+        if account is not None:
+            key = f"acct:{account['id']}"
+            if not app.state.analyze_limit_account.allow(key):
+                wait = app.state.analyze_limit_account.retry_after(key)
+                return JSONResponse(
+                    {"detail": "Too many analyses from this account — try "
+                               f"again in {max(1, wait // 60)} minute(s)."},
+                    status_code=429, headers={"Retry-After": str(wait)})
         anonymous = _current_account(request) is None
         ip = None
         if anonymous:
@@ -4571,6 +4596,11 @@ a real Stripe payment, no signature.</p>"""
             request, 500, "Something went wrong",
             "Ventoryn hit an unexpected error. Try again, or go back "
             "to Overview.")
+
+    # Outermost layer, registered last: security headers on every
+    # response and the cross-site request check (ventoryn/security.py).
+    from ventoryn.security import install as _install_hardening
+    _install_hardening(app, _saas_config)
 
     return app
 
