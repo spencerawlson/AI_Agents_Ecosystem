@@ -41,9 +41,14 @@ Fetcher = Callable[[str], "tuple[int, str]"]
 
 
 def http_fetch(url: str, timeout: int = 15) -> tuple[int, str]:
+    """Fetch an untrusted URL (a site someone typed in). Goes through
+    core.netguard: internal addresses, non-web schemes and redirect
+    tricks are refused and reported as a network failure (status 0)."""
+    from core.netguard import safe_urlopen
+
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with safe_urlopen(req, timeout=timeout) as resp:
             body = resp.read(2_000_000).decode("utf-8", errors="replace")
             return resp.status, body
     except urllib.error.HTTPError as exc:

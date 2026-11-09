@@ -86,11 +86,12 @@ def esc(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 SIDEBAR_CSS = """
-/* Ventoryn platform shell: purple sidebar + white workspace.
-   Adapted from the UI reference (platform.html / styles.css). */
+/* Ventoryn platform shell: navy sidebar + tinted workspace — the same
+   navy / violet as the landing page and its product preview. */
 .app-layout { display: grid; grid-template-columns: 252px minmax(0, 1fr);
-  min-height: 100vh; width: 100%; background: #fff; }
-.app-sidebar { background: linear-gradient(160deg, #8623ee, #5014a3 62%, #6a1fc0);
+  min-height: 100vh; width: 100%; background: var(--v-bg, #f6f5fb); }
+.app-sidebar { background: linear-gradient(180deg, #0b0e1e 0%, #151a33 100%);
+  border-right: 1px solid rgba(255, 255, 255, .06);
   color: #fff; padding: 24px 13px; display: flex; flex-direction: column;
   gap: 27px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .sidebar-brand { display: inline-flex; align-items: center; gap: 12px;
@@ -98,7 +99,7 @@ SIDEBAR_CSS = """
   text-decoration: none; white-space: nowrap; padding: 0 17px; }
 .sidebar-brand .brand-mark { display: inline-block; font-weight: 1000;
   font-size: 40px; line-height: .8; letter-spacing: -8px; padding-right: 9px;
-  background: linear-gradient(135deg, #da50fa 8%, #7b4bff 58%, #51a8fa);
+  background: linear-gradient(135deg, #c4b5fd 8%, #8b5cf6 55%, #3b82f6);
   color: transparent; background-clip: text; transform: skew(-8deg); }
 .sidebar-brand:hover { color: #fff; }
 .app-nav { display: flex; flex-direction: column; gap: 4px; }
@@ -106,40 +107,42 @@ SIDEBAR_CSS = """
   gap: 17px; width: 100%; background: transparent; color: #fff; border: 0;
   border-radius: 10px; text-align: left; padding: 14px 20px; font-size: 15px;
   font-weight: 500; text-decoration: none; cursor: pointer; }
-.app-nav a.nav-item:hover, .app-nav .nav-item.active {
-  background: linear-gradient(100deg, #b344ff, #7e28f2);
-  box-shadow: inset 0 0 1px rgba(255, 255, 255, .5); }
+.app-nav .nav-item { color: #d9d4f5; }
+.app-nav a.nav-item:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.app-nav .nav-item.active { color: #fff;
+  background: linear-gradient(100deg, #6d28d9, #7c3aed);
+  box-shadow: 0 6px 18px rgba(109, 40, 217, .35); }
 .app-nav .nav-item.active { font-weight: 700; cursor: default; }
 .app-nav .nav-item svg { flex: 0 0 auto; width: 18px; height: 18px; }
 .app-nav .nav-item .nav-label { flex: 1; min-width: 0; }
-.nav-count { margin-left: auto; background: #b936f5; color: #fff;
+.nav-count { margin-left: auto; background: #8b5cf6; color: #fff;
   border-radius: 22px; font-size: 13px; font-weight: 700; padding: 4px 8px;
   line-height: 1; }
 .nav-group { display: block; margin-top: 10px; padding: 12px 20px 4px;
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .08em; color: rgba(255, 255, 255, .65); }
-.growth-plan { border: 1px solid #ad5bf9;
-  background: linear-gradient(140deg, #7a26d6, #4a078e);
+  letter-spacing: .08em; color: rgba(196, 181, 253, .7); }
+.growth-plan { border: 1px solid rgba(196, 181, 253, .3);
+  background: rgba(255, 255, 255, .04);
   border-radius: 15px; padding: 17px; margin-top: auto; }
 .growth-title { font-size: 18px; font-weight: 800; }
 .growth-plan p { font-size: 14px; margin: 13px 0 10px; }
-.growth-progress { height: 14px; border: 1px solid #d7a0fd;
-  border-radius: 100px; overflow: hidden; background: #57239a; }
+.growth-progress { height: 10px; border: 0;
+  border-radius: 100px; overflow: hidden; background: rgba(255, 255, 255, .1); }
 .growth-progress i { display: block; height: 100%;
-  background: linear-gradient(90deg, #e77bfe, #9c51fe); border-radius: inherit; }
+  background: linear-gradient(90deg, #8b5cf6, #c4b5fd); border-radius: inherit; }
 .growth-plan strong { display: block; text-align: right; margin: 8px 3px 17px; }
 .growth-plan .growth-owner { text-align: center; margin: 8px 0 0;
-  font-size: 13px; color: #e9d5ff; }
-.ghost-button { display: block; border: 1px solid #d4b5f6; background: transparent;
+  font-size: 13px; color: #c4b5fd; }
+.ghost-button { display: block; border: 1px solid rgba(255, 255, 255, .28); background: transparent;
   color: #fff; border-radius: 8px; padding: 11px; width: 100%;
   text-align: center; text-decoration: none; font-weight: 600; font-size: 14px; }
 .ghost-button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
 .sidebar-foot { margin-top: auto; }
-.sidebar-foot .nav-item { border-top: 1px solid rgba(255, 255, 255, .25); }
+.sidebar-foot .nav-item { border-top: 1px solid rgba(255, 255, 255, .1); }
 .sidebar-account { font-size: 12px; color: rgba(255, 255, 255, .7);
   padding: 10px 20px 0; margin: 0; overflow-wrap: anywhere; }
 .sidebar-overlay { display: none; }
-.app-content { min-width: 0; background: #fff; }
+.app-content { min-width: 0; background: var(--v-bg, #f6f5fb); }
 .app-header { min-height: 83px; display: flex; align-items: center;
   justify-content: space-between; gap: 20px; padding: 12px 28px; }
 .app-page-head { display: flex; align-items: center; gap: 16px; min-width: 0; }
@@ -156,7 +159,7 @@ SIDEBAR_CSS = """
   color: #1f1938; text-decoration: none; }
 .notification:hover { background: #f1ebff; }
 .header-badge { position: absolute; top: 2px; right: 0; min-width: 18px;
-  height: 18px; padding: 0 5px; border-radius: 999px; background: #9a2cf6;
+  height: 18px; padding: 0 5px; border-radius: 999px; background: #7c3aed;
   color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
   text-align: center; }
 /* The slim pause pill (Overview header, operator only): the same
@@ -172,7 +175,7 @@ SIDEBAR_CSS = """
 .pause-pill:hover { background: #f1ebff; }
 .pause-pill svg { width: 15px; height: 15px; display: block; }
 .avatar-menu { position: relative; }
-.avatar { background: #7f36e7; border: 0; border-radius: 50%; width: 41px;
+.avatar { background: #6d28d9; border: 0; border-radius: 50%; width: 41px;
   height: 41px; min-height: 41px; padding: 0; color: #fff; font-weight: 800;
   font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;
   justify-content: center; }

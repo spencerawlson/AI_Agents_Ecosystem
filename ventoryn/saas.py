@@ -189,7 +189,11 @@ class SaasConfig:
             monthly_credits=monthly,
             base_url=env.get("SAAS_BASE_URL", "http://localhost:8000"
                              ).rstrip("/"),
-            cookie_secure=env.get("SAAS_COOKIE_SECURE", "") == "1",
+            # Secure cookies whenever the site is served over HTTPS;
+            # SAAS_COOKIE_SECURE=1/0 overrides.
+            cookie_secure=(env.get("SAAS_COOKIE_SECURE") == "1" or (
+                env.get("SAAS_COOKIE_SECURE") != "0" and
+                env.get("SAAS_BASE_URL", "").lower().startswith("https://"))),
             operator_email=env.get("SAAS_OPERATOR_EMAIL", ""
                                    ).strip().lower(),
             admin_password=env.get("VENTORYN_ADMIN_PASSWORD", ""),

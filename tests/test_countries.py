@@ -119,6 +119,8 @@ def test_analyze_accepts_a_spread_of_codes_end_to_end():
     # to 5 per IP per hour, and this test starts six — signing in
     # exercises the same country validation without the limit.
     app, store = _app_with()
+    # ...and not about the cap on concurrent analyses either.
+    app.state.analyze_max_running = 100
     client = TestClient(app)
     sign_in(client, store)
     for code in ("ht", "br", "ng", "jp", "fr", "us"):

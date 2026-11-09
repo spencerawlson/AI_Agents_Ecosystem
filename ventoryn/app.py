@@ -612,6 +612,13 @@ def create_app(
 .v-feed-cost { color: var(--v-muted); margin-left: auto; }
 .v-feed-result { flex-basis: 100%; color: var(--v-muted); }
 .v-feed-voice { flex-basis: 100%; font-size: 14px; }
+/* Overview: the three customer counts as one compact card. */
+.v-kpi-stack .v-kpi-row { display: flex; align-items: center;
+  justify-content: space-between; gap: 16px; padding: 12px 0;
+  border-top: 1px solid var(--v-line); }
+.v-kpi-stack .v-kpi-row:first-of-type { border-top: 0; padding-top: 4px; }
+.v-kpi-stack .v-kpi-row p { margin: 2px 0 0; font-size: 13px; }
+.v-kpi-stack .big { font-size: 28px; line-height: 1; }
 .v-feed-meta { flex-basis: 100%; color: var(--v-muted); font-size: 13px; }
 /* Agent activity (Agents page): tasks + spend per agent, and
    activity over time. Plain HTML bars — platform styling, not the
@@ -646,8 +653,11 @@ def create_app(
    from ventoryn/ui.py; the flow steps are white platform cards
    with a purple accent, a green check badge when the step has
    real evidence, a grey dot when it does not. */
-.v-report-grid { display: grid; grid-template-columns: repeat(2, 1fr);
-  gap: 16px; margin: 16px 0; }
+.v-report-grid { display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+/* min-width: 0 so a wide table scrolls inside its card instead of
+   stretching the column past the screen on phones. */
+.v-report-grid > * { min-width: 0; }
 .v-report-grid .card { margin: 0; }
 /* The merged Results section on Overview: donut + campaign table
    side by side in one card, stacking on narrow screens. */
@@ -691,7 +701,7 @@ def create_app(
 .v-bbar-num { flex: 0 0 32px; text-align: right; font-weight: bold; }
 .card form label { display: block; margin: 12px 0 4px; font-weight: 600; }
 @media (max-width: 640px) {
-  .v-report-grid { grid-template-columns: 1fr; }
+  .v-report-grid { grid-template-columns: minmax(0, 1fr); }
 }
 /* Operator Agent & Financial report: the stat-card grid (Revenue /
    Total costs / Net profit). Token-only, like everything above. */
@@ -2407,7 +2417,18 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             if r.get("winner") is not None:
                 return (f"winner: '{r['winner']}' "
                         f"(score {r.get('score', '—')})")
-            s = json.dumps(r)
+            # Plain words, not raw JSON: {"tick": 4, "reports": 5}
+            # reads "tick 4, reports 5"; {"passed": true} reads "passed".
+            parts = []
+            for k, v in r.items():
+                label = str(k).replace("_", " ")
+                if isinstance(v, bool):
+                    parts.append(label if v else f"not {label}")
+                elif isinstance(v, (int, float, str)):
+                    parts.append(f"{label} {v}")
+                elif isinstance(v, (list, tuple)):
+                    parts.append(f"{label} ({len(v)})")
+            s = ", ".join(parts)
             return s if len(s) <= 140 else s[:140] + "…"
         return str(r)
 
@@ -3204,6 +3225,12 @@ id="analyze-submit">Analyze</button>
     from ventoryn.analyze_jobs import validate_url as _validate_analyze_url
 
     app.state.analyze_jobs = _analyze_new_store()
+    # The free analysis is public and makes outbound fetches: cap it
+    # per client, and cap how many run at once across everyone.
+    # (Anonymous previews: 5 per client IP per hour, in analyze_jobs.)
+    from ventoryn.security import RateLimiter
+    app.state.analyze_limit_account = RateLimiter(limit=30, window=600)
+    app.state.analyze_max_running = 4
     app.state.analyze_runner = None
 
     @app.post("/api/analyze")
@@ -3214,7 +3241,8 @@ id="analyze-submit">Analyze</button>
         # in ventoryn.analyze_jobs: preview jobs carry no report).
         # Anonymous previews are rate-limited per client IP so the
         # free endpoint cannot be hammered; signed-in usage is
-        # attributed to an account and is not limited here.
+        # attributed to an account and gets a generous per-account
+        # limit; and at most a few analyses run at once overall.
         payload = payload or {}
         try:
             url = _validate_analyze_url(payload.get("url", ""))
@@ -3222,6 +3250,24 @@ id="analyze-submit">Analyze</button>
             language = _validate_language(payload.get("language", ""))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+        store = app.state.analyze_jobs
+        with store["lock"]:
+            running = sum(1 for j in store["jobs"].values()
+                          if j["status"] in ("queued", "running"))
+        if running >= app.state.analyze_max_running:
+            return JSONResponse(
+                {"detail": "Ventoryn is busy analyzing other sites — "
+                           "try again in a minute."},
+                status_code=429, headers={"Retry-After": "60"})
+        account = _current_account(request)
+        if account is not None:
+            key = f"acct:{account['id']}"
+            if not app.state.analyze_limit_account.allow(key):
+                wait = app.state.analyze_limit_account.retry_after(key)
+                return JSONResponse(
+                    {"detail": "Too many analyses from this account — try "
+                               f"again in {max(1, wait // 60)} minute(s)."},
+                    status_code=429, headers={"Retry-After": str(wait)})
         anonymous = _current_account(request) is None
         ip = None
         if anonymous:
@@ -3289,12 +3335,11 @@ id="analyze-submit">Analyze</button>
 <div class='v-bar-track'><div class='v-bar-fill' style='width:{min(verified, 100)}%'></div></div>
 <p><span class='pill green'>+{last7} verified customers (7 days)</span></p>
 <p class='muted'>Goal: 100 verified paying customers.</p>{count_note}</div>
-<div class='card'><h2>Verified</h2><div class='big'>{verified}</div>
-<p class='muted'>The Ventoryn signature reached the payment.</p></div>
-<div class='card'><h2>Pending</h2><div class='big'>{counts['pending']}</div>
-<p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div>
-<div class='card'><h2>Unattributed</h2><div class='big'>{counts['unattributed']}</div>
-<p class='muted'>Real Stripe payment, no signature.</p></div>
+<div class='card v-kpi-stack'><h2>Customers</h2>
+<div class='v-kpi-row'><div><strong>Verified</strong><p class='muted'>The Ventoryn signature reached the payment.</p></div><span class='big'>{verified}</span></div>
+<div class='v-kpi-row'><div><strong>Pending</strong><p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div><span class='big'>{counts['pending']}</span></div>
+<div class='v-kpi-row'><div><strong>Unattributed</strong><p class='muted'>Real Stripe payment, no signature.</p></div><span class='big'>{counts['unattributed']}</span></div>
+</div>
 </div>"""
 
     def _flow_html(data: dict) -> str:
@@ -4571,6 +4616,11 @@ a real Stripe payment, no signature.</p>"""
             request, 500, "Something went wrong",
             "Ventoryn hit an unexpected error. Try again, or go back "
             "to Overview.")
+
+    # Outermost layer, registered last: security headers on every
+    # response and the cross-site request check (ventoryn/security.py).
+    from ventoryn.security import install as _install_hardening
+    _install_hardening(app, _saas_config)
 
     return app
 
