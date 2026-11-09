@@ -104,9 +104,11 @@ CREDIT_COSTS: dict[str, int] = {
     "video_render": 15,        # one rendered video (script -> MP4 + SRT)
 }
 
-#: Job types the shell can actually run right now. The rest of
-#: CREDIT_COSTS is priced but not yet wired to the agent machinery.
-RUNNABLE_JOB_TYPES = frozenset({"analyze"})
+#: Job types the shell can run: all of CREDIT_COSTS (each one wired in
+#: ventoryn/site_jobs.py). A job whose server prerequisite is missing
+#: (an AI key, ffmpeg) is still listed; running it explains what is
+#: missing and charges nothing.
+RUNNABLE_JOB_TYPES = frozenset(CREDIT_COSTS)
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"

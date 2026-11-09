@@ -602,15 +602,21 @@ def test_operator_site_page_shows_unlimited(store, config):
     assert "Credit balance: <strong>Unlimited</strong>" in r.text
 
 
-def test_job_not_available_yet_is_not_charged(client, store):
+def test_job_server_cannot_run_is_not_charged(client, store, monkeypatch):
+    # Every job is offered; one whose server prerequisite is missing
+    # (here: no AI key for drafting) says so and charges nothing.
+    import ventoryn.site_jobs as site_jobs
+    monkeypatch.setattr(site_jobs, "_llm_enabled", lambda: False)
     account = _login(client, store)
     store.grant_credits(account["id"], 100, "test grant")
     site = store.create_site(account["id"], "https://road2cissp.com")
     r = client.post(f"/account/sites/{site['id']}/jobs",
                     data={"job_type": "seo_article"})
-    assert r.status_code == 400
-    assert "not available yet" in r.text
+    assert r.status_code == 503
+    assert "needs an AI key" in r.text
+    assert "Nothing was charged" in r.text
     assert store.credit_balance(account["id"]) == 100
+    assert store.list_jobs(account["id"]) == []
 
 
 def test_connections_are_honest_and_secrets_never_rendered(client, store):

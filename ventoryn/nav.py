@@ -138,7 +138,12 @@ SIDEBAR_CSS = """
   text-align: center; text-decoration: none; font-weight: 600; font-size: 14px; }
 .ghost-button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
 .sidebar-foot { margin-top: auto; }
-.sidebar-foot .nav-item { border-top: 1px solid rgba(255, 255, 255, .1); }
+.sidebar-foot .nav-item { border-top: 1px solid rgba(255, 255, 255, .1);
+  display: flex; align-items: center; gap: 17px; padding: 14px 20px;
+  color: #d9d4f5; text-decoration: none; font-size: 15px; font-weight: 500;
+  border-radius: 0 0 10px 10px; }
+.sidebar-foot .nav-item:hover { color: #fff; background: rgba(255, 255, 255, .07); }
+.sidebar-foot .nav-item svg { flex: 0 0 auto; width: 18px; height: 18px; }
 .sidebar-account { font-size: 12px; color: rgba(255, 255, 255, .7);
   padding: 10px 20px 0; margin: 0; overflow-wrap: anywhere; }
 .sidebar-overlay { display: none; }
