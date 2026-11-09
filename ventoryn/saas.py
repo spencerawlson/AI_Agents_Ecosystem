@@ -481,6 +481,17 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("saas_conversions", "attribution", "TEXT NOT NULL DEFAULT 'unattributed'"),
     ("saas_conversions", "signature_tag", "TEXT NOT NULL DEFAULT ''"),
     ("saas_conversions", "action_id", "TEXT NOT NULL DEFAULT ''"),
+    # Test/live separation + refund/dispute reconciliation (the
+    # pilot's customer-acquisition count must never be inflated by
+    # Stripe test-mode noise, and must drop a sale that is later
+    # refunded or lost in a dispute). Existing rows default to
+    # livemode=1 (counted) — they predate any live Stripe proof, so
+    # there is no real data to reclassify; manual (owner-recorded)
+    # sales are never Stripe events and always stay livemode=1.
+    ("saas_conversions", "livemode", "INTEGER NOT NULL DEFAULT 1"),
+    ("saas_conversions", "payment_intent_id", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_conversions", "refunded_at", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_conversions", "disputed_at", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Admin login rate limit: this many wrong guesses lock the login
@@ -1241,12 +1252,17 @@ class SaasStore:
                           stripe_event_id: str | None = None,
                           attribution: str = "unattributed",
                           signature_tag: str = "",
-                          action_id: str = "") -> dict | None:
+                          action_id: str = "",
+                          livemode: bool = True,
+                          payment_intent_id: str = "") -> dict | None:
         """Record one paying customer. Returns None when the same Stripe
         event was already recorded (webhooks redeliver).
         `attribution` is "ventoryn" only when the Ventoryn signature
         reached the payment (see handle_customer_sale_webhook);
-        otherwise "unattributed" — never guessed."""
+        otherwise "unattributed" — never guessed. `livemode=False`
+        (a Stripe TEST MODE event) is still recorded — never silently
+        dropped — but is excluded from every real count and revenue
+        total (see list_conversions / paying_customer_count)."""
         if stripe_event_id:
             with self._lock:
                 seen = self._conn.execute(
@@ -1259,20 +1275,72 @@ class SaasStore:
             self._conn.execute(
                 "INSERT INTO saas_conversions (id, site_id, amount_cents,"
                 " currency, source, stripe_event_id, attribution,"
-                " signature_tag, action_id, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " signature_tag, action_id, livemode, payment_intent_id,"
+                " created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (conv_id, site_id, amount_cents, currency, source,
                  stripe_event_id, attribution, signature_tag, action_id,
-                 _iso(_now())))
+                 int(bool(livemode)), payment_intent_id, _iso(_now())))
         return {"id": conv_id, "site_id": site_id,
                 "amount_cents": amount_cents, "currency": currency,
                 "source": source, "attribution": attribution,
                 "signature_tag": signature_tag, "action_id": action_id}
 
+    def record_refund(self, site_id: str, payment_intent_id: str,
+                      refunded_at: str) -> bool:
+        """Exclude the sale for this payment intent from the paying
+        customer count and revenue totals — the row stays (never
+        deleted) so the owner can still see what happened. Idempotent:
+        a redelivered refund notice for the same intent is a no-op."""
+        if not payment_intent_id:
+            return False
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE saas_conversions SET refunded_at = ?"
+                " WHERE site_id = ? AND payment_intent_id = ?"
+                " AND refunded_at = ''",
+                (refunded_at, site_id, payment_intent_id))
+        return cur.rowcount > 0
+
+    def record_dispute(self, site_id: str, payment_intent_id: str,
+                       disputed_at: str) -> bool:
+        """Exclude the sale while a dispute is open. `clear_dispute`
+        restores it if the dispute is later won."""
+        if not payment_intent_id:
+            return False
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE saas_conversions SET disputed_at = ?"
+                " WHERE site_id = ? AND payment_intent_id = ?"
+                " AND disputed_at = ''",
+                (disputed_at, site_id, payment_intent_id))
+        return cur.rowcount > 0
+
+    def clear_dispute(self, site_id: str, payment_intent_id: str) -> bool:
+        """A disputed sale is counted again — the dispute was won or
+        withdrawn — unless it was also refunded separately."""
+        if not payment_intent_id:
+            return False
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE saas_conversions SET disputed_at = ''"
+                " WHERE site_id = ? AND payment_intent_id = ?"
+                " AND disputed_at != ''",
+                (site_id, payment_intent_id))
+        return cur.rowcount > 0
+
     def list_conversions(self, site_id: str, limit: int = 20) -> list[dict]:
+        """Conversions for one site, most recent first. Stripe TEST
+        MODE events are excluded here — they never appear anywhere a
+        customer or the owner sees real figures. Refunded/disputed
+        rows ARE included (so the owner's own record stays complete);
+        callers that total or count toward the paying-customer figure
+        must skip rows where refunded_at or disputed_at is set (see
+        paying_customer_count, conversion_status_counts, and friends)."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM saas_conversions WHERE site_id = ?"
+                " AND livemode != 0"
                 " ORDER BY created_at DESC LIMIT ?",
                 (site_id, limit)).fetchall()
         return [_row_dict(r) for r in rows]
@@ -1280,7 +1348,8 @@ class SaasStore:
     def paying_customer_count(self, site_id: str) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM saas_conversions WHERE site_id = ?",
+                "SELECT COUNT(*) FROM saas_conversions WHERE site_id = ?"
+                " AND livemode != 0 AND refunded_at = '' AND disputed_at = ''",
                 (site_id,)).fetchone()
         return int(row[0])
 
@@ -1316,9 +1385,10 @@ class SaasStore:
                                for c in conversions]
         if show_revenue and stripe_connected:
             all_conversions = self.list_conversions(site_id)
-            total = sum(int(c["amount_cents"]) for c in all_conversions)
-            currency = (all_conversions[0]["currency"]
-                        if all_conversions else "usd")
+            countable = [c for c in all_conversions
+                        if not c.get("refunded_at") and not c.get("disputed_at")]
+            total = sum(int(c["amount_cents"]) for c in countable)
+            currency = (countable[0]["currency"] if countable else "usd")
             revenue = {"total_cents": total, "currency": currency}
         return {"paying_customers": count if show_count else None,
                 "revenue": revenue,
@@ -1337,6 +1407,8 @@ class SaasStore:
                   "total": 0}
         for site_id in site_ids:
             for c in self.list_conversions(site_id, limit=1000):
+                if c.get("refunded_at") or c.get("disputed_at"):
+                    continue
                 counts["total"] += 1
                 if c.get("attribution") == "ventoryn":
                     counts["verified"] += 1
@@ -1362,6 +1434,8 @@ class SaasStore:
         for site_id in site_ids:
             for c in self.list_conversions(site_id, limit=1000):
                 if c.get("attribution") != "ventoryn":
+                    continue
+                if c.get("refunded_at") or c.get("disputed_at"):
                     continue
                 try:
                     day = datetime.fromisoformat(
@@ -1392,6 +1466,8 @@ class SaasStore:
             for c in self.list_conversions(site_id, limit=1000):
                 if c.get("attribution") != "ventoryn":
                     continue
+                if c.get("refunded_at") or c.get("disputed_at"):
+                    continue
                 try:
                     when = datetime.fromisoformat(c["created_at"])
                 except (ValueError, TypeError):
@@ -1421,7 +1497,9 @@ class SaasStore:
             if row[2]:
                 paying += self.paying_customer_count(site_id)
             if row[1] and row[3] == "connected":
-                conversions = self.list_conversions(site_id)
+                conversions = [c for c in self.list_conversions(site_id)
+                              if not c.get("refunded_at")
+                              and not c.get("disputed_at")]
                 total_cents += sum(int(c["amount_cents"]) for c in conversions)
                 if conversions:
                     currency = conversions[0]["currency"]
@@ -2005,6 +2083,13 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
     return "ignored"
 
 
+#: Event types that reverse money already recorded for a sale: a
+#: refund (full or partial) or a dispute removes the sale from the
+#: paying-customer count and revenue totals without deleting the row.
+_REVERSAL_EVENT_TYPES = ("charge.refunded", "charge.dispute.created",
+                        "charge.dispute.closed")
+
+
 def handle_customer_sale_webhook(store: SaasStore, site_id: str,
                                  event: dict) -> str:
     """Apply one customer-site sale event (the customer's own Stripe
@@ -2014,7 +2099,12 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
     signature tag (metadata.ventoryn_tag, or utm_content) matches a
     link Ventoryn recorded for this site. A payment without the tag
     is recorded as unattributed revenue — never assigned to a post
-    by guesswork. Returns "ok", "duplicate", or "ignored"."""
+    by guesswork. A Stripe TEST MODE event (``livemode`` false) is
+    still recorded, but excluded from every real count and revenue
+    total (see list_conversions). A refund or a lost dispute excludes
+    the sale from those same totals without deleting the row — the
+    owner's own record stays complete. Returns "ok", "duplicate", or
+    "ignored"."""
     event_id = event.get("id") or ""
     if not event_id:
         return "ignored"
@@ -2023,16 +2113,42 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
     etype = event.get("type") or ""
     data = event.get("data") or {}
     obj = data.get("object") or {}
+
+    if etype in _REVERSAL_EVENT_TYPES:
+        # Charges/disputes do not reliably carry the original Checkout
+        # Session's metadata, so tenant scoping here comes from the
+        # webhook secret that already verified this event belongs to
+        # `site_id` (see the stripe_webhook route), not from
+        # metadata.ventoryn_site_id.
+        payment_intent_id = obj.get("payment_intent") or ""
+        if not payment_intent_id:
+            return "ignored"
+        now_iso = _iso(_now())
+        if etype == "charge.refunded":
+            store.record_refund(site_id, payment_intent_id, now_iso)
+        elif etype == "charge.dispute.created":
+            store.record_dispute(site_id, payment_intent_id, now_iso)
+        else:  # charge.dispute.closed
+            if obj.get("status") == "lost":
+                store.record_refund(site_id, payment_intent_id, now_iso)
+            else:
+                store.clear_dispute(site_id, payment_intent_id)
+        return "ok"
+
     metadata = obj.get("metadata") or {}
     if metadata.get("ventoryn_site_id") != site_id:
         return "ignored"
     amount = None
+    payment_intent_id = ""
     if etype == "checkout.session.completed":
         amount = obj.get("amount_total")
+        payment_intent_id = obj.get("payment_intent") or ""
     elif etype == "payment_intent.succeeded":
         amount = obj.get("amount_received")
+        payment_intent_id = obj.get("id") or ""
     elif etype == "invoice.payment_succeeded":
         amount = obj.get("amount_paid")
+        payment_intent_id = obj.get("payment_intent") or ""
     if not isinstance(amount, int) or amount <= 0:
         return "ignored"
     currency = (obj.get("currency") or "usd").lower()
@@ -2046,7 +2162,9 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
             action_id = recorded["action_id"]
     recorded = store.record_conversion(
         site_id, amount, currency, "stripe", stripe_event_id=event_id,
-        attribution=attribution, signature_tag=tag, action_id=action_id)
+        attribution=attribution, signature_tag=tag, action_id=action_id,
+        livemode=bool(event.get("livemode", True)),
+        payment_intent_id=payment_intent_id)
     return "ok" if recorded else "duplicate"
 
 
