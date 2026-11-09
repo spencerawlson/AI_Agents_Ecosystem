@@ -1,0 +1,19 @@
+# Never in the image: secrets, state, local tooling.
+.git
+.venv
+venv
+.env
+.env.*
+data
+reports
+*.db
+*.db-wal
+*.db-shm
+__pycache__
+*.py[cod]
+.pytest_cache
+*.egg-info
+build
+dist
+tests
+pytest-debug.log
