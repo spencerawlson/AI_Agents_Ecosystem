@@ -5,6 +5,13 @@ vector (inline SVG). No PNG, JPG, WebP, or GIF is rendered on any
 page. The og-image is intentionally ABSENT (it would be a bitmap,
 used only by external link previews, never rendered on a page) —
 that is Spencer's call, flagged in the report, not silently changed.
+
+ONE deliberate exception (Spencer, 2026-11-09): the website snapshot's
+screenshot of the customer's OWN site, shown only on that owner's site
+page and served by the owner-only route
+/account/sites/<id>/snapshot-image. It is customer content, not a
+Ventoryn graphic. The template scan below allows exactly that <img>
+and nothing else.
 """
 
 import re
@@ -102,12 +109,19 @@ def test_no_bitmap_reference_in_page_templates():
         here / "ventoryn" / "app.py",
         here / "ventoryn" / "nav.py",
         here / "ventoryn" / "saas_routes.py",
+        here / "ventoryn" / "site_snapshot.py",
         # (The game file ventoryn/static/game.html is deleted —
         # Overview is server-rendered now — so it is no longer
         # scanned.)
     ]
+    snapshot_img = re.compile(
+        r"<img class='v-snap-shot' src='/account/sites/\{sid\}/snapshot-image'")
     for path in sources:
         text = path.read_text(encoding="utf-8")
+        if path.name == "site_snapshot.py":
+            # The one allowed image: the owner's own-site screenshot.
+            assert len(snapshot_img.findall(text)) == 1, path
+            text = snapshot_img.sub("", text)
         assert "<img" not in text.lower(), path
         match = BITMAP.search(text)
         assert match is None, (path, match.group(0) if match else "")

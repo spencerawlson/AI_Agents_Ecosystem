@@ -62,3 +62,20 @@ def _no_network():
         socket.getaddrinfo = real_getaddrinfo
         socket.socket.connect = real_connect
         socket.socket.connect_ex = real_connect_ex
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_real_browser():
+    """Tests never launch Chromium: adding a site starts a website
+    snapshot in the background, whose screenshot would open a real
+    browser per test. The capture is stubbed; the browser's own guard
+    logic (site_screenshot._allowed) is tested directly."""
+    import ventoryn.site_screenshot as shots
+
+    real = shots.capture
+    shots.capture = lambda url, out_path, timeout_ms=20_000: (
+        False, "unavailable — screenshots are disabled in tests")
+    try:
+        yield
+    finally:
+        shots.capture = real
