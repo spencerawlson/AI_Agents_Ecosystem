@@ -1458,7 +1458,7 @@ new paying customers.</p>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Every approved action carries a unique, tamper-resistant attribution identifier, bound to the campaign and the action that was approved.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Stripe webhook signatures are validated on every payment notice, and payment events are processed idempotently — a payment delivered twice counts once.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A customer is counted only after an eligible, successful payment event is verified.</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Repeat purchases are deduplicated per a documented customer identity policy; refunds, disputes, and reversed payments are reconciled.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Refunds, disputes, and reversed payments are reconciled — a sale that is later refunded or a dispute that is lost is removed from the verified count automatically.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Protection against replay, manipulation, and unauthorized reassignment of attribution.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Consent, privacy, and tracking requirements are respected; cross-device and cross-session attribution is shown as limited when deterministic evidence is unavailable.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Ventoryn never claims every customer can be attributed with certainty — where the evidence is missing, a sale is shown as Unattributed or Verification Pending.</li>
@@ -2870,7 +2870,8 @@ id="analyze-submit">Analyze</button>
                     1 for c in _saas_store.list_conversions(
                         s["id"], limit=1000)
                     if c.get("action_id") == sig["action_id"]
-                    and c.get("attribution") == "ventoryn")
+                    and c.get("attribution") == "ventoryn"
+                    and not c.get("refunded_at") and not c.get("disputed_at"))
         campaign_list = list(campaigns.values())
 
         # Acquisition trend: cumulative verified by day + Goal: 100.
@@ -3922,7 +3923,11 @@ is paid and rate-limited.</p>""" + cards)
                 continue
             if rev["conversions"]:
                 for c in rev["conversions"]:
-                    if c.get("attribution") == "ventoryn":
+                    if c.get("refunded_at"):
+                        label = "Refunded"
+                    elif c.get("disputed_at"):
+                        label = "Disputed"
+                    elif c.get("attribution") == "ventoryn":
                         label = "Verified"
                     elif c.get("source") == "manual":
                         label = "Pending"

@@ -442,6 +442,108 @@ def test_customer_sale_webhook_counts_paying_customer(client, store):
     assert store.paying_customer_count(site["id"]) == 1
 
 
+def test_customer_sale_webhook_test_mode_excluded_from_count(client, store):
+    """A Stripe TEST MODE delivery (livemode: false) is recorded —
+    never silently dropped — but must never inflate the real
+    paying-customer count or revenue, which is the whole point of a
+    first-customer pilot's metrics."""
+    account = _account(store)
+    site = store.create_site(account["id"], "https://road2cissp.com")
+    store.update_connection(site["id"], "stripe_sales", "connected",
+                            "Connected", {"webhook_secret": "whsec_site"})
+    event = {"id": "evt_sale_test", "type": "checkout.session.completed",
+             "livemode": False,
+             "data": {"object": {
+                 "amount_total": 1900, "currency": "usd",
+                 "payment_intent": "pi_test_1",
+                 "metadata": {"ventoryn_site_id": site["id"]}}}}
+    payload, headers = _signed("whsec_site", event)
+    r = client.post("/account/billing/webhook", content=payload,
+                    headers=headers)
+    assert r.status_code == 200
+    assert r.json()["result"] == "ok"
+    # Recorded (not dropped), but excluded from the real count/list.
+    assert store.paying_customer_count(site["id"]) == 0
+    assert store.list_conversions(site["id"]) == []
+
+
+def test_customer_sale_webhook_refund_excludes_from_count(client, store):
+    account = _account(store)
+    site = store.create_site(account["id"], "https://road2cissp.com")
+    store.update_connection(site["id"], "stripe_sales", "connected",
+                            "Connected", {"webhook_secret": "whsec_site"})
+    sale = {"id": "evt_sale_refundable", "type": "checkout.session.completed",
+            "livemode": True,
+            "data": {"object": {
+                "amount_total": 1900, "currency": "usd",
+                "payment_intent": "pi_refundable_1",
+                "metadata": {"ventoryn_site_id": site["id"]}}}}
+    payload, headers = _signed("whsec_site", sale)
+    client.post("/account/billing/webhook", content=payload, headers=headers)
+    assert store.paying_customer_count(site["id"]) == 1
+
+    refund = {"id": "evt_refund_1", "type": "charge.refunded",
+              "data": {"object": {"payment_intent": "pi_refundable_1"}}}
+    payload, headers = _signed("whsec_site", refund)
+    r = client.post("/account/billing/webhook", content=payload,
+                    headers=headers)
+    assert r.json()["result"] == "ok"
+    assert store.paying_customer_count(site["id"]) == 0
+    # The row stays for the owner's own record — it is just excluded
+    # from the count, never deleted.
+    rows = store.list_conversions(site["id"])
+    assert len(rows) == 1
+    assert rows[0]["refunded_at"]
+
+    # Redelivery of the same refund event is a no-op (idempotent).
+    r = client.post("/account/billing/webhook", content=payload,
+                    headers=headers)
+    assert r.json()["result"] == "duplicate"
+    assert store.paying_customer_count(site["id"]) == 0
+
+
+def test_customer_sale_webhook_dispute_lost_vs_won(client, store):
+    account = _account(store)
+    site = store.create_site(account["id"], "https://road2cissp.com")
+    store.update_connection(site["id"], "stripe_sales", "connected",
+                            "Connected", {"webhook_secret": "whsec_site"})
+    sale = {"id": "evt_sale_disputable", "type": "checkout.session.completed",
+            "data": {"object": {
+                "amount_total": 1900, "currency": "usd",
+                "payment_intent": "pi_disputable_1",
+                "metadata": {"ventoryn_site_id": site["id"]}}}}
+    payload, headers = _signed("whsec_site", sale)
+    client.post("/account/billing/webhook", content=payload, headers=headers)
+    assert store.paying_customer_count(site["id"]) == 1
+
+    opened = {"id": "evt_dispute_open", "type": "charge.dispute.created",
+              "data": {"object": {"payment_intent": "pi_disputable_1"}}}
+    payload, headers = _signed("whsec_site", opened)
+    client.post("/account/billing/webhook", content=payload, headers=headers)
+    assert store.paying_customer_count(site["id"]) == 0
+
+    # Won: the sale is counted again.
+    won = {"id": "evt_dispute_won", "type": "charge.dispute.closed",
+           "data": {"object": {"payment_intent": "pi_disputable_1",
+                               "status": "won"}}}
+    payload, headers = _signed("whsec_site", won)
+    client.post("/account/billing/webhook", content=payload, headers=headers)
+    assert store.paying_customer_count(site["id"]) == 1
+
+    # Re-open (a fresh event id — the first was already processed)
+    # and lose: excluded, same as a refund.
+    reopened = {"id": "evt_dispute_open_2", "type": "charge.dispute.created",
+               "data": {"object": {"payment_intent": "pi_disputable_1"}}}
+    payload, headers = _signed("whsec_site", reopened)
+    client.post("/account/billing/webhook", content=payload, headers=headers)
+    lost = {"id": "evt_dispute_lost", "type": "charge.dispute.closed",
+            "data": {"object": {"payment_intent": "pi_disputable_1",
+                                "status": "lost"}}}
+    payload, headers = _signed("whsec_site", lost)
+    client.post("/account/billing/webhook", content=payload, headers=headers)
+    assert store.paying_customer_count(site["id"]) == 0
+
+
 # ---------------------------------------------------------------------------
 # Jobs + connections + manual conversions
 # ---------------------------------------------------------------------------
