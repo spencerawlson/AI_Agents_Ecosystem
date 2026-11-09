@@ -29,7 +29,10 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 # Paths a non-browser server POSTs to; verified by signature instead.
-CSRF_EXEMPT_PATHS = ("/account/billing/webhook",)
+# The analytics collector receives page views from customers' own
+# sites (cross-site by design); it changes no account state and has
+# its own host check, bot filter, size cap and rate limit.
+CSRF_EXEMPT_PATHS = ("/account/billing/webhook", "/api/va/collect")
 
 # Where a form submit may lead (POST /account/subscribe redirects to
 # Stripe Checkout; Chrome applies form-action to that redirect).

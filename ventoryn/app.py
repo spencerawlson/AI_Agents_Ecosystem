@@ -2757,7 +2757,17 @@ id="analyze-submit">Analyze</button>
             if getattr(a, "business_id", None) in site_biz_ids]
         any_sig = any(
             _saas_store.list_signatures(s["id"]) for s in sites)
-        if check_visitors:
+        # Strongest evidence first: Ventoryn Analytics saw a visit that
+        # arrived through a signed Ventoryn link on one of these sites.
+        from ventoryn.analytics import analytics_for
+        _va = analytics_for(_saas_store)
+        signed_visit = any(_va.summary(s["id"])["signed_visits"]
+                           for s in sites)
+        if signed_visit:
+            visit_ok = True
+            visit_note = ("Ventoryn Analytics recorded a visit through a "
+                          "signed Ventoryn link.")
+        elif check_visitors:
             has_visitors = False
             for s in sites:
                 conn = _saas_store.get_connection(s["id"], "plausible") or {}
@@ -3694,26 +3704,15 @@ shows verified conversions only.</p>"""
         data = _attribution_data(account, check_visitors=False)
         counts = data["counts"]
         rows = ""
+        from ventoryn.analytics import funnel_cells
+
         for s in data["sites"]:
             site = _saas_store.get_site(s["id"])
-            conn = _saas_store.get_connection(s["id"], "plausible") or {}
-            if conn.get("status") == "connected":
-                raw = conn.get("_detail_raw") or {}
-                key = raw.get("api_key")
-                v = (plausible_visitors(
-                    key, raw.get("site_domain") or site["host"])
-                    if key else None)
-                visitors_html = (
-                    f"{v:,}" if v is not None else
-                    "<span class='unavailable'>unavailable — "
-                    "Plausible did not answer</span>")
-            else:
-                visitors_html = ("<span class='unavailable'>"
-                                 "unavailable — connect Plausible</span>")
+            visitors_html, signups_html = funnel_cells(
+                _saas_store, site, plausible_visitors)
             rows += (
                 f"<tr><td>{esc(s['url'])}</td><td>{visitors_html}</td>"
-                f"<td><span class='unavailable'>unavailable — signup "
-                f"tracking is not connected yet</span></td>"
+                f"<td>{signups_html}</td>"
                 f"<td>{s['count_html']}</td>"
                 f"<td>{s['revenue_html']}</td></tr>")
         rows = rows or ("<tr><td colspan='5'>No websites yet — add one "
@@ -4514,6 +4513,8 @@ a real Stripe payment, no signature.</p>"""
     from ventoryn.saas_routes import register_saas_routes
 
     register_saas_routes(app, _saas_store, _saas_config)
+    from ventoryn.analytics import register_analytics_routes
+    register_analytics_routes(app, _saas_store, _saas_config)
 
     # -- activity: who is live now -----------------------------------------
     # Every authenticated request stamps the account's last-seen

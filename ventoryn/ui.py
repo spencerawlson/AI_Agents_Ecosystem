@@ -155,6 +155,13 @@ input:focus, select:focus, textarea:focus { outline: none;
   margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 .v-back { display: inline-block; margin-top: 18px; font-weight: 600; }
+/* Copy-paste code (the Ventoryn Analytics snippet): wraps, never
+   widens the page. */
+.v-snippet { background: var(--v-navy); color: #e9e4ff; padding: 14px 16px;
+  border-radius: var(--v-radius-sm); white-space: pre-wrap;
+  word-break: break-all; font-size: 13px; line-height: 1.5; margin: 8px 0 12px;
+  user-select: all; }
+.v-snippet code { background: none; color: inherit; padding: 0; }
 
 @media (max-width: 560px) {
   .v-main { padding: 4px 16px 40px; }

@@ -210,17 +210,13 @@ def _funnel_rows(store: SaasStore, site: dict,
     display settings are respected separately (revenue_for_site):
     OFF hides the figure — it never shows a number the customer
     chose to hide. Nothing here is invented."""
-    if plausible_key:
-        detail = store.get_connection(site["id"], "plausible") or {}
-        raw = detail.get("_detail_raw") or {}
-        domain = raw.get("site_domain") or site["host"]
-        visitors = plausible_visitors(plausible_key, domain)
-        visitors_html = (f"{visitors:,}" if visitors is not None else
-                         "<span class='unavailable'>unavailable — "
-                         "Plausible did not answer</span>")
-    else:
-        visitors_html = ("<span class='unavailable'>unavailable — "
-                         "connect Plausible below</span>")
+    from ventoryn.analytics import funnel_cells
+
+    # Ventoryn Analytics first, Plausible as the fallback (plausible_key
+    # is kept in the signature for callers; funnel_cells reads the
+    # connection itself).
+    visitors_html, signups_html = funnel_cells(store, site,
+                                               plausible_visitors)
     connections = {c["kind"]: c for c in store.get_connections(site["id"])}
     stripe = connections.get("stripe_sales") or {}
     stripe_connected = stripe.get("status") == "connected"
@@ -247,8 +243,7 @@ def _funnel_rows(store: SaasStore, site: dict,
                             f"{rev['revenue']['currency'].upper()}")
     return (
         f"<tr><td>Visitors (last 30 days)</td><td>{visitors_html}</td></tr>"
-        f"<tr><td>Signups</td><td><span class='unavailable'>unavailable — "
-        f"signup tracking is not connected yet</span></td></tr>"
+        f"<tr><td>Signups</td><td>{signups_html}</td></tr>"
         f"<tr><td>Paying customers</td><td>{paying_html}</td></tr>"
         f"<tr><td>Revenue</td><td>{revenue_html}</td></tr>")
 
@@ -926,7 +921,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                                 status_code=303)
 
     @app.get("/account/sites/{site_id}", response_class=HTMLResponse)
-    def site_detail(request: Request, site_id: str):
+    def site_detail(request: Request, site_id: str, va_check: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1084,7 +1079,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         balance_text = ("Unlimited"
                         if config.is_operator(account["email"])
                         else str(account["credits_balance"]))
-        inner = f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
+        inner = _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
@@ -1364,6 +1359,71 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       account, current="account"),
                 status_code=500)
         return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    def _va_card(site: dict, check: str) -> str:
+        """Ventoryn Analytics: the snippet, live status, install check."""
+        from ventoryn.analytics import analytics_for, snippet
+
+        va = analytics_for(store).summary(site["id"])
+        if va["installed"]:
+            status = (f"<p><span class='badge badge-ok'>Receiving data</span> "
+                      f"Last event {esc(va['last_seen'][:16].replace('T', ' '))} UTC · "
+                      f"{va['visitors']:,} visitors and {va['pageviews']:,} "
+                      f"page views in the last 30 days"
+                      + (f" · {va['signed_visits']:,} through signed "
+                         f"Ventoryn links" if va["signed_visits"] else "")
+                      + "</p>")
+            top = "".join(f"<tr><td>{esc(src)}</td><td>{v:,}</td></tr>"
+                          for src, v in va["sources"][:8])
+            if top:
+                status += ("<div class='table-wrap'><table><tr><th>Source"
+                           "</th><th>Visitors (30 days)</th></tr>"
+                           f"{top}</table></div>")
+        else:
+            status = ("<p><span class='badge badge-off'>Not installed</span> "
+                      "No visits recorded yet.</p>")
+        notice = ""
+        if check:
+            ok, _, message = check.partition(":")
+            kind = "ok" if ok == "ok" else "warn"
+            notice = (f"<div class='v-notice v-notice-{kind}'>"
+                      f"{esc(message)}</div>")
+        code = esc(snippet(site["id"], config.base_url))
+        return (f"<div class='card' id='ventoryn-analytics'>"
+                f"<h2>Ventoryn Analytics</h2>{notice}{status}"
+                f"<p>Add this line inside <code>&lt;head&gt;</code> on every "
+                f"page of {esc(site['host'])}:</p>"
+                f"<pre class='v-snippet'><code>{code}</code></pre>"
+                f"<p class='muted'>Count signups by calling "
+                f"<code>ventoryn('signup')</code> when someone signs up. "
+                f"No cookies, nothing stored on visitors' devices, no "
+                f"personal data kept. If your site sends a "
+                f"Content-Security-Policy, allow "
+                f"<code>{esc(config.base_url)}</code> in "
+                f"<code>script-src</code> and <code>connect-src</code>.</p>"
+                f"<form method='post' action='/account/sites/{esc(site['id'])}"
+                f"/analytics/check'><button class='btn' type='submit'>"
+                f"Check my installation</button></form></div>")
+
+    @app.post("/account/sites/{site_id}/analytics/check")
+    async def va_check_install(request: Request, site_id: str):
+        import asyncio
+        import urllib.parse as _up
+
+        from ventoryn.analytics import check_install
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account, current="account"), status_code=404)
+        ok, message = await asyncio.to_thread(check_install, site)
+        q = _up.quote(("ok:" if ok else "no:") + message, safe="")
+        return RedirectResponse(
+            f"/account/sites/{site_id}?va_check={q}#ventoryn-analytics",
+            status_code=303)
 
     @app.post("/account/sites/{site_id}/conversions")
     def record_sale(request: Request, site_id: str,
