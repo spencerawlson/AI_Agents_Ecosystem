@@ -799,7 +799,6 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if redirect is not None:
             return redirect
         sites = store.list_sites(account["id"])
-        jobs = store.list_jobs(account["id"])
         # The website the visitor typed on the landing page, carried
         # through sign-in and checkout — it arrives prefilled on the
         # add-website form, never retyped.
@@ -833,35 +832,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                          "<a href='/account/security'>Set up "
                          "two-factor</a>. You cannot use Ventoryn until "
                          "it is set up.</p>")
-        site_rows = ""
-        for site in sites:
-            connections = {c["kind"]: c
-                           for c in store.get_connections(site["id"])}
-            plausible_key = None
-            raw = (store.get_connection(site["id"], "plausible") or {}
-                   ).get("_detail_raw") or {}
-            if connections.get("plausible", {}).get("status") == "connected":
-                plausible_key = raw.get("api_key")
-            funnel = _funnel_rows(store, site, plausible_key)
-            site_rows += (
-                f"<div class='card'><h3><a href='/account/sites/{esc(site['id'])}'>"
-                f"{esc(site['url'])}</a></h3>"
-                f"<div class='table-wrap'><table>{funnel}</table></div></div>")
-        if not site_rows:
-            site_rows = ("<div class='card'><p>No websites yet. "
-                         f"<a href='{esc(add_site_href)}'>Add your first "
-                         "website</a> — Ventoryn works to bring it its "
-                         "first 100 paying customers.</p></div>")
-        job_rows = "".join(
-            f"<tr><td>{esc(j['job_type'].replace('_', ' '))}</td>"
-            f"<td>{esc(j['status'])}</td>"
-            f"<td>{j['credits_charged']} credits</td>"
-            f"<td>{esc(j['result'] or '—')}</td></tr>"
-            for j in jobs) or ("<tr><td colspan='4'>No jobs yet.</td></tr>")
         # The plan card: name + status + credit balance only. The
         # Subscribe pitch ($20/month) and the credit table ("what a
         # credit buys") live ONLY on the Subscribe page — My account
-        # shows your plan, your websites, recent jobs, nothing else.
+        # shows your plan only (websites + jobs are on Websites).
         # The owner has no $20/month plan: "Permanent — owner", no
         # price, no Subscribe button for himself.
         if config.is_operator(account["email"]):
@@ -894,14 +868,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 f"<p><a class='btn' href='{esc(add_site_href)}'>"
                 "Add a website</a></p></div>")
             pause_card = ""
+        # Your websites (with their funnels) and Recent jobs moved to the
+        # Websites page (/portfolio); My account is the plan only.
         inner = f"""{_account_subnav_html('dashboard')}{notice}
 {plan_card}
-{pause_card}
-<h2>Your websites</h2>{site_rows}
-<h2>Recent jobs</h2>
-<div class='table-wrap'><table>
-<tr><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>
-{job_rows}</table></div>"""
+{pause_card}"""
         return _signed_page("My account", inner, account, current="account")
 
     # -- subscribe -----------------------------------------------------------
@@ -1287,8 +1258,15 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         if config.is_operator(account["email"])
                         else str(account["credits_balance"]))
         from ventoryn import site_snapshot as _snap
+        snap = _snap.snapshot_store_for(store).get(site["id"])
+        if snap is None:
+            # Sites added before the snapshot existed never had one:
+            # start it now (start() enforces one run at a time), so the
+            # "Looking at your site…" card is never a dead end.
+            _snap.start(store, site, REPORTS_DIR)
+            snap = _snap.snapshot_store_for(store).get(site["id"])
         snapshot_html = (f"<style>{_snap.SNAPSHOT_CSS}</style>"
-                         + _snap.render_card(site, _snap.snapshot_store_for(store).get(site["id"])))
+                         + _snap.render_card(site, snap))
         inner = snapshot_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a

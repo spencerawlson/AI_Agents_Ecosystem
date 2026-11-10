@@ -331,8 +331,11 @@ def test_customer_my_account_plan_only_no_pitch():
     assert r.status_code == 200
     assert "My account" in r.text
     assert "Ventoryn Growth" in r.text  # the plan name
-    assert "ada.example.com" in r.text  # the websites
-    assert "Recent jobs" in r.text
+    # Websites + Recent jobs moved to the Websites page (/portfolio).
+    assert "Your websites" not in r.text
+    assert "Recent jobs" not in r.text
+    w = client_a.get("/portfolio")
+    assert "ada.example.com" in w.text and "Recent jobs" in w.text
     assert "Subscribe — $20/month" not in r.text
     assert "$20/month" not in r.text
     assert "What a credit buys" not in r.text
