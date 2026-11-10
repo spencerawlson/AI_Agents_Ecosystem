@@ -50,7 +50,8 @@ p { margin: 8px 0; }
 .muted { color: var(--v-muted); font-size: 14px; }
 .unavailable { color: var(--v-muted); font-style: italic; }
 code { background: var(--v-violet-soft); color: var(--v-violet-deep);
-  padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+  padding: 1px 6px; border-radius: 6px; font-size: 13px;
+  overflow-wrap: anywhere; }
 blockquote { border-left: 4px solid var(--v-amber); margin: 12px 0;
   padding: 10px 14px; background: var(--v-amber-soft);
   border-radius: 0 var(--v-radius-sm) var(--v-radius-sm) 0; }
