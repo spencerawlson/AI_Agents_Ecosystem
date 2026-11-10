@@ -1843,8 +1843,9 @@ if (demoToggle && demoValue) {{
                    if conn.get("status") == "connected" else None)
             return (f"<div class='table-wrap v-biz-funnel'><table>"
                     f"{_funnel_rows(_saas_store, site, key)}</table></div>"
-                    f"<p class='v-biz-open'><a href='/account/sites/"
-                    f"{esc(site['id'])}'>Open website</a></p>")
+                    f"<p class='v-biz-open'><a href='{esc(site['url'])}' "
+                    f"target='_blank' rel='noopener noreferrer'>"
+                    f"Open website</a></p>")
 
         def _title(r) -> str:
             if str(r["id"]).startswith("site:"):
