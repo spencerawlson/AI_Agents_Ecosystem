@@ -1721,6 +1721,23 @@ funnel counts it. This is the owner-recorded fallback.</p>
         store.record_conversion(site_id, amount_cents, "usd", "manual")
         return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
 
+    def _count_own_sale(event: dict) -> None:
+        """A Ventoryn subscription is also a paying customer of
+        ventoryn.app itself. Its events are signed with the platform
+        secret (Ventoryn's own Stripe account), so they never reach the
+        per-site sales secrets — count them for the own site here. Only
+        the own site id is honoured, and only from a platform-verified
+        event; the derived event id keeps redeliveries counted once."""
+        from ventoryn.analytics import own_site_id
+
+        own = own_site_id()
+        obj = (event.get("data") or {}).get("object") or {}
+        if (not own or ((obj.get("metadata") or {}).get("ventoryn_site_id") != own)
+                or store.get_site(own) is None):
+            return
+        handle_customer_sale_webhook(
+            store, own, {**event, "id": f"{event['id']}:own-sale"})
+
     # -- Stripe webhook (no login — the signature is the auth) ---------------
     @app.post("/account/billing/webhook")
     async def stripe_webhook(request: Request):
@@ -1735,6 +1752,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if config.stripe_webhook_secret and verify_webhook_signature(
                 payload, header, config.stripe_webhook_secret):
             result = handle_platform_webhook(store, config, event)
+            _count_own_sale(event)
             return JSONResponse({"received": True, "result": result})
         for site_id, secret in store.stripe_sales_secrets():
             if verify_webhook_signature(payload, header, secret):
