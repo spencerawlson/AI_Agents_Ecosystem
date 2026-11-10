@@ -16,6 +16,7 @@ crash and on reboot.
 | File ownership | Container runs as the host user's uid/gid (1000). |
 | Logs | `docker logs`, rotated at 20 MB × 5. |
 | Video jobs | `ffmpeg` is in the image. |
+| Screenshots | A second container, `ventoryn-shot` (same image, `python -m ventoryn.shot_service`, 127.0.0.1:8210). Chrome needs a relaxed seccomp filter for its sandbox, so the browser runs here — not in the app: no data, no `.env.ventoryn`, read-only root, all capabilities dropped, 1 GB / 1 CPU / 512 processes. The app reaches it with a shared token (`~/.config/ventoryn/shot.token`, created on first use). |
 
 Docker Compose is not installed on the server (Fedora's `docker` package
 does not ship it), so the script uses plain `docker run`.
@@ -39,10 +40,12 @@ logs and **rolls back automatically**.
 ## Day-to-day
 
 ```bash
+git pull --ff-only                   # first, so the newest script runs
 deploy/docker/ventoryn.sh deploy     # git pull + rebuild + replace; previous image restored if unhealthy
 deploy/docker/ventoryn.sh logs
 deploy/docker/ventoryn.sh status
 deploy/docker/ventoryn.sh backup
+deploy/docker/ventoryn.sh shooter     # (re)start only the screenshot container
 ```
 
 ## Rollback to the old way
