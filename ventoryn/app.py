@@ -4768,6 +4768,8 @@ a real Stripe payment, no signature.</p>"""
     register_saas_routes(app, _saas_store, _saas_config)
     from ventoryn.analytics import register_analytics_routes
     register_analytics_routes(app, _saas_store, _saas_config)
+    from ventoryn.public_files import register_public_files
+    register_public_files(app, _saas_config)
 
     # -- activity: who is live now -----------------------------------------
     # Every authenticated request stamps the account's last-seen
