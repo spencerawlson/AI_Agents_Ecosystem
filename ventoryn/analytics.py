@@ -94,13 +94,19 @@ window.ventoryn=function(n){if(typeof n==='string'&&/^[a-z0-9_-]{1,40}$/i.test(n
 OWN_SITE_ID_DEFAULT = "8e7c68c8885a1ef3e072a01c"
 
 
-def own_snippet() -> str:
-    """The analytics tag for Ventoryn's own pages. Same origin as the app,
-    so the platform CSP ('self') already allows the script and beacon."""
+def own_site_id() -> str:
+    """Ventoryn's own site id, or "" when turned off / invalid."""
     import os
 
     site = os.environ.get("VENTORYN_OWN_SITE_ID", OWN_SITE_ID_DEFAULT).strip()
-    if not re.fullmatch(r"[0-9a-f]{24}", site):
+    return site if re.fullmatch(r"[0-9a-f]{24}", site) else ""
+
+
+def own_snippet() -> str:
+    """The analytics tag for Ventoryn's own pages. Same origin as the app,
+    so the platform CSP ('self') already allows the script and beacon."""
+    site = own_site_id()
+    if not site:
         return ""
     return f'<script defer data-site="{site}" src="https://ventoryn.app/v.js"></script>'
 

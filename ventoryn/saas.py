@@ -2310,6 +2310,10 @@ def create_checkout_session(config: SaasConfig, account: dict,
         "success_url": success_url,
         "cancel_url": f"{config.base_url}/account/subscribe?cancelled=1",
     }
+    from ventoryn.analytics import own_site_id
+    if own_site_id():
+        # ventoryn.app counts its own subscribers as paying customers.
+        fields["metadata[ventoryn_site_id]"] = own_site_id()
     body = _http_post_form(
         STRIPE_CHECKOUT_SESSIONS_URL, fields,
         headers=stripe_auth_header(config.stripe_secret_key),
