@@ -4838,6 +4838,23 @@ a real Stripe payment, no signature.</p>"""
     from ventoryn.public_files import register_public_files
     register_public_files(app, _saas_config)
 
+    # Autopilot: the agents work on every website by default.
+    def _start_autopilot():
+        from ventoryn import autopilot
+        from ventoryn.saas_routes import REPORTS_DIR as _reports
+
+        app.state.autopilot_stop = autopilot.start(
+            _saas_store, _saas_config, reports_dir=_reports,
+            get_orchestrator=lambda: app.state.ecosystem["orchestrator"])
+
+    def _stop_autopilot():
+        stop = getattr(app.state, "autopilot_stop", None)
+        if stop is not None:
+            stop.set()
+
+    app.router.on_startup.append(_start_autopilot)
+    app.router.on_shutdown.append(_stop_autopilot)
+
     # -- activity: who is live now -----------------------------------------
     # Every authenticated request stamps the account's last-seen
     # (throttled to one write per minute per account in the store),

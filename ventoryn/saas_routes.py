@@ -1300,6 +1300,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
 <h2>Run agent work</h2>
+{_autopilot_card(site)}
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
 <form method='post' action='/account/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
 <label for='job_type'>Job</label>
@@ -1502,6 +1503,36 @@ funnel counts it. This is the owner-recorded fallback.</p>
             out.append(f"<option value='{esc(jt)}' data-hint='{esc(hint)}'>"
                        f"{esc(label)} — {cost} credits{esc(note)}</option>")
         return "".join(out)
+
+    def _autopilot_card(site: dict) -> str:
+        from ventoryn import autopilot
+
+        on = bool(int(site.get("autopilot", 1) or 0))
+        plan = ", ".join(
+            f"{site_jobs.JOB_LABELS[jt].split(' — ')[0]} every {days} days"
+            for jt, days in autopilot.AUTOPILOT_JOBS)
+        state = ("<span class='badge badge-ok'>On</span>" if on
+                 else "<span class='badge badge-off'>Off</span>")
+        label = "Turn off" if on else "Turn on"
+        return (f"<div class='card' id='autopilot'><h3>Agents on autopilot {state}</h3>"
+                f"<p class='muted'>The agents work on this website by themselves: "
+                f"{esc(plan)}. Each run costs the same credits as running it by hand; "
+                f"nothing is published without your approval.</p>"
+                f"<form method='post' action='/account/sites/{esc(site['id'])}/autopilot'>"
+                f"<input type='hidden' name='on' value='{0 if on else 1}'>"
+                f"<button class='btn' type='submit'>{label}</button></form></div>")
+
+    @app.post("/account/sites/{site_id}/autopilot")
+    def site_autopilot(request: Request, site_id: str, on: str = Form("1")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account, current="account"), status_code=404)
+        store.set_site_autopilot(site_id, on == "1")
+        return RedirectResponse(f"/account/sites/{site_id}#autopilot", status_code=303)
 
     @app.post("/account/sites/{site_id}/jobs")
     async def run_job(request: Request, site_id: str,
