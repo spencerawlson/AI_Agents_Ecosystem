@@ -117,12 +117,12 @@ def test_unconnected_account_cannot_post_gate_enforced():
             store, account, site["id"], kind, config)
         assert allowed is False, kind
         assert "Not connected" in reason, reason
-    # The Connect action for Reddit/X refuses honestly (no app
-    # registration yet — nothing is stored, nothing is faked).
+    # The Connect action for Reddit refuses honestly (no free API
+    # access exists — nothing is stored, nothing is faked).
     r = client.post(f"/account/sites/{site['id']}/connections/reddit",
                     data={})
     assert r.status_code == 400
-    assert "app registration" in r.text
+    assert "not available" in r.text
     conn = store.get_connection(site["id"], "reddit") or {}
     assert conn.get("status") != "connected"
     # Pause-all-posting also blocks, even if a connection existed.

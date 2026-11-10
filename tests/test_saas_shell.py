@@ -727,7 +727,7 @@ def test_connections_are_honest_and_secrets_never_rendered(client, store):
     r = client.post(
         f"/account/sites/{site['id']}/connections/reddit", data={})
     assert r.status_code == 400
-    assert "app registration" in r.text
+    assert "not available" in r.text
 
     r = client.post(
         f"/account/sites/{site['id']}/connections/plausible",
