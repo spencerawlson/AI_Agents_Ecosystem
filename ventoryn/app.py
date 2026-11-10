@@ -564,6 +564,11 @@ def create_app(
   margin: 0; font-size: 14px; padding-top: 12px;
   border-top: 1px solid var(--v-line); }
 .v-biz dt { color: var(--v-muted); }
+.v-biz-funnel { margin: 12px 0 0; box-shadow: none; }
+.v-biz-funnel td { font-size: 13px; padding: 7px 10px; }
+.v-biz-open { margin: 10px 0 0; font-weight: 600; font-size: 14px; }
+.v-biz h3 a { color: inherit; text-decoration: none; }
+.v-biz h3 a:hover { color: var(--v-violet-deep); }
 .v-biz dd { margin: 0; font-weight: 700; text-align: right;
   font-variant-numeric: tabular-nums; }
 .v-biz-extra { margin: 12px 0 0; font-size: 14px;
@@ -1748,10 +1753,35 @@ if (demoToggle && demoValue) {{
         total_profit = sum(r["net_profit"] for r in biz_rows
                            if r["net_profit"] is not None)
 
+        from ventoryn.saas_routes import _funnel_rows
+
+        def _site_extra(r) -> str:
+            """For the account's own websites: the funnel (visitors,
+            signups, paying customers, revenue) that used to live on
+            My account, plus the way into the site's page."""
+            if not str(r["id"]).startswith("site:"):
+                return ""
+            site = _saas_store.get_site(str(r["id"])[5:])
+            if site is None:
+                return ""
+            conn = _saas_store.get_connection(site["id"], "plausible") or {}
+            key = ((conn.get("_detail_raw") or {}).get("api_key")
+                   if conn.get("status") == "connected" else None)
+            return (f"<div class='table-wrap v-biz-funnel'><table>"
+                    f"{_funnel_rows(_saas_store, site, key)}</table></div>"
+                    f"<p class='v-biz-open'><a href='/account/sites/"
+                    f"{esc(site['id'])}'>Open website &rarr;</a></p>")
+
+        def _title(r) -> str:
+            if str(r["id"]).startswith("site:"):
+                return (f"<h3><a href='/account/sites/{esc(str(r['id'])[5:])}'>"
+                        f"{esc(r['name'])}</a></h3>")
+            return f"<h3>{esc(r['name'])}</h3>"
+
         def _cards(rows) -> str:
             return "".join(
                 f"<article class='v-biz v-accent-{i % 4}'>"
-                f"<h3>{esc(r['name'])}</h3>"
+                f"{_title(r)}"
                 f"<p class='v-biz-url'>{esc(r['business_type'])} · "
                 f"{esc(r['status'])}"
                 + (" · <a class='pill' href='/businesses'>Unclaimed — claim"
@@ -1760,6 +1790,7 @@ if (demoToggle && demoValue) {{
                 f"<dl><dt>Revenue</dt><dd>{_money(r['revenue'])}</dd>"
                 f"<dt>Costs</dt><dd>{money(r['total_costs'])}</dd>"
                 f"<dt>Net profit</dt><dd>{_money(r['net_profit'])}</dd></dl>"
+                f"{_site_extra(r)}"
                 f"</article>"
                 for i, r in enumerate(rows)) or (
                 "<div class='card'><p>No websites yet. "
@@ -1772,6 +1803,17 @@ if (demoToggle && demoValue) {{
                        if any_hidden else "")
         # Registry businesses are a second, clearly-labeled group —
         # never mixed into the customer's own websites.
+        # Recent jobs (moved here from My account): which website each
+        # job ran on, what it was, and what it cost.
+        hosts = {s["id"]: s["host"] for s in _saas_store.list_sites(account["id"])}
+        job_rows = "".join(
+            f"<tr><td>{esc(hosts.get(j['site_id'], '—'))}</td>"
+            f"<td>{esc(j['job_type'].replace('_', ' '))}</td>"
+            f"<td>{esc(j['status'])}</td>"
+            f"<td>{j['credits_charged']} credits</td>"
+            f"<td>{esc(j['result'] or '—')}</td></tr>"
+            for j in _saas_store.list_jobs(account["id"])
+        ) or "<tr><td colspan='5'>No jobs yet.</td></tr>"
         reg_group = ""
         if reg_rows:
             reg_group = (f"<h2>Operator businesses</h2>"
@@ -1792,6 +1834,10 @@ sum of recorded paying customers per site.</p>{hidden_note}
 <p><a class='btn' href='/account/sites/new'>Add a website</a></p>
 <h2>Your websites</h2>
 <div class='v-biz-grid'>{_cards(site_rows)}</div>
+<h2>Recent jobs</h2>
+<div class='table-wrap'><table>
+<tr><th>Website</th><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>
+{job_rows}</table></div>
 {reg_group}"""
         return _operator_page(
             "Websites", inner, account=account, current="portfolio",

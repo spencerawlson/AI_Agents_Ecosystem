@@ -276,10 +276,14 @@ def test_dashboard_requires_login(client):
 def test_dashboard_honest_unavailable_states(client, store):
     account = _login(client, store)
     site = store.create_site(account["id"], "https://road2cissp.com")
+    # The per-site funnel lives on the Websites page (moved from My
+    # account): honest "unavailable" values while nothing is connected.
+    w = client.get("/portfolio")
+    assert w.status_code == 200
+    assert "road2cissp.com" in w.text
+    assert "unavailable" in w.text
     r = client.get("/account/dashboard")
     assert r.status_code == 200
-    assert "road2cissp.com" in r.text
-    assert "unavailable" in r.text  # funnel values, nothing connected yet
     # My account shows the plan name only — the Subscribe pitch
     # ($20/month) and the credit table live only on the Subscribe
     # page, never here.
