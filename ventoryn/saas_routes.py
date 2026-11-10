@@ -73,6 +73,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from core.countries import country_options
 from ventoryn.qrcode import qr_svg
 from ventoryn.saas import (
+    job_cost_label,
     APP_REGISTRATION_KINDS,
     CONNECTION_CONSENT,
     CONNECTION_REVOKE_NOTE,
@@ -1176,7 +1177,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         job_rows = "".join(
             f"<tr><td>{esc(j['job_type'].replace('_', ' '))}</td>"
             f"<td>{esc(j['status'])}</td>"
-            f"<td>{j['credits_charged']} credits</td>"
+            f"<td>{esc(job_cost_label(j, config.is_operator(account['email'])))}</td>"
             f"<td>{esc(j['result'] or '—')}</td></tr>"
             for j in jobs) or ("<tr><td colspan='4'>No jobs yet.</td></tr>")
         # Conversions from revenue_for_site: the three display

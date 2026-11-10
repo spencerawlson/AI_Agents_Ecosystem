@@ -25,7 +25,7 @@ def test_site_card_carries_the_funnel_and_link():
     site = store.create_site(account["id"], "https://shop.example.com")
     html = client.get("/portfolio").text
     assert "Visitors (last 30 days)" in html and "Paying customers" in html
-    assert f"href='/account/sites/{site['id']}'>Open website" in html
+    assert f"href='/account/sites/{site['id']}'>Open website</a>" in html
     assert f"<h3><a href='/account/sites/{site['id']}'>shop.example.com</a></h3>" in html
 
 
