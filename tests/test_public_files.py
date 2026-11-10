@@ -40,3 +40,10 @@ def test_llms_txt_is_public_plain_text():
     assert r.text.startswith("# Ventoryn\n")
     assert "$20/month" in r.text and "https://ventoryn.app/" in r.text
     assert "{base}" not in r.text
+
+
+def test_meta_description_fits_search_results():
+    import html, re
+    page = _client().get("/").text
+    m = re.search(r'<meta name="description" content="([^"]*)">', page)
+    assert m and 50 <= len(html.unescape(m.group(1))) <= 160

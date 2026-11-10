@@ -1312,7 +1312,7 @@ section.alt { background: var(--bg-tint); }
 <html lang="en"><head><title>Ventoryn — Become a Founding Customer</title>
 <meta charset="utf-8">
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<meta name="description" content="Ventoryn is an AI customer-acquisition service. AI agents discover your audience and prepare campaigns. You approve every action, while verified attribution shows which efforts turn into paying customers.">
+<meta name="description" content="Ventoryn&#x27;s AI agents find your audience and prepare campaigns. You approve every action; verified attribution shows which efforts bring paying customers.">
 <meta property="og:title" content="Ventoryn — Become a Founding Customer">
 <meta property="og:description" content="Enter your website, connect your accounts, and let Ventoryn's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
 <meta property="og:type" content="website">
