@@ -22,9 +22,11 @@ llm = ["litellm>=1.60"]
 market = ["pytrends", "requests>=2.31"]
 # Slideshow MP4 rendering (core/video_render.py).
 video = ["Pillow>=11.0"]
+# Website snapshot screenshots (ventoryn/site_screenshot.py).
+screenshot = ["playwright>=1.48"]
 # Durable task store (infra/pg_store.py, launch.py initdb).
 postgres = ["psycopg2-binary>=2.9"]
-all = ["ai-agents-ecosystem[llm,market,video,postgres]"]
+all = ["ai-agents-ecosystem[llm,market,video,screenshot,postgres]"]
 dev = ["ai-agents-ecosystem[all]", "pytest>=8.0", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]

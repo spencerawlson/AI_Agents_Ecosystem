@@ -21,10 +21,22 @@ WORKDIR /app
 # + the llm / market / video extras; postgres is left out (the deploy
 # uses the SQLite state file).
 COPY pyproject.toml ./
-RUN python -c "import tomllib; p = tomllib.load(open('pyproject.toml', 'rb'))['project']; deps = list(p['dependencies']) + [d for e in ('llm', 'market', 'video') for d in p['optional-dependencies'][e]]; open('/tmp/requirements.txt', 'w').write(chr(10).join(deps))" \
+RUN python -c "import tomllib; p = tomllib.load(open('pyproject.toml', 'rb'))['project']; deps = list(p['dependencies']) + [d for e in ('llm', 'market', 'video', 'screenshot') for d in p['optional-dependencies'][e]]; open('/tmp/requirements.txt', 'w').write(chr(10).join(deps))" \
  && pip install -r /tmp/requirements.txt
 
+# Chromium for the website-snapshot screenshot (runs WITH its sandbox;
+# see ventoryn/site_screenshot.py). Browsers in a shared path so the
+# non-root app user can run them.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/* \
+ && chmod -R a+rX /ms-playwright
+
 COPY . .
+
+# Every Python process in the container (incl. `docker exec ... python`
+# maintenance scripts) loads the mounted secrets file like the app does.
+RUN cp deploy/docker/sitecustomize.py     "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
 
 # Run as the host user that owns data/ and reports/ (uid 1000 on the
 # server), so files written by the container keep their owner.

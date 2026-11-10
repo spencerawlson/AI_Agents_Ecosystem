@@ -917,6 +917,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # The admin's recent-activity feed: a real website was added.
         store.record_activity_event(account["id"], "site-added",
                                     f"Website added: {site['url']}")
+        # The website snapshot (preview, specs, traffic, presence) starts
+        # right away in the background; the site page fills in.
+        from ventoryn import site_snapshot
+        site_snapshot.start(store, site, REPORTS_DIR)
         return RedirectResponse(f"/account/sites/{site['id']}",
                                 status_code=303)
 
@@ -979,9 +983,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         f"<form method='post' action='/account/sites/{esc(site_id)}"
                         f"/connections/stripe_sales'>"
                         "<label for='stripe_secret'>Stripe webhook signing "
-                        "secret</label><input type='text' id='stripe_secret' "
-                        "name='webhook_secret' placeholder='Stored, never "
-                        "shown back'><p><button class='btn' type='submit'>"
+                        "secret</label><input type='password' id='stripe_secret' "
+                        "name='webhook_secret' autocomplete='off' "
+                        "spellcheck='false' placeholder='whsec_… (stored "
+                        "encrypted, never shown back)'><p><button class='btn' type='submit'>"
                         "Connect Stripe sales</button></p></form>")
             else:
                 # Reddit / X: honest about the missing app registration —
@@ -1079,7 +1084,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         balance_text = ("Unlimited"
                         if config.is_operator(account["email"])
                         else str(account["credits_balance"]))
-        inner = _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
+        from ventoryn import site_snapshot as _snap
+        snapshot_html = (f"<style>{_snap.SNAPSHOT_CSS}</style>"
+                         + _snap.render_card(site, _snap.snapshot_store_for(store).get(site["id"])))
+        inner = snapshot_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
@@ -1404,6 +1412,41 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"<form method='post' action='/account/sites/{esc(site['id'])}"
                 f"/analytics/check'><button class='btn' type='submit'>"
                 f"Check my installation</button></form></div>")
+
+    @app.post("/account/sites/{site_id}/snapshot")
+    def snapshot_refresh(request: Request, site_id: str):
+        from ventoryn import site_snapshot
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account, current="account"), status_code=404)
+        # Cooldown + one-at-a-time are enforced inside start().
+        site_snapshot.start(store, site, REPORTS_DIR)
+        return RedirectResponse(f"/account/sites/{site_id}#site-snapshot",
+                                status_code=303)
+
+    @app.get("/account/sites/{site_id}/snapshot-image")
+    def snapshot_image(request: Request, site_id: str):
+        """The owner's own site screenshot — owner only, never public."""
+        from fastapi.responses import FileResponse, Response
+
+        from ventoryn.site_screenshot import snapshot_image_path
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return Response(status_code=404)
+        path = snapshot_image_path(REPORTS_DIR, site_id)
+        if not path.is_file():
+            return Response(status_code=404)
+        return FileResponse(str(path), media_type="image/png",
+                            headers={"Cache-Control": "private, max-age=300"})
 
     @app.post("/account/sites/{site_id}/analytics/check")
     async def va_check_install(request: Request, site_id: str):
