@@ -89,6 +89,22 @@ window.ventoryn=function(n){if(typeof n==='string'&&/^[a-z0-9_-]{1,40}$/i.test(n
 """
 
 
+#: Ventoryn's own site in Ventoryn Analytics (ventoryn.app tracks itself).
+#: VENTORYN_OWN_SITE_ID overrides it; "off" turns it off (e.g. dev/test).
+OWN_SITE_ID_DEFAULT = "8e7c68c8885a1ef3e072a01c"
+
+
+def own_snippet() -> str:
+    """The analytics tag for Ventoryn's own pages. Same origin as the app,
+    so the platform CSP ('self') already allows the script and beacon."""
+    import os
+
+    site = os.environ.get("VENTORYN_OWN_SITE_ID", OWN_SITE_ID_DEFAULT).strip()
+    if not re.fullmatch(r"[0-9a-f]{24}", site):
+        return ""
+    return f'<script defer data-site="{site}" src="https://ventoryn.app/v.js"></script>'
+
+
 def _bare_host(host: str) -> str:
     host = (host or "").lower().split(":")[0]
     return host[4:] if host.startswith("www.") else host

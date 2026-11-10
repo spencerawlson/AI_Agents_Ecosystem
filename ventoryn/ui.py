@@ -183,6 +183,13 @@ DOC_CSS = """
 """
 
 
+def _own_snippet() -> str:
+    """Ventoryn Analytics on Ventoryn's own pages (see analytics.own_snippet)."""
+    from ventoryn.analytics import own_snippet
+
+    return own_snippet()
+
+
 def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
@@ -281,7 +288,7 @@ def page(title: str, inner: str, *, header: str = "",
             f"<title>{esc(title)} — Ventoryn</title>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<meta name='theme-color' content='#0b0e1e'>"
-            f"<style>{BASE_CSS}{SIDEBAR_CSS}{extra_css}</style>{head_extra}"
+            f"<style>{BASE_CSS}{SIDEBAR_CSS}{extra_css}</style>{head_extra}{_own_snippet()}"
             f"</head><body{cls}><div class='app-layout'>{sidebar}"
             f"<div class='app-content'>{page_head}"
             f"<main class='app-main'>{inner}</main></div></div>"
@@ -291,6 +298,6 @@ def page(title: str, inner: str, *, header: str = "",
         f"<title>{esc(title)} — Ventoryn</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta name='theme-color' content='#0b0e1e'>"
-        f"<style>{BASE_CSS}{extra_css}</style>{head_extra}"
+        f"<style>{BASE_CSS}{extra_css}</style>{head_extra}{_own_snippet()}"
         f"</head><body{cls}>{header}<main class='v-main'>{inner}</main>"
         "</body></html>")

@@ -1318,7 +1318,7 @@ section.alt { background: var(--bg-tint); }
 <meta property="og:type" content="website">
 <meta property="og:url" content="{esc(_saas_config.base_url)}/">
 <script type="application/ld+json">{json_ld}</script>
-<style>{_LANDING_CSS}</style></head><body>
+<style>{_LANDING_CSS}</style>{_own_snippet_landing()}</head><body>
 <header class="site-nav"><div class="wrap">
 <button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 5h16M3 11h16M3 17h16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></button>
 <a class="brand" href="/">Ventoryn<span>.</span></a>
@@ -1760,6 +1760,11 @@ if (demoToggle && demoValue) {{
 }}
 </script>
 </body></html>"""
+
+    def _own_snippet_landing() -> str:
+        from ventoryn.analytics import own_snippet
+
+        return own_snippet()
 
     @app.get("/", response_class=HTMLResponse)
     def landing_page(request: Request):
