@@ -105,6 +105,19 @@ CREDIT_COSTS: dict[str, int] = {
     "video_render": 15,        # one rendered video (script -> MP4 + SRT)
 }
 
+def job_cost_label(job: dict, is_operator: bool) -> str:
+    """What a job cost, honestly. The owner is never charged (jobs record
+    0 credits for him), which used to make his agent work look free: show
+    the job's real price with "not charged" instead of "0 credits"."""
+    charged = int(job.get("credits_charged") or 0)
+    if charged:
+        return f"{charged} credits"
+    price = CREDIT_COSTS.get(job.get("job_type", ""), 0)
+    if is_operator and price:
+        return f"{price} credits — not charged (owner)"
+    return "0 credits"
+
+
 #: Job types the shell can run: all of CREDIT_COSTS (each one wired in
 #: ventoryn/site_jobs.py). A job whose server prerequisite is missing
 #: (an AI key, ffmpeg) is still listed; running it explains what is
@@ -1186,6 +1199,14 @@ class SaasStore:
             self._conn.execute(
                 "UPDATE saas_jobs SET status = ?, result = ? WHERE id = ?",
                 (status, result, job_id))
+
+    def jobs_since(self, account_id: str, since_iso: str) -> list[dict]:
+        """Every job of the account created at or after ``since_iso``."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_jobs WHERE account_id = ? AND created_at >= ?"
+                " ORDER BY created_at DESC", (account_id, since_iso)).fetchall()
+        return [_row_dict(r) for r in rows]
 
     def list_jobs(self, account_id: str, site_id: str | None = None,
                   limit: int = 20) -> list[dict]:

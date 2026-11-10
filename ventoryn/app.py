@@ -125,6 +125,35 @@ def _is_completion(event) -> bool:
     return False
 
 
+def agent_cost_windows(audit: AuditLog, now=None,
+                       windows: tuple = (1, 7, 30)) -> dict:
+    """Real AI spend per time window, from the audit log — deduped per run
+    exactly like agent_stats_from_audit (one run = one cost, even when it
+    logged run_completed AND task_verified), so the Overview card and the
+    Agents page can never disagree. {days: {"cost", "tokens", "runs"}}."""
+    from datetime import datetime, timedelta, timezone
+
+    now = now or datetime.now(timezone.utc)
+    groups: dict[str, list] = {}
+    for e in audit.all_events():
+        if e.event in _RUN_EVENTS and (e.run_id or e.task_id):
+            groups.setdefault(e.run_id or e.task_id, []).append(e)
+    out = {d: {"cost": 0.0, "tokens": 0, "runs": 0} for d in windows}
+    for group in groups.values():
+        chosen = next((ev for pref in _COST_PREFERENCE for ev in group
+                       if ev.event == pref and (ev.cost_usd or ev.tokens_used)),
+                      group[0])
+        at = chosen.created_at
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        for d in windows:
+            if at >= now - timedelta(days=d):
+                out[d]["cost"] += chosen.cost_usd
+                out[d]["tokens"] += chosen.tokens_used
+                out[d]["runs"] += 1
+    return out
+
+
 def agent_stats_from_audit(audit: AuditLog, agent_types: list) -> list[dict]:
     """Per-agent totals derived from the audit log — the same source the
     feed reads, so the bars, the feed and the ledger can never disagree.
@@ -617,6 +646,18 @@ def create_app(
 .v-feed-cost { color: var(--v-muted); margin-left: auto; }
 .v-feed-result { flex-basis: 100%; color: var(--v-muted); }
 .v-feed-voice { flex-basis: 100%; font-size: 14px; }
+/* Overview: Agent costs (24 h / 7 d / 30 d). */
+.v-cost-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px; }
+.v-cost-cell { border: 1px solid var(--v-line); border-radius: var(--v-radius-sm);
+  padding: 12px 14px; background: #faf9fe; display: flex;
+  flex-direction: column; gap: 2px; min-width: 0; }
+.v-cost-label { font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--v-muted); }
+.v-cost-big { font-size: 22px; font-weight: 800; color: var(--v-ink);
+  font-variant-numeric: tabular-nums; }
+.v-cost-sub { font-size: 13px; color: var(--v-muted); overflow-wrap: anywhere; }
+@media (max-width: 640px) { .v-cost-grid { grid-template-columns: minmax(0, 1fr); } }
 /* Overview: the three customer counts as one compact card. */
 .v-kpi-stack .v-kpi-row { display: flex; align-items: center;
   justify-content: space-between; gap: 16px; padding: 12px 0;
@@ -1767,7 +1808,7 @@ if (demoToggle && demoValue) {{
             return (f"<div class='table-wrap v-biz-funnel'><table>"
                     f"{_funnel_rows(_saas_store, site, key)}</table></div>"
                     f"<p class='v-biz-open'><a href='/account/sites/"
-                    f"{esc(site['id'])}'>Open website &rarr;</a></p>")
+                    f"{esc(site['id'])}'>Open website</a></p>")
 
         def _title(r) -> str:
             if str(r["id"]).startswith("site:"):
@@ -1802,12 +1843,15 @@ if (demoToggle && demoValue) {{
         # never mixed into the customer's own websites.
         # Recent jobs (moved here from My account): which website each
         # job ran on, what it was, and what it cost.
+        from ventoryn.saas import job_cost_label as _job_cost
+
+        _is_op = _saas_config.is_operator(account["email"])
         hosts = {s["id"]: s["host"] for s in _saas_store.list_sites(account["id"])}
         job_rows = "".join(
             f"<tr><td>{esc(hosts.get(j['site_id'], '—'))}</td>"
             f"<td>{esc(j['job_type'].replace('_', ' '))}</td>"
             f"<td>{esc(j['status'])}</td>"
-            f"<td>{j['credits_charged']} credits</td>"
+            f"<td>{esc(_job_cost(j, _is_op))}</td>"
             f"<td>{esc(j['result'] or '—')}</td></tr>"
             for j in _saas_store.list_jobs(account["id"])
         ) or "<tr><td colspan='5'>No jobs yet.</td></tr>"
@@ -2242,6 +2286,46 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
                 f"Reject</button></form>"
                 f"{more}</div>")
 
+    def _agent_costs_card_html(account) -> str:
+        """What the agents' work is costing — 24 h / 7 days / 30 days.
+        The owner sees the real AI spend (USD + tokens, from the audit
+        log) and the credit value of the jobs he ran (he is not charged,
+        so the jobs' price is what the work is worth). A customer sees
+        the credits their jobs used."""
+        from datetime import datetime, timedelta, timezone
+        from ventoryn.saas import CREDIT_COSTS
+
+        now = datetime.now(timezone.utc)
+        is_op = _saas_config.is_operator(account["email"])
+        jobs = _saas_store.jobs_since(account["id"],
+                                      (now - timedelta(days=30)).isoformat())
+        ai = agent_cost_windows(state["audit"], now) if is_op else None
+        cells = ""
+        for days, label in ((1, "Last 24 hours"), (7, "Last 7 days"), (30, "Last 30 days")):
+            since = (now - timedelta(days=days)).isoformat()
+            window = [j for j in jobs if j["created_at"] >= since]
+            credits = sum((j["credits_charged"] or
+                           (CREDIT_COSTS.get(j["job_type"], 0) if is_op else 0))
+                          for j in window)
+            lines = ""
+            if ai is not None:
+                w = ai[days]
+                lines += (f"<span class='v-cost-big'>${w['cost']:,.4f}</span>"
+                          f"<span class='v-cost-sub'>AI spend — {w['tokens']:,} tokens"
+                          f" — {w['runs']} run{'s' if w['runs'] != 1 else ''}</span>")
+            else:
+                lines += f"<span class='v-cost-big'>{credits:,} credits</span>"
+            lines += (f"<span class='v-cost-sub'>{len(window)} job"
+                      f"{'s' if len(window) != 1 else ''} — {credits:,} credits"
+                      + (" (not charged)" if is_op and credits else "") + "</span>")
+            cells += f"<div class='v-cost-cell'><span class='v-cost-label'>{label}</span>{lines}</div>"
+        return (f"<div class='card v-costs'><h2>Agent costs</h2>"
+                f"<div class='v-cost-grid'>{cells}</div>"
+                f"<p class='muted' style='margin:10px 0 0'>"
+                + ("Real AI spend from every agent run, counted once per run. "
+                   if is_op else "Credits used by your agents' jobs. ")
+                + "<a href='/agents'>Cost per agent</a></p></div>")
+
     @app.get("/ops", response_class=HTMLResponse)
     def live_ops_page(request: Request, decided: str = ""):
         """The professional Overview: the top summary (progress ring
@@ -2343,6 +2427,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             middle = f"{websites_section}\n{analyze_html}"
         inner = f"""{banner}{_progress_grid_html(data)}
 {decision_html}
+{_agent_costs_card_html(account)}
 {middle}
 {_results_html(data)}
 {_live_activity_feed_html(snap["events"])}
