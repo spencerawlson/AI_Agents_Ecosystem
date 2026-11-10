@@ -1258,8 +1258,15 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         if config.is_operator(account["email"])
                         else str(account["credits_balance"]))
         from ventoryn import site_snapshot as _snap
+        snap = _snap.snapshot_store_for(store).get(site["id"])
+        if snap is None:
+            # Sites added before the snapshot existed never had one:
+            # start it now (start() enforces one run at a time), so the
+            # "Looking at your site…" card is never a dead end.
+            _snap.start(store, site, REPORTS_DIR)
+            snap = _snap.snapshot_store_for(store).get(site["id"])
         snapshot_html = (f"<style>{_snap.SNAPSHOT_CSS}</style>"
-                         + _snap.render_card(site, _snap.snapshot_store_for(store).get(site["id"])))
+                         + _snap.render_card(site, snap))
         inner = snapshot_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a

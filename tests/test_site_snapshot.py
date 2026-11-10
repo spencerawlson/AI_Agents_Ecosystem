@@ -212,3 +212,13 @@ def test_screenshot_is_owner_only(env):
     assert other.get(f"/account/sites/{site['id']}/snapshot-image").status_code == 404
     assert TestClient(client.app).get(
         f"/account/sites/{site['id']}/snapshot-image", follow_redirects=False).status_code in (303, 307)
+
+
+def test_old_site_without_snapshot_gets_one_when_opened(env):
+    # Sites added before the snapshot feature never had a run; opening
+    # the site page must start one, not show "Looking…" forever.
+    client, store, account, _ = env
+    site = store.create_site(account["id"], "https://old.example.com")  # no start()
+    assert site_snapshot.snapshot_store_for(store).get(site["id"]) is None
+    client.get(f"/account/sites/{site['id']}")
+    assert _wait_done(store, site["id"])["status"] == "done"
