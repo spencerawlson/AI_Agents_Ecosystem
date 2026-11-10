@@ -6,7 +6,7 @@
 - Consent text states plainly what Ventoryn can and cannot do.
 - Revenue privacy: per-account scoped; the display toggle is
   respected everywhere including admin totals (off = no dollar
-  figure anywhere; the sale still counts toward the 100 goal);
+  figure anywhere; the sale still counts as a verified customer);
   revenue figures never go into logs.
 - Webhooks: HMAC signature-verified, fail closed, replay protection
   and idempotent counting (a payment reported twice counts once).

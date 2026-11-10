@@ -163,7 +163,7 @@ def test_overview_section_order_with_decision_strip():
     r = client.get("/ops")
     assert r.status_code == 200
     text = r.text
-    markers = ("<h2>Progress to 100</h2>", "<h2>Needs your decision</h2>",
+    markers = ("<h2>Verified customers</h2>", "<h2>Needs your decision</h2>",
                "<h2>Your websites</h2>", "<h2>Analyze a site</h2>",
                "<h2>Results</h2>", "<h2>Live activity</h2>",
                "Data &amp; privacy controls</a>")

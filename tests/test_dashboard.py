@@ -45,7 +45,8 @@ def test_dashboard():
     # /portfolio, and it is the operator's own (signed-in) view.
     r = client.get("/")
     assert r.status_code == 200
-    assert "first 100 paying customers" in r.text
+    assert "Founding Customer" in r.text
+    assert "first 100 paying customers" not in r.text
     assert "Sign in with Google" in r.text
     assert "$20/month" in r.text
 

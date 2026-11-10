@@ -1255,8 +1255,8 @@ section.alt { background: var(--bg-tint); }
             "name": "Ventoryn",
             "applicationCategory": "BusinessApplication",
             "operatingSystem": "Web",
-            "description": ("Ventoryn gets your website its first 100 "
-                            "paying customers. AI agents discover your "
+            "description": ("Ventoryn is an AI customer-acquisition "
+                            "service. AI agents discover your "
                             "audience and prepare campaigns; you approve "
                             "every action; verified attribution shows "
                             "which efforts turn into paying customers."),
@@ -1268,11 +1268,11 @@ section.alt { background: var(--bg-tint); }
             "url": _saas_config.base_url,
         })
         return f"""<!DOCTYPE html>
-<html lang="en"><head><title>Ventoryn — get your website its first 100 paying customers</title>
+<html lang="en"><head><title>Ventoryn — Become a Founding Customer</title>
 <meta charset="utf-8">
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<meta name="description" content="Ventoryn gets your website its first 100 paying customers. AI agents discover your audience and prepare campaigns. You approve every action, while verified attribution shows which efforts turn into paying customers.">
-<meta property="og:title" content="Ventoryn — Your First 100 Paying Customers">
+<meta name="description" content="Ventoryn is an AI customer-acquisition service. AI agents discover your audience and prepare campaigns. You approve every action, while verified attribution shows which efforts turn into paying customers.">
+<meta property="og:title" content="Ventoryn — Become a Founding Customer">
 <meta property="og:description" content="Enter your website, connect your accounts, and let Ventoryn's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{esc(_saas_config.base_url)}/">
@@ -1302,7 +1302,7 @@ section.alt { background: var(--bg-tint); }
 <div class="wrap hero-grid">
 <div class="hero-copy">
 <span class="eyebrow">AI-Powered Customer Acquisition</span>
-<h1>Your First <span class="grad">100</span> Paying Customers.</h1>
+<h1>Become a Ventoryn <span class="grad">Founding Customer</span>.</h1>
 <h2 class="sub">Let AI Find Them. You Approve Every Move.</h2>
 <p class="lede">Enter your website, connect your accounts, and let
 Ventoryn&rsquo;s AI agents discover your audience, prepare campaigns, and
@@ -1339,7 +1339,7 @@ to fix. Nothing is published.</p>
 <div id="landing-cta" hidden></div>
 </div>
 </div>
-<div class="preview" role="img" aria-label="Illustrative preview of the Ventoryn dashboard: 24 of 100 verified customers, acquisition funnel, agent activity, approval queue, and a conversion attribution trace. All numbers are example data.">
+<div class="preview" role="img" aria-label="Illustrative preview of the Ventoryn dashboard: verified customers, acquisition funnel, agent activity, approval queue, and a conversion attribution trace. All numbers are example data.">
 <div class="preview-bar">
 <span class="dot" style="background:#ff5f57"></span>
 <span class="dot" style="background:#febc2e"></span>
@@ -1361,19 +1361,15 @@ to fix. Nothing is published.</p>
 <div class="side-item">Attribution</div>
 <div class="side-item">Integrations</div>
 <div class="side-item">Settings</div>
-<div class="side-foot">Growth Plan<br>Goal: First 100 Customers<br>24 / 100</div>
+<div class="side-foot">Growth Plan<br>Founding Customer Program</div>
 </div>
 <div class="preview-main">
 <div class="preview-grid">
 <div class="preview-cell">
-<h3>Customer acquisition progress</h3>
-<div class="ring-wrap">
-<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Progress ring: 24 of 100 verified customers"><circle cx="60" cy="60" r="52" fill="none" stroke="#e9e4fb" stroke-width="12"/><circle cx="60" cy="60" r="52" fill="none" stroke="#8b5cf6" stroke-width="12" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="248.3" transform="rotate(-90 60 60)"/><text x="60" y="56" text-anchor="middle" font-size="24" font-weight="800" fill="#6d28d9">24</text><text x="60" y="74" text-anchor="middle" font-size="11" fill="#666">/ 100</text></svg>
-<div><div class="ring-num">24 <small>/ 100 Verified Customers</small></div>
-<p class="ring-sub">24 verified paying customers so far — 76 to go. Example numbers.</p>
-<span class="pill green">+6 new customers (7 days)</span></div>
-</div>
-<div class="trend"><svg viewBox="0 0 300 64" role="img" aria-label="Illustrative acquisition trend rising to 24 verified customers"><polyline points="0,56 30,54 60,50 90,48 120,44 150,38 180,34 210,28 240,20 270,12 300,8" fill="none" stroke="#8b5cf6" stroke-width="2.5"/><line x1="0" y1="8" x2="300" y2="8" stroke="#c4b5fd" stroke-width="1" stroke-dasharray="4 4"/></svg></div>
+<h3>Verified customers</h3>
+<p>Verified customers appear here as signed sales land — each one
+traced from an approved action to a Stripe checkout.</p>
+<div class="trend"><svg viewBox="0 0 300 64" role="img" aria-label="Illustrative acquisition trend of verified customers over time"><polyline points="0,56 30,54 60,50 90,48 120,44 150,38 180,34 210,28 240,20 270,12 300,8" fill="none" stroke="#8b5cf6" stroke-width="2.5"/></svg></div>
 </div>
 <div class="preview-cell">
 <h3>Acquisition funnel</h3>
@@ -1419,15 +1415,15 @@ not real customer data, not a result Ventoryn promises.</p>
 <section id="how-it-works" class="alt">
 <div class="wrap">
 <h2>How <span class="grad">Ventoryn</span> Works</h2>
-<p class="lede">From your website to your first 100 paying customers — in 5 simple steps.</p>
+<p class="lede">From your website to verified paying customers — in 5 simple steps.</p>
 <ol class="steps">
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="none" stroke="#6d28d9" stroke-width="2"/><path d="M3 14h22M14 3c3 3.5 3 18.5 0 22M14 3c-3 3.5-3 18.5 0 22" fill="none" stroke="#6d28d9" stroke-width="1.6"/></svg></span><span class="step-num">1</span><strong>Enter Your Website</strong><span>Tell Ventoryn where your business lives. We analyze your website, product positioning, and potential audience.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="4" y="8" width="20" height="12" rx="2" fill="none" stroke="#3b82f6" stroke-width="2"/><path d="M10 14h8" stroke="#3b82f6" stroke-width="2"/></svg></span><span class="step-num">2</span><strong>Connect Your Accounts</strong><span>Securely connect supported social networks, analytics tools, and Stripe to bring your acquisition data together.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="#8b5cf6" stroke-width="2"/><line x1="17" y1="17" x2="24" y2="24" stroke="#8b5cf6" stroke-width="2"/></svg></span><span class="step-num">3</span><strong>Let AI Research Opportunities</strong><span>Ventoryn&rsquo;s agents find relevant audiences, conversations, communities, and content opportunities.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 3l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11V7z" fill="none" stroke="#166534" stroke-width="2"/><path d="M10 14l3 3 5-6" fill="none" stroke="#166534" stroke-width="2"/></svg></span><span class="step-num">4</span><strong>Approve Every Action</strong><span>Review recommended posts, replies, and campaigns before anything is published or executed.</span></li>
-<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M6 25V4" stroke="#92400e" stroke-width="2"/><path d="M6 4h16l-4 5 4 5H6" fill="none" stroke="#92400e" stroke-width="2"/></svg></span><span class="step-num">5</span><strong>Track Verified Customers</strong><span>Follow attribution from approved action to checkout and see your progress toward 100 paying customers.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M6 25V4" stroke="#92400e" stroke-width="2"/><path d="M6 4h16l-4 5 4 5H6" fill="none" stroke="#92400e" stroke-width="2"/></svg></span><span class="step-num">5</span><strong>Track Verified Customers</strong><span>Follow attribution from approved action to checkout and see which approved actions turned into verified paying customers.</span></li>
 </ol>
-<div class="steps-cta"><a class="btn btn-primary" href="#start">Start Your First 100 Journey</a></div>
+<div class="steps-cta"><a class="btn btn-primary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a></div>
 </div>
 </section>
 <section id="product">
@@ -1488,12 +1484,12 @@ Ventoryn is built on three principles.</p>
 <p class="lede">Built for businesses looking for their first paying
 customers.</p>
 <div class="who-grid">
-<div class="who"><h3>SaaS founders</h3><p>Your product is live. Your first 100 paying customers are not — yet.</p></div>
+<div class="who"><h3>SaaS founders</h3><p>Your product is live. Your paying customers are not — yet.</p></div>
 <div class="who"><h3>Independent software developers</h3><p>Ship the product, let Ventoryn find the people who will pay for it.</p></div>
 <div class="who"><h3>Startup teams</h3><p>Small team, no marketing department — agents do the daily outreach work.</p></div>
 <div class="who"><h3>Online service businesses</h3><p>Turn your website into a steady flow of new clients.</p></div>
 <div class="who"><h3>Digital product creators</h3><p>Courses, templates, tools — find the buyers already looking.</p></div>
-<div class="who"><h3>Founders launching their first website</h3><p>Day one on the web, with a plan to reach 100 paying customers.</p></div>
+<div class="who"><h3>Founders launching their first website</h3><p>Day one on the web, with a plan to find paying customers.</p></div>
 </div>
 </div>
 </section>
@@ -1508,15 +1504,14 @@ customers.</p>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your websites on Ventoryn</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>{_saas_config.monthly_credits:,} credits every month</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A growth report per site</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Agents working daily toward your first 100 paying customers</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Agents working daily to find new paying customers</li>
 </ul>
 <table class="credit-table">
 <thead><tr><th>What a credit buys</th><th>Cost</th></tr></thead>
 <tbody>{credit_rows}</tbody>
 </table>
 <p style="margin-top:16px"><a class="btn btn-primary" href="/account/subscribe">Subscribe — $20/month</a></p>
-<p class="muted">No free trial. No guarantees — the first 100 paying
-customers is a target Ventoryn works toward, not a promised outcome.
+<p class="muted">No free trial. No guarantees on customer numbers.
 Cancel anytime from your account.</p>
 </div>
 </div>
@@ -1525,14 +1520,14 @@ Cancel anytime from your account.</p>
 <div class="wrap">
 <h2>Frequently asked questions</h2>
 <div class="faq">
-<details><summary>What does Ventoryn do?</summary><p>Ventoryn is a service that gets a website its first 100 paying customers. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities — and you approve every action before anything happens. Progress is measured in verified paying customers, not page views.</p></details>
+<details><summary>What does Ventoryn do?</summary><p>Ventoryn is an AI customer-acquisition service for websites. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities — and you approve every action before anything happens. Progress is measured in verified paying customers, not page views.</p></details>
 <details><summary>How does Ventoryn help me find customers?</summary><p>Its agents research where your audience already gathers — relevant communities, conversations, and search demand — then prepare outreach (posts, replies, articles, videos) for your review. Approved actions go out; everything else stays a draft.</p></details>
 <details><summary>Will Ventoryn post without my approval?</summary><p>No. Nothing is ever published, replied to, or sent without your explicit approval. Every proposed action sits in your approval queue first. You pay for the service — you decide what goes out under your name.</p></details>
 <details><summary>Which accounts can I connect?</summary><p>Per website: Reddit, X, Plausible (analytics), and Stripe (sales). Reddit and X posting need the platform OAuth app registrations first — until then the connection honestly says so. X&rsquo;s API is paid and rate-limited, so posting there is slower.</p></details>
 <details><summary>How does Ventoryn verify paying customers?</summary><p>Every approved action carries a unique, signed attribution link. When a visitor follows it and pays through your Stripe checkout, the payment notice (signature-verified, processed once) is matched to that link — and only then is the customer counted as verified. A sale with no signature is reported as unattributed, never guessed.</p></details>
 <details><summary>Do I need Stripe?</summary><p>To count verified paying customers, yes — Ventoryn reads payments from your Stripe account (read-only; it can never charge or refund). Without a Stripe connection, Ventoryn can still analyze your site and prepare campaigns, but paying customers show as unavailable until you connect it.</p></details>
-<details><summary>Can I hide my revenue?</summary><p>Yes — revenue is private by default. You choose, per website, whether revenue amounts are displayed and whether the customer count is displayed. They are two separate settings. With revenue hidden, no dollar figure appears anywhere on Ventoryn — your sales still count toward the 100 goal. Revenue figures never go into logs.</p></details>
-<details><summary>Is getting 100 customers guaranteed?</summary><p>No. The first 100 paying customers is a target Ventoryn works toward — not a guaranteed outcome. What Ventoryn guarantees is the work: daily research, prepared campaigns, your approval on everything, and honest attribution of what actually turned into a paying customer.</p></details>
+<details><summary>Can I hide my revenue?</summary><p>Yes — revenue is private by default. You choose, per website, whether revenue amounts are displayed and whether the customer count is displayed. They are two separate settings. With revenue hidden, no dollar figure appears anywhere on Ventoryn — your sales still count as verified customers. Revenue figures never go into logs.</p></details>
+<details><summary>Does Ventoryn guarantee new customers?</summary><p>No. Ventoryn does not guarantee a number of paying customers. What Ventoryn guarantees is the work: daily research, prepared campaigns, your approval on everything, and honest attribution of what actually turned into a paying customer.</p></details>
 <details><summary>Can I disconnect my accounts?</summary><p>Yes, anytime, from your site&rsquo;s Connections section. Disconnecting revokes the token at the provider (where the provider allows it) and deletes the stored token and revenue data. Deleting your account does the same for everything it owns.</p></details>
 <details><summary>How is my information protected?</summary><p>Two-factor authentication (TOTP) is mandatory for every account from the first sign-in — you set it up with an authenticator app and backup codes. Sign-in is zero-trust: every request is verified server-side against your session, sessions expire, and a logged-out session stops working immediately. Tokens Ventoryn holds are encrypted at rest, server-side only, with the minimum scopes for the job. Sensitive actions — disconnecting a connection, changing the revenue display, disconnecting Stripe — ask for a fresh two-factor code. The admin account is protected by its own password plus two-factor, separate from any customer sign-in.</p></details>
 </div>
@@ -1544,8 +1539,10 @@ Cancel anytime from your account.</p>
 <p>Give Ventoryn your website. Let intelligent agents discover
 opportunities, prepare outreach, and help turn real engagement into
 measurable customer growth.</p>
+<p>Joining the waitlist is free registration, separate from the
+$20/month subscription.</p>
 <div class="hero-ctas">
-<a class="btn btn-primary" href="#start">Start Your First 100 Journey</a>
+<a class="btn btn-primary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a>
 <a class="btn btn-ghost" href="/account/login">Explore the Platform</a>
 </div>
 </div>
@@ -1568,7 +1565,7 @@ measurable customer growth.</p>
 <span class="soon">Privacy Policy — coming soon</span>
 <span class="soon">Terms of Service — coming soon</span></div>
 </div>
-<p class="base">Ventoryn — get your website its first 100 paying customers.</p>
+<p class="base">Ventoryn — AI customer acquisition for your website.</p>
 </div></footer>
 <script>
 "use strict";
@@ -1795,7 +1792,7 @@ if (demoToggle && demoValue) {{
                 for i, r in enumerate(rows)) or (
                 "<div class='card'><p>No websites yet. "
                 "<a href='/account/sites/new'>Add your first website</a> — "
-                "Ventoryn works to bring it its first 100 paying "
+                "Ventoryn works to bring it new paying "
                 "customers.</p></div>")
         hidden_note = ("<p class='muted'>Revenue from a site whose "
                        "revenue display is off is not included in these "
@@ -2307,7 +2304,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             for i, b in enumerate(snap["businesses"])) or (
             "<div class='card'><p>No websites yet. "
             "<a href='/account/sites/new'>Add your first website</a> — "
-            "Ventoryn works to bring it its first 100 paying "
+            "Ventoryn works to bring it new paying "
             "customers.</p></div>")
         # The landing funnel: a visitor who typed a URL on the
         # landing page arrives here with ?site_url= — prefill the
@@ -2775,13 +2772,13 @@ id="analyze-submit">Analyze</button>
         trend = _saas_store.verified_trend(counted_ids, days=30)
         any_count_hidden = len(counted_ids) != len(site_ids)
 
-        # Progress ring (SVG): verified / 100.
+        # Progress ring (SVG): verified-customer count.
         pct = min(verified, 100) / 100
         circ = 326.7
         ring = (
             f"<svg width='140' height='140' viewBox='0 0 140 140' "
-            f"role='img' aria-label='Progress: {verified} of 100 "
-            f"verified customers'><circle cx='70' cy='70' r='52' "
+            f"role='img' aria-label='Verified customers: {verified}'>"
+            f"<circle cx='70' cy='70' r='52' "
             f"fill='none' stroke='#e9e4fb' stroke-width='14'/>"
             f"<circle cx='70' cy='70' r='52' fill='none' "
             f"stroke='#8b5cf6' stroke-width='14' stroke-linecap='round' "
@@ -2791,7 +2788,7 @@ id="analyze-submit">Analyze</button>
             f"<text x='70' y='66' text-anchor='middle' font-size='28' "
             f"font-weight='800' fill='#6d28d9'>{verified}</text>"
             f"<text x='70' y='86' text-anchor='middle' font-size='13' "
-            f"fill='#666'>/ 100</text></svg>")
+            f"fill='#666'>verified</text></svg>")
 
         # Attribution flow: a step shows a check only where this
         # account has real evidence for it.
@@ -2920,7 +2917,7 @@ id="analyze-submit">Analyze</button>
                     and not c.get("refunded_at") and not c.get("disputed_at"))
         campaign_list = list(campaigns.values())
 
-        # Acquisition trend: cumulative verified by day + Goal: 100.
+        # Acquisition trend: cumulative verified by day.
         # Real data only — no estimated/projection line is drawn.
         if trend:
             vmax = max(100, max(p["verified"] for p in trend))
@@ -2930,22 +2927,15 @@ id="analyze-submit">Analyze</button>
                 f"{(i * tw / max(npts - 1, 1)):.1f},"
                 f"{(th - (p['verified'] / vmax) * th):.1f}"
                 for i, p in enumerate(trend))
-            goal_y = th - (100 / vmax) * th
             trend_svg = (
                 f"<svg viewBox='0 0 {tw} {th}' class='v-trend' "
                 f"role='img' aria-label='Acquisition trend: verified "
-                f"customers over the last 30 days, goal 100'>"
-                f"<line x1='0' y1='{goal_y:.1f}' x2='{tw}' "
-                f"y2='{goal_y:.1f}' stroke='#c4b5fd' stroke-width='1.5' "
-                f"stroke-dasharray='6 4'/>"
-                f"<text x='{tw - 4}' y='{goal_y - 6:.1f}' "
-                f"text-anchor='end' font-size='11' fill='#6d28d9'>"
-                f"Goal: 100</text>"
+                f"customers over the last 30 days'>"
                 f"<polyline points='{pts}' fill='none' "
                 f"stroke='#8b5cf6' stroke-width='2.5'/></svg>"
                 f"<p class='muted'>Verified customers, cumulative, "
-                f"last 30 days. The dashed line is the goal of 100 — "
-                f"no projection is drawn, only real verified sales.</p>")
+                f"last 30 days. "
+                f"No projection is drawn, only real verified sales.</p>")
         else:
             trend_svg = ("<p class='muted'>No verified customers yet — "
                          "the trend appears once the first signed sale "
@@ -3377,7 +3367,7 @@ id="analyze-submit">Analyze</button>
                             filename=job["report_name"])
 
     def _progress_grid_html(data: dict) -> str:
-        """The top summary: progress ring (verified / 100) + the
+        """The top summary: progress ring (verified-customer count) + the
         Verified / Pending / Unattributed stat cards. Shared by the
         customer /report and the professional Overview, so the two
         can never disagree."""
@@ -3390,10 +3380,10 @@ id="analyze-submit">Analyze</button>
             "more of your sites — change it in Data &amp; privacy "
             "controls below.</p>" if data["any_count_hidden"] else "")
         return f"""<div class='v-report-grid'>
-<div class='card v-progress'><h2>Progress to 100</h2>{ring}
+<div class='card v-progress'><h2>Verified customers</h2>{ring}
 <div class='v-bar-track'><div class='v-bar-fill' style='width:{min(verified, 100)}%'></div></div>
 <p><span class='pill green'>+{last7} verified customers (7 days)</span></p>
-<p class='muted'>Goal: 100 verified paying customers.</p>{count_note}</div>
+<p class='muted'>Verified paying customers, counted from signed sales.</p>{count_note}</div>
 <div class='card v-kpi-stack'><h2>Customers</h2>
 <div class='v-kpi-row'><div><strong>Verified</strong><p class='muted'>The Ventoryn signature reached the payment.</p></div><span class='big'>{verified}</span></div>
 <div class='v-kpi-row'><div><strong>Pending</strong><p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div><span class='big'>{counts['pending']}</span></div>
@@ -3536,8 +3526,8 @@ per-sale details are separate settings.</p>{data['privacy_forms']}</div>
                 f"<td>{esc(j['result'] or '—')}</td></tr>"
                 for j in _saas_store.list_jobs(account["id"])
             ) or "<tr><td colspan='4'>No jobs yet.</td></tr>"
-            inner = f"""<p class='muted'>Track your journey to your first
-100 verified paying customers.</p>
+            inner = f"""<p class='muted'>Track verified paying customers
+from signed campaigns to checkout.</p>
 <p class='muted'>Generated: {esc(utcnow().isoformat())}</p>
 {_progress_grid_html(data)}
 {_attribution_sections_html(data)}

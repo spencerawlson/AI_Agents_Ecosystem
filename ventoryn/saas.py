@@ -3,7 +3,7 @@
 This is what turns the internal Ventoryn dashboard into a product a
 website owner can buy: a stranger signs in with Google, subscribes for
 $20/month, adds their website, and Ventoryn works to bring that site
-its first 100 paying customers.
+new paying customers.
 
 Design rules (from the brief, do not weaken):
 - Sign-in is Google OAuth only. No passwords anywhere in this module.
@@ -42,7 +42,7 @@ Design rules (from the brief, do not weaken):
   payment. Otherwise it is unattributed revenue, never guessed.
 - REVENUE PRIVACY: the per-site "show my revenue" toggle is
   respected everywhere, including admin totals (off = no dollar
-  figure anywhere; the sale still counts toward the 100 goal).
+  figure anywhere; the sale still counts as a verified customer).
   Revenue figures never go into logs.
 """
 
@@ -529,7 +529,7 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # per-sale detail rows (which campaign, when, attribution state).
     # Revenue is private by default (OFF); the count and the details
     # are shown by default (ON). Either way the sale is still
-    # recorded and still counts toward the 100 goal internally.
+    # recorded and still counts as a verified customer internally.
     ("saas_sites", "revenue_show", "INTEGER NOT NULL DEFAULT 0"),
     ("saas_sites", "count_show", "INTEGER NOT NULL DEFAULT 1"),
     ("saas_sites", "details_show", "INTEGER NOT NULL DEFAULT 1"),
@@ -1236,7 +1236,7 @@ class SaasStore:
         """The customer's revenue-AMOUNT display choice ("Show my
         revenue on Ventoryn"). OFF hides every dollar figure for the
         site — report, funnel and admin totals — while the
-        paying-customer count still increments toward the 100 goal.
+        paying-customer count still increments as verified sales land.
         The count display is a separate setting (set_count_show)."""
         with self._lock, self._conn:
             self._conn.execute(
@@ -1247,7 +1247,7 @@ class SaasStore:
         """The customer's paying-customer COUNT display choice
         ("Show my customer count on Ventoryn"). OFF hides the count
         from the report, the funnel and the admin totals — the sales
-        are still recorded and still count toward the 100 goal
+        are still recorded and still count as verified customers
         internally. Separate from the revenue-amount setting."""
         with self._lock, self._conn:
             self._conn.execute(

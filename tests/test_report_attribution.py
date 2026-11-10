@@ -1,7 +1,7 @@
 """The customer Acquisition & Attribution report (reference image 3).
 
-The customer /report is the attribution-first view: progress toward
-100 verified paying customers, Verified / Pending / Unattributed
+The customer /report is the attribution-first view: verified paying
+customers, Verified / Pending / Unattributed
 counts, the attribution flow with evidence checks, the conversion
 status donut, campaign performance, the acquisition trend from real
 data, the conversion breakdown, the data-source legend, and the
@@ -125,10 +125,11 @@ def test_report_structure_per_reference():
     text = r.text
     # Title + subtitle.
     assert "Acquisition &amp; Attribution" in text
-    assert "100 verified paying customers" in text
-    # Progress: 1 verified of 100, with the 7-day pill.
-    assert "1" in text and "/ 100" in text
-    assert "Goal: 100" in text
+    assert "Track verified paying customers" in text
+    # Progress: 1 verified customer, with the 7-day pill.
+    assert "1" in text and "Verified customers" in text
+    assert "Goal: 100" not in text
+    assert "/ 100" not in text
     assert "verified customers (7 days)" in text
     # The revenue TOTAL is $19 + $19 + $25 = $63.00 (the per-sale
     # amounts live on the site page, not the report).
@@ -196,8 +197,9 @@ def test_report_empty_state_is_honest():
     store.create_site(account["id"], "https://ada.example.com")
     r = client.get("/report")
     assert r.status_code == 200
-    assert "0" in r.text  # 0 verified of 100
-    assert "/ 100" in r.text
+    assert "0" in r.text  # 0 verified customers
+    assert "Verified customers" in r.text
+    assert "/ 100" not in r.text
     # Every flow step says so when there is no evidence.
     assert "No evidence yet" in r.text
     assert "No signed campaigns yet" in r.text

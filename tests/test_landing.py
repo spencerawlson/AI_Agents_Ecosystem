@@ -78,8 +78,10 @@ def test_landing_page_public():
     app, _store = _app_with()
     r = TestClient(app).get("/")
     assert r.status_code == 200
-    # What it is, the promise, the price, the URL box, sign-in.
-    assert "first 100 paying customers" in r.text
+    # What it is, the program, the price, the URL box, sign-in.
+    assert "Founding Customer" in r.text
+    assert "first 100 paying customers" not in r.text
+    assert "Join the Founding Customer Waitlist" in r.text
     assert "$20/month" in r.text
     assert 'id="landing-analyze-form"' in r.text or \
         "id='landing-analyze-form'" in r.text
@@ -90,11 +92,11 @@ def test_landing_page_public():
     assert "Sign in with Google" in r.text
     # Reference image 1: the How It Works heading names the product.
     assert "How" in r.text and "Ventoryn" in r.text and "Works" in r.text
-    assert "From your website to your first 100 paying customers" in r.text
+    assert "From your website to verified paying customers" in r.text
     # The preview reuses the analyze pipeline in-process.
     assert 'fetch("/api/analyze"' in r.text
     # No site is named as a proof case — the page stands on the
-    # promise alone.
+    # program alone.
     assert "Road to CISSP" not in r.text
     assert "road2cissp" not in r.text.lower()
     # Visual design: gradient hero, styled URL card, feature strip,

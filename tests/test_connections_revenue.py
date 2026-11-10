@@ -182,7 +182,7 @@ def test_count_toggle_hides_count_but_count_still_increments():
     r = client.get(f"/account/sites/{site['id']}")
     assert "hidden — the customer count is not shown" in r.text
     # …but the count itself still increments — the sale still counts
-    # toward the 100 goal.
+    # as a verified customer.
     store.record_conversion(site["id"], 1900, "usd", "manual")
     assert store.paying_customer_count(site["id"]) == 2
     assert store.revenue_for_site(site["id"])["paying_customers"] is None

@@ -141,6 +141,8 @@ def test_new_pages_honest_empty_states_no_demo_numbers():
         r = client.get(path)
         assert "24 / 100" not in r.text, path
         assert "24 of 100" not in r.text, path
+        assert "Goal: First 100" not in r.text, path
+        assert "Verified customers" in r.text, path
 
 
 def test_new_pages_vector_only_no_glyph_arrows():

@@ -291,7 +291,7 @@ def sidebar_html(current: str | None, is_operator: bool, *,
     ``current`` is the PLATFORM_ITEMS key of the page being rendered
     (or None when the page is not a sidebar item): that item renders
     as a non-clickable span, never a dead link. ``verified`` is the
-    account's verified-customer count toward the first 100.
+    account's verified-customer count.
     ``pending_approvals`` badges the Approvals item (and the header
     bell) when above zero. The operator sees the Admin group and
     "Owner account — permanent" instead of the Manage Plan button.
@@ -325,9 +325,9 @@ def sidebar_html(current: str | None, is_operator: bool, *,
         f"<nav class='app-nav' aria-label='Platform'>{items}{admin}</nav>"
         f"<div class='growth-plan'>"
         f"<div class='growth-title'>Growth Plan</div>"
-        f"<p>Goal: First 100 Customers</p>"
+        f"<p>Verified customers</p>"
         f"<div class='growth-progress'><i style='width:{pct}%'></i></div>"
-        f"<strong>{verified} / 100</strong>"
+        f"<strong>{verified} verified</strong>"
         f"{growth_action}</div>"
         f"<div class='sidebar-foot'>"
         f"<a class='nav-item' href='/account/logout'>"

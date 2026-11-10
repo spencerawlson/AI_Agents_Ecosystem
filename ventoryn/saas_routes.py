@@ -284,7 +284,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         """_page for a signed-in account: the platform shell (purple
         sidebar + app header). These routes are all behind the
         forced-2FA middleware gate, so the sidebar is safe here.
-        Growth (verified / 100) comes from the store over the
+        Growth (the verified-customer count) comes from the store over the
         account's counted sites; pending approvals are the
         per-account pending ones from app.state.ecosystem (set at
         the top of create_app, long before register_saas_routes
@@ -929,7 +929,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                      f"<ul><li>{config.monthly_credits:,} credits every "
                      f"month</li><li>Your websites on Ventoryn, working "
-                     f"toward their first 100 paying customers</li>"
+                     f"to find new paying customers</li>"
                      f"<li>Growth reports per site</li></ul>"
                      f"<p><strong>Payments are not set up yet.</strong> "
                      f"The price is {esc(PLAN_PRICE_LABEL)}; the Stripe "
@@ -942,8 +942,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  f"<div class='card'><h2>{esc(PLAN_NAME)} — "
                  f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                  f"<ul><li>{config.monthly_credits:,} credits every month"
-                 f"</li><li>Your websites on Ventoryn, working toward "
-                 f"their first 100 paying customers</li>"
+                 f"</li><li>Your websites on Ventoryn, working to find "
+                 f"new paying customers</li>"
                  f"<li>Growth reports per site</li></ul>"
                  f"{pending_note}"
                  f"<form method='post' action='/account/subscribe'>"
@@ -989,8 +989,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if redirect is not None:
             return redirect
         inner = ("<div class='card'><p>Add the website Ventoryn will "
-                 "work on — it works to bring this site its first 100 "
-                 "paying customers.</p>"
+                 "work on — it works to bring this site new paying "
+                 "customers.</p>"
                  "<form method='post' action='/account/sites'>"
                  "<label for='url'>Website URL</label>"
                  "<input type='text' id='url' name='url' required "

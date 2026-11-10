@@ -2,13 +2,14 @@
 reference-image reading (2026-11-08).
 
 - Images 1 + 2 are both the landing page: WORDING from image 1
-  ("Your First 100 Paying Customers", "Let AI Find Them. You Approve
+  ("Become a Ventoryn Founding Customer", "Let AI Find Them. You Approve
   Every Move.", the five steps, the trust statements); DASHBOARD
   PREVIEW VISUAL from image 2 (light, clean dashboard panels with
   charts and tables) — the hero keeps image 1's navy background and
   copy, the preview inside it is rebuilt in image 2's light-panel
-  style with Ventoryn's acquisition content (24/100, funnel, agents,
-  approval queue, attribution), NOT image 2's multi-business content.
+  style with Ventoryn's acquisition content (verified-customer
+  summary, funnel, agents, approval queue, attribution), NOT image 2's
+  multi-business content.
 - Image 3 is the attribution-first repositioning (report pages).
 - Vector only: no bitmap references anywhere in the rendered page.
 """
@@ -32,9 +33,9 @@ def test_hero_copy_exact():
     r = _landing()
     assert r.status_code == 200
     assert "AI-Powered Customer Acquisition" in r.text
-    assert "Your First" in r.text and "Paying Customers." in r.text
-    # The "100" is gradient text (image 1).
-    assert 'class="grad">100</span>' in r.text
+    assert "Become a Ventoryn" in r.text and "Founding Customer" in r.text
+    # The program name is gradient text (image 1's "100" was).
+    assert 'class="grad">Founding Customer</span>' in r.text
     assert "Let AI Find Them. You Approve Every Move." in r.text
     assert "Enter your website, connect your accounts" in r.text
     assert "Start Getting Customers" in r.text
@@ -83,10 +84,12 @@ def test_preview_light_panels_image2_style():
                  "Attribution", "Integrations", "Settings"):
         assert item in r.text
     assert "Last 30 Days" in r.text
-    # Progress ring (SVG), not just a bar.
-    assert "Progress ring: 24 of 100 verified customers" in r.text
-    assert "/ 100 Verified Customers" in r.text
-    assert "+6 new customers (7 days)" in r.text
+    # Verified-customers cell: honest text, no counter, no goal.
+    assert "Verified customers appear here as signed sales land" in r.text
+    assert "24 of 100" not in r.text
+    assert "24 / 100" not in r.text
+    assert "Goal: First 100" not in r.text
+    assert "Progress ring: 24 of 100" not in r.text
     # Illustrative label, everywhere the numbers appear.
     assert "ILLUSTRATIVE DEMO DATA" in r.text
     assert "Illustrative product preview — not live customer data." in r.text
@@ -121,14 +124,15 @@ def test_preview_agents_queue_attribution():
 def test_how_it_works_image1():
     r = _landing()
     assert "Ventoryn" in r.text and "Works" in r.text
-    assert "From your website to your first 100 paying customers" in r.text
+    assert "From your website to verified paying customers" in r.text
     assert "in 5 simple steps." in r.text
     for step in ("Enter Your Website", "Connect Your Accounts",
                  "Let AI Research Opportunities", "Approve Every Action",
                  "Track Verified Customers"):
         assert step in r.text
     assert r.text.count('class="step-icon"') == 5
-    assert "Start Your First 100 Journey" in r.text
+    assert "Join the Founding Customer Waitlist" in r.text
+    assert 'href="/founding-customer-waitlist"' in r.text
     # Step connectors are inline SVG arrows between the cards — the
     # old font-glyph arrow rendered as "92" here. They exist on
     # desktop and are hidden where the cards stack.
@@ -188,7 +192,7 @@ def test_faq_ten_items_with_2fa_in_ten():
               "How does Ventoryn verify paying customers?",
               "Do I need Stripe?",
               "Can I hide my revenue?",
-              "Is getting 100 customers guaranteed?",
+              "Does Ventoryn guarantee new customers?",
               "Can I disconnect my accounts?",
               "How is my information protected?"):
         assert q in r.text
