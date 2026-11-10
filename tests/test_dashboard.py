@@ -294,7 +294,9 @@ def test_live_ops_is_ventoryn_and_professional():
     shell: the analyze fields keep 44px+ tap targets, the sidebar
     collapses behind a 44px toggle on a phone, and there is no crew
     carousel, no game HUD, and no runtime controls on the page.
-    The live-ops doc moved with the name."""
+    (The websites section has its own, unrelated scroll-snap
+    carousel — that one's expected.) The live-ops doc moved with
+    the name."""
     app, client, _store = _operator_app(
         registry=BusinessRegistry(), ledger=Ledger())
     r = client.get("/ops")
@@ -302,7 +304,6 @@ def test_live_ops_is_ventoryn_and_professional():
     assert "Overview — Ventoryn" in r.text
     assert "Ecosystem Tycoon" not in r.text
     assert "Your crew" not in r.text
-    assert "scroll-snap-type: x mandatory" not in r.text
     assert 'id="crew-prev"' not in r.text
     assert "What the team is doing" not in r.text
     # Thumb-friendly: the analyze fields and the sidebar toggle.

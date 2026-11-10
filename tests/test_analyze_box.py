@@ -328,13 +328,12 @@ def test_ops_page_has_analyze_panel(client):
 
 def test_ops_page_has_no_carousel(client):
     """The crew carousel is gone by design: the professional
-    Overview has no agents section, so there is no scroll-snap
-    strip, no crew prev/next buttons, and no carousel JS on /ops.
-    The agents roster lives only on /agents."""
+    Overview has no agents section, so there is no crew prev/next
+    buttons, and no carousel JS on /ops. The agents roster lives
+    only on /agents. (The websites section has its own, unrelated
+    scroll-snap carousel — that one's expected.)"""
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "scroll-snap-type: x mandatory" not in r.text
-    assert "scroll-snap-align: start" not in r.text
     assert 'id="crew-prev"' not in r.text
     assert 'id="crew-next"' not in r.text
     assert 'id="crew-dots"' not in r.text

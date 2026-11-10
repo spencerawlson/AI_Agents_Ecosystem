@@ -602,6 +602,27 @@ def create_app(
   font-variant-numeric: tabular-nums; }
 .v-biz-extra { margin: 12px 0 0; font-size: 14px;
   border-top: 1px solid var(--v-line); padding-top: 12px; }
+/* Websites carousel (Overview): the same cards as the grid, one
+   swipeable row instead — scroll-snap does the work natively on
+   touch, the arrow buttons are the non-touch fallback. */
+.v-carousel-wrap { position: relative; display: flex; align-items: center;
+  gap: 8px; margin: 18px 0; }
+.v-carousel { display: flex; gap: 14px; overflow-x: auto; min-width: 0;
+  scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  padding: 2px 2px 14px; -webkit-overflow-scrolling: touch; }
+.v-carousel > .v-biz { scroll-snap-align: start; flex: 0 0 300px;
+  min-width: 0; margin: 0; }
+.v-carousel-btn { flex: 0 0 auto; width: 36px; height: 36px;
+  border-radius: 50%; border: 1px solid var(--v-line);
+  background: var(--v-card); color: var(--v-violet-deep);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: var(--v-shadow); padding: 0; }
+.v-carousel-btn:hover { background: var(--v-violet-soft); }
+@media (max-width: 640px) {
+  .v-carousel > .v-biz { flex: 0 0 85%; }
+  .v-carousel-btn { display: none; }
+  .v-carousel-wrap { gap: 0; margin: 14px 0; }
+}
 /* Analyze box (Overview only — its one home): the same URL +
    market-country form as the landing page's free preview, in
    platform card styling. Nothing is published; the report is
@@ -629,6 +650,11 @@ def create_app(
   font-weight: 600; }
 @media (max-width: 560px) {
   #analyze-panel .analyze-row { flex-direction: column; align-items: stretch; }
+  /* .analyze-field's flex-basis (180px) sizes WIDTH in the desktop
+     row — once the row above becomes a column, the same basis sizes
+     HEIGHT instead and stretches each field to ~180px tall with
+     mostly empty space. Reset it here. */
+  #analyze-panel .analyze-field { flex: 1 1 auto; }
 }
 /* Live activity feed (Overview) + the events feed (Agents):
    one plain row per event — time, actor, event, ids, cost, result.
@@ -707,9 +733,10 @@ def create_app(
 .v-report-grid .card { margin: 0; }
 /* The merged Results section on Overview: donut + campaign table
    side by side in one card, stacking on narrow screens. */
-.v-results-pair { display: grid; grid-template-columns: 1fr 1fr;
+.v-results-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px; margin: 16px 0; }
-@media (max-width: 760px) { .v-results-pair { grid-template-columns: 1fr; } }
+.v-results-pair > * { min-width: 0; }
+@media (max-width: 760px) { .v-results-pair { grid-template-columns: minmax(0, 1fr); } }
 .v-progress { text-align: center; }
 .v-bar-track { height: 12px; background: var(--v-violet-soft);
   border-radius: 999px; overflow: hidden; margin: 12px 0; }
@@ -1220,8 +1247,12 @@ section.alt { background: var(--bg-tint); }
   .nav-drop { position: static; box-shadow: none; border: 0; padding: 0 0 0 12px;
     min-width: 0; }
   .nav-toggle { display: block; }
+  /* Sign In is the one nav-actions button with no other path on
+     mobile (the hero's own text about Google sign-in has no link of
+     its own) — keep it, drop the redundant Get Started (it only
+     scrolls to the hero, already the first thing in view). */
   .nav-actions .btn { display: none; }
-  .nav-actions .btn-primary { display: inline-block; }
+  .nav-actions #landing-signin { display: inline-block; }
   section { padding: 44px 0; }
   section h2 { font-size: 26px; }
   .steps, .features, .principles, .who-grid { grid-template-columns: 1fr; }
@@ -2421,8 +2452,43 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             footer = (f"<p class='muted'><a href='/account/sites/"
                       f"{esc(data['sites'][0]['id'])}'>Data &amp; privacy "
                       f"controls</a></p>")
-        websites_section = (f"<h2>Your websites</h2>"
-                            f"<div class='v-biz-grid'>{biz_cards}</div>")
+        if snap["businesses"]:
+            # A swipeable carousel, not a grid: one card per website,
+            # scroll-snap does the work on touch, the arrow buttons
+            # are the non-touch fallback.
+            websites_section = (
+                "<h2>Your websites</h2>"
+                "<div class='v-carousel-wrap'>"
+                "<button class='v-carousel-btn v-carousel-prev' type='button' "
+                "aria-label='Previous website'>"
+                "<svg width='16' height='16' viewBox='0 0 16 16' aria-hidden='true'>"
+                "<path d='M10 2L4 8l6 6' fill='none' stroke='currentColor' "
+                "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>"
+                "</svg></button>"
+                f"<div class='v-carousel' role='list'>{biz_cards}</div>"
+                "<button class='v-carousel-btn v-carousel-next' type='button' "
+                "aria-label='Next website'>"
+                "<svg width='16' height='16' viewBox='0 0 16 16' aria-hidden='true'>"
+                "<path d='M6 2l6 6-6 6' fill='none' stroke='currentColor' "
+                "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>"
+                "</svg></button>"
+                "</div>"
+                "<script>(function(){"
+                "document.querySelectorAll('.v-carousel-wrap').forEach(function(wrap){"
+                "var track=wrap.querySelector('.v-carousel');"
+                "function step(){var first=track.children[0];if(!first)return 300;"
+                "var gap=parseFloat(getComputedStyle(track).gap||'14');"
+                "return first.offsetWidth+gap;}"
+                "var prev=wrap.querySelector('.v-carousel-prev');"
+                "var next=wrap.querySelector('.v-carousel-next');"
+                "if(prev)prev.addEventListener('click',function(){"
+                "track.scrollBy({left:-step(),behavior:'smooth'});});"
+                "if(next)next.addEventListener('click',function(){"
+                "track.scrollBy({left:step(),behavior:'smooth'});});"
+                "});"
+                "})();</script>")
+        else:
+            websites_section = f"<h2>Your websites</h2>{biz_cards}"
         analyze_html = _analyze_box_html(prefill, show_prompt)
         # A customer with zero sites sees the analyze box first —
         # it is the way in. Everyone else reads websites first.
