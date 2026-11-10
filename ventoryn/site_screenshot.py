@@ -44,7 +44,59 @@ def _allowed(url: str) -> bool:
 
 
 def capture(url: str, out_path: Path, timeout_ms: int = 20_000) -> tuple[bool, str]:
-    """(ok, note). Never raises."""
+    """(ok, note). Never raises.
+
+    In production the browser runs in the separate screenshot container
+    (ventoryn.shot_service: no data, no secrets, Chrome sandbox on); the
+    app calls it when VENTORYN_SHOT_URL is set. Without it (local dev),
+    the browser runs in-process — still sandbox-only."""
+    import os
+
+    if os.environ.get("VENTORYN_SHOT_URL"):
+        return _capture_remote(url, out_path, os.environ["VENTORYN_SHOT_URL"],
+                               os.environ.get("VENTORYN_SHOT_TOKEN", ""))
+    return _capture_local(url, out_path, timeout_ms)
+
+
+def _capture_remote(url: str, out_path: Path, service: str, token: str,
+                    timeout: float = 45) -> tuple[bool, str]:
+    """Ask the screenshot container for a PNG. The service address must be
+    on this machine (loopback) — it is configuration, not user input."""
+    import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    host = urllib.parse.urlsplit(service).hostname or ""
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        return False, "unavailable — the screenshot service address is not local"
+    if not _allowed(url):
+        return False, "unavailable — that address is not allowed"
+    req = urllib.request.Request(
+        service.rstrip("/") + "/shot", data=json.dumps({"url": url}).encode(),
+        headers={"Content-Type": "application/json", "X-Shot-Token": token})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - local service
+            if resp.headers.get("Content-Type") != "image/png":
+                return False, "unavailable — unexpected answer from the screenshot service"
+            data = resp.read(10_000_001)
+        if len(data) > 10_000_000 or not data.startswith(bytes([0x89]) + b"PNG"):
+            return False, "unavailable — unexpected answer from the screenshot service"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(data)
+        return True, ""
+    except urllib.error.HTTPError as exc:
+        try:
+            note = json.loads(exc.read(2000) or b"{}").get("note")
+        except ValueError:
+            note = None
+        return False, note or f"unavailable — screenshot service answered HTTP {exc.code}"
+    except Exception:  # noqa: BLE001 - service down: no screenshot, nothing else breaks
+        return False, "unavailable — the screenshot service is not running"
+
+
+def _capture_local(url: str, out_path: Path, timeout_ms: int = 20_000) -> tuple[bool, str]:
+    """The browser itself (sandbox on, every request guarded)."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:

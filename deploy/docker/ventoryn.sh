@@ -8,6 +8,7 @@
 #   deploy/docker/ventoryn.sh rollback   container -> host process (old way)
 #   deploy/docker/ventoryn.sh deploy     git pull, rebuild, replace container;
 #                                        previous image restored if unhealthy
+#   deploy/docker/ventoryn.sh shooter    (re)start only the screenshot container
 #   deploy/docker/ventoryn.sh status | logs
 #
 # State and secrets never go into the image: data/, reports/ and
@@ -23,6 +24,10 @@ IMAGE=ventoryn
 PORT=8000
 BACKUPS="${VENTORYN_BACKUPS:-$HOME/ventoryn-backups}"
 HOST_LOG="$HOME/ventoryn-host.log"
+# The screenshot container: same image, separate and locked down.
+SHOT_NAME=ventoryn-shot
+SHOT_PORT=8210
+SHOT_TOKEN_FILE="${VENTORYN_SHOT_TOKEN_FILE:-$HOME/.config/ventoryn/shot.token}"
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -30,7 +35,7 @@ die() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 healthy() {  # wait up to $1 seconds for the app to answer on localhost
     local deadline=$((SECONDS + ${1:-90}))
     while (( SECONDS < deadline )); do
-        if curl -fsS -o /dev/null --max-time 4 "http://127.0.0.1:$PORT/"; then
+        if curl -fs -o /dev/null --max-time 4 "http://127.0.0.1:$PORT/"; then
             return 0
         fi
         sleep 3
@@ -83,10 +88,49 @@ cmd_build() {
         -t "$IMAGE:$tag" -t "$IMAGE:latest" "$REPO"
 }
 
+shot_token() {  # shared secret between the app and the screenshot container
+    if [[ ! -s "$SHOT_TOKEN_FILE" ]]; then
+        mkdir -p "$(dirname "$SHOT_TOKEN_FILE")"
+        (umask 077; python3 -c 'import secrets; print(secrets.token_hex(32))' > "$SHOT_TOKEN_FILE")
+    fi
+    cat "$SHOT_TOKEN_FILE"
+}
+
+start_shooter() {
+    # Opening untrusted sites in a browser is the riskiest thing Ventoryn
+    # does, so it happens here: no data, no secrets file, read-only root,
+    # no Linux capabilities, resource limits. Chrome's own sandbox needs
+    # the relaxed seccomp filter, granted to THIS container only.
+    local image="$1"
+    docker rm -f "$SHOT_NAME" >/dev/null 2>&1 || true
+    docker run -d --name "$SHOT_NAME" --restart unless-stopped \
+        --network host \
+        --user "$(id -u):$(id -g)" \
+        --read-only \
+        --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+        --tmpfs /home/app:rw,nosuid,nodev,size=64m \
+        --cap-drop ALL \
+        --security-opt seccomp=unconfined \
+        --memory 1g --memory-swap 1g --cpus 1 --pids-limit 512 \
+        -e VENTORYN_SHOT_TOKEN="$(shot_token)" \
+        --log-opt max-size=5m --log-opt max-file=2 \
+        "$image" python -m ventoryn.shot_service --host 127.0.0.1 --port "$SHOT_PORT" >/dev/null
+    for _ in $(seq 1 20); do
+        curl -fs -o /dev/null --max-time 2 "http://127.0.0.1:$SHOT_PORT/health" && { say "Screenshot container up"; return 0; }
+        sleep 1
+    done
+    printf '\033[33mScreenshot container did not answer — snapshots will show "screenshot unavailable"\033[0m\n'
+    docker logs --tail 20 "$SHOT_NAME" 2>&1 || true
+}
+
+stop_shooter() { docker rm -f "$SHOT_NAME" >/dev/null 2>&1 || true; }
+
 run_container() {
     local image="$1"
     docker run -d --name "$NAME" --restart unless-stopped \
         --network host \
+        -e VENTORYN_SHOT_URL="http://127.0.0.1:$SHOT_PORT" \
+        -e VENTORYN_SHOT_TOKEN="$(shot_token)" \
         --user "$(id -u):$(id -g)" \
         -v "$REPO/data:/app/data:z" \
         -v "$REPO/reports:/app/reports:z" \
@@ -104,6 +148,7 @@ start_host_process() {
 }
 
 cmd_rollback() {
+    stop_shooter
     if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
         say "Stopping container $NAME"
         docker stop -t 30 "$NAME" >/dev/null || true
@@ -133,6 +178,7 @@ cmd_cutover() {
     fi
     for _ in $(seq 1 15); do port_free && break; sleep 1; done
     port_free || die "port $PORT still in use — nothing changed in Docker"
+    start_shooter "$IMAGE:latest"
     say "Starting container $NAME"
     run_container "$IMAGE:latest"
     if healthy 120; then
@@ -149,11 +195,14 @@ cmd_cutover() {
 cmd_deploy() {
     docker ps --format '{{.Names}}' | grep -qx "$NAME" || die "not running in Docker yet — use cutover"
     local previous
-    previous="$(docker inspect --format '{{.Config.Image}}' "$NAME")"
+    # The image ID, not the tag: the rebuild moves ventoryn:latest to the
+    # new image, so the tag would "restore" the new version.
+    previous="$(docker inspect --format '{{.Image}}' "$NAME")"
     git -C "$REPO" pull --ff-only
     cmd_build
     cmd_backup
-    say "Replacing container ($previous -> $IMAGE:latest)"
+    say "Replacing container (${previous:7:12} -> $(docker image inspect --format '{{.Id}}' "$IMAGE:latest" | cut -c8-19))"
+    start_shooter "$IMAGE:latest"
     docker stop -t 30 "$NAME" >/dev/null && docker rm "$NAME" >/dev/null
     run_container "$IMAGE:latest"
     if healthy 120; then
@@ -162,6 +211,7 @@ cmd_deploy() {
         printf '\033[31mNew image unhealthy — restoring %s\033[0m\n' "$previous"
         docker logs --tail 60 "$NAME" || true
         docker stop "$NAME" >/dev/null || true; docker rm "$NAME" >/dev/null || true
+        start_shooter "$previous"
         run_container "$previous"
         healthy 120 && say "Previous image restored" || die "previous image unhealthy too — run: $0 rollback"
         exit 1
@@ -170,6 +220,7 @@ cmd_deploy() {
 
 cmd_status() {
     docker ps -a --filter "name=^$NAME$" --format 'container: {{.Names}}  {{.Image}}  {{.Status}}' || true
+    docker ps -a --filter "name=^$SHOT_NAME$" --format 'screenshots: {{.Names}}  {{.Status}}' || true
     local pids; pids="$(host_pids)"; [[ -n "$pids" ]] && echo "host process: $pids" || echo "host process: none"
     curl -fsS -o /dev/null -w "http://127.0.0.1:$PORT/ -> %{http_code}\n" --max-time 4 "http://127.0.0.1:$PORT/" || echo "not answering on :$PORT"
 }
@@ -180,7 +231,8 @@ case "${1:-}" in
     cutover) cmd_cutover ;;
     rollback) cmd_rollback ;;
     deploy) cmd_deploy ;;
+    shooter) start_shooter "$IMAGE:latest" ;;
     status) cmd_status ;;
     logs) docker logs -f --tail 200 "$NAME" ;;
-    *) sed -n '2,13p' "$0"; exit 2 ;;
+    *) sed -n '2,14p' "$0"; exit 2 ;;
 esac
