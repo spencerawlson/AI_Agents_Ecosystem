@@ -67,7 +67,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from core.countries import normalize_country
-from ventoryn.signature import make_tag, parse_tag, tag_from_url
+from ventoryn.signature import (make_tag, parse_tag, sign_agent_link,
+                                tag_from_url)
 from ventoryn.token_crypto import decrypt_token, encrypt_token, is_encrypted
 from ventoryn.totp import (
     hash_backup_code,
@@ -173,6 +174,17 @@ class SaasConfig:
     #: registration needed" and no posting is possible on it.
     reddit_app_registered: bool = False
     x_app_registered: bool = False
+    #: X OAuth 2.0 app credentials (VENTORYN_X_CLIENT_ID /
+    #: VENTORYN_X_CLIENT_SECRET). Empty means the Connect-X flow is
+    #: unavailable regardless of x_app_registered — both the flag and
+    #: real credentials are required, belt-and-suspenders.
+    x_client_id: str = ""
+    x_client_secret: str = ""
+    #: Reported (not independently verified against an official
+    #: source — see docs/implementation/X_API_VERIFICATION.md), used
+    #: only to size a conservative spend cap per site per calendar
+    #: month. VENTORYN_X_MONTHLY_BUDGET_USD overrides.
+    x_monthly_budget_usd: float = 5.0
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "SaasConfig":
@@ -202,6 +214,10 @@ class SaasConfig:
             reddit_app_registered=env.get(
                 "VENTORYN_REDDIT_APP_REGISTERED", "") == "1",
             x_app_registered=env.get("VENTORYN_X_APP_REGISTERED", "") == "1",
+            x_client_id=env.get("VENTORYN_X_CLIENT_ID", ""),
+            x_client_secret=env.get("VENTORYN_X_CLIENT_SECRET", ""),
+            x_monthly_budget_usd=_safe_float(
+                env.get("VENTORYN_X_MONTHLY_BUDGET_USD"), 5.0),
         )
 
     def app_registered(self, kind: str) -> bool:
@@ -238,6 +254,14 @@ class SaasConfig:
     @property
     def google_redirect_uri(self) -> str:
         return f"{self.base_url}/account/auth/google/callback"
+
+    @property
+    def x_redirect_uri(self) -> str:
+        return f"{self.base_url}/account/auth/x/callback"
+
+    @property
+    def x_oauth_configured(self) -> bool:
+        return bool(self.x_client_id and self.x_client_secret)
 
 
 def default_saas_db_path() -> Path | None:
@@ -322,6 +346,13 @@ def _iso(dt: datetime) -> str:
 
 def _new_id() -> str:
     return secrets.token_hex(12)
+
+
+def _safe_float(raw: str | None, default: float) -> float:
+    try:
+        return float(raw) if raw else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _hash_token(token: str) -> str:
@@ -453,6 +484,32 @@ CREATE TABLE IF NOT EXISTS saas_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS saas_connection_oauth_states (
+    state TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    code_verifier TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_social_drafts (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    link_url TEXT NOT NULL DEFAULT '',
+    signature_tag TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    tweet_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+CREATE TABLE IF NOT EXISTS saas_x_post_log (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    cost_usd_cents INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 #: Columns added to tables that already exist on a deployed state
@@ -530,7 +587,8 @@ DEFAULT_CONNECTIONS = (
 
 #: Secret fields inside a connection's detail JSON. Never returned by
 #: get_connections(), never logged, never rendered.
-_SECRET_DETAIL_KEYS = frozenset({"api_key", "webhook_secret"})
+_SECRET_DETAIL_KEYS = frozenset({"api_key", "webhook_secret",
+                                 "access_token", "refresh_token"})
 
 #: Minimum OAuth / API scopes requested for each connection. The
 #: Connect screen shows these in plain words (see
@@ -1017,6 +1075,41 @@ class SaasStore:
             self._conn.execute(
                 "DELETE FROM saas_oauth_states WHERE state = ?", (state,))
         return True
+
+    # -- per-connection OAuth state (PKCE) ------------------------------------
+    # Separate from saas_oauth_states (account sign-in): a connection OAuth
+    # flow (X) is per-site and carries a PKCE code_verifier that must
+    # survive the provider round-trip — the account sign-in flow needs
+    # neither.
+    def create_connection_oauth_state(self, site_id: str, kind: str,
+                                      code_verifier: str) -> str:
+        state = secrets.token_urlsafe(24)
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_connection_oauth_states (state, site_id,"
+                " kind, code_verifier, created_at) VALUES (?, ?, ?, ?, ?)",
+                (state, site_id, kind, code_verifier, _iso(_now())))
+        return state
+
+    def consume_connection_oauth_state(self, state: str) -> dict | None:
+        """The pending (site_id, kind, code_verifier) for `state`, only
+        when issued within the last 10 minutes — else None. Consumed
+        states are deleted — no replays."""
+        if not state:
+            return None
+        cutoff = _iso(_now() - timedelta(minutes=OAUTH_STATE_TTL_MINUTES))
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT site_id, kind, code_verifier FROM"
+                " saas_connection_oauth_states"
+                " WHERE state = ? AND created_at > ?",
+                (state, cutoff)).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "DELETE FROM saas_connection_oauth_states WHERE state = ?",
+                (state,))
+        return {"site_id": row[0], "kind": row[1], "code_verifier": row[2]}
 
     # -- credits -------------------------------------------------------------
     def credit_balance(self, account_id: str) -> int:
@@ -1539,6 +1632,69 @@ class SaasStore:
                 (site_id, limit)).fetchall()
         return [_row_dict(r) for r in rows]
 
+    # -- social drafts (approval-first posting) ------------------------------
+    # A draft is never posted by creating it — only an explicit, separate
+    # approve action (post_to_x) calls the provider. Compose != approve.
+    def create_social_draft(self, site_id: str, kind: str, text: str,
+                            link_url: str = "") -> dict:
+        draft_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_social_drafts (id, site_id, kind, text,"
+                " link_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (draft_id, site_id, kind, text, link_url, _iso(_now())))
+        return self.get_social_draft(draft_id)
+
+    def get_social_draft(self, draft_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_social_drafts WHERE id = ?",
+                (draft_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_social_drafts(self, site_id: str, limit: int = 20) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_social_drafts WHERE site_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (site_id, limit)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def decide_social_draft(self, draft_id: str, status: str,
+                            signature_tag: str = "", tweet_id: str = ""
+                            ) -> bool:
+        """Record the outcome of an approve/reject/post decision.
+        Only a still-pending draft is updated — a draft already
+        decided cannot be decided again."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE saas_social_drafts SET status = ?, signature_tag = ?,"
+                " tweet_id = ?, decided_at = ?"
+                " WHERE id = ? AND status = 'pending'",
+                (status, signature_tag, tweet_id, _iso(_now()), draft_id))
+        return cur.rowcount > 0
+
+    def record_x_post_cost(self, site_id: str, draft_id: str,
+                           cost_usd_cents: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_x_post_log (id, site_id, draft_id,"
+                " cost_usd_cents, created_at) VALUES (?, ?, ?, ?, ?)",
+                (_new_id(), site_id, draft_id, cost_usd_cents, _iso(_now())))
+
+    def x_spend_this_month_usd(self, site_id: str) -> float:
+        """Sum of recorded X post cost for this site in the current UTC
+        calendar month — real recorded spend only, never an estimate
+        of future spend. The basis for the monthly budget cap."""
+        month_start = _now().replace(day=1, hour=0, minute=0, second=0,
+                                     microsecond=0)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(cost_usd_cents), 0) FROM saas_x_post_log"
+                " WHERE site_id = ? AND created_at >= ?",
+                (site_id, _iso(month_start))).fetchone()
+        return int(row[0]) / 100
+
     # -- Stripe webhook idempotency ------------------------------------------
     def record_stripe_event(self, event_id: str) -> bool:
         """True the first time an event id is seen, False on redelivery."""
@@ -1943,6 +2099,159 @@ def google_userinfo(access_token: str, urlopen=None) -> dict:
         raise SaasError("Google did not return a profile. Try again.")
     return {"sub": profile["sub"], "email": profile["email"],
             "name": profile.get("name", "")}
+
+
+# ---------------------------------------------------------------------------
+# X (Twitter) OAuth 2.0 with PKCE — per-site connection (not account
+# sign-in). stdlib urllib, injectable urlopen for tests. No live keys
+# anywhere in the repo; tests use fakes. Posting is a separate step
+# (post_to_x) — connecting an account never posts anything.
+# ---------------------------------------------------------------------------
+
+X_AUTH_URL = "https://twitter.com/i/oauth2/authorize"
+X_TOKEN_URL = "https://api.twitter.com/2/oauth2/token"
+X_USERINFO_URL = "https://api.twitter.com/2/users/me"
+X_POST_URL = "https://api.twitter.com/2/tweets"
+#: Reported, not independently verified against an official source —
+#: see docs/implementation/X_API_VERIFICATION.md. Used only to size
+#: the conservative monthly spend cap (SaasConfig.x_monthly_budget_usd)
+#: — never shown to a customer as a confirmed fact.
+X_REPORTED_COST_PER_LINKED_POST_USD = 0.20
+
+
+def pkce_pair() -> tuple[str, str]:
+    """A fresh PKCE verifier (RFC 7636: 43-128 unreserved chars) and
+    its S256 challenge."""
+    verifier = secrets.token_urlsafe(96)[:128]
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return verifier, challenge
+
+
+def x_auth_url(config: SaasConfig, state: str, code_challenge: str) -> str:
+    params = urllib.parse.urlencode({
+        "response_type": "code",
+        "client_id": config.x_client_id,
+        "redirect_uri": config.x_redirect_uri,
+        "scope": CONNECTION_SCOPES["x"],
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    })
+    return f"{X_AUTH_URL}?{params}"
+
+
+def exchange_x_code(config: SaasConfig, code: str, code_verifier: str,
+                    urlopen=None) -> dict:
+    """Exchange an authorization code + PKCE verifier for X tokens.
+    Raises SaasError on any failure — the caller shows a plain error,
+    never the detail."""
+    auth = base64.b64encode(
+        f"{config.x_client_id}:{config.x_client_secret}".encode("utf-8")
+    ).decode("ascii")
+    body = _http_post_form(X_TOKEN_URL, {
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": config.x_redirect_uri,
+        "code_verifier": code_verifier,
+    }, headers={"Authorization": f"Basic {auth}"}, urlopen=urlopen)
+    if body.get("error") or not body.get("access_token"):
+        raise SaasError("X did not accept the connection. Try again.")
+    return body
+
+
+def x_userinfo(access_token: str, urlopen=None) -> dict:
+    """{"data": {"id": ..., "username": ..., "name": ...}}, or {} on
+    any failure — the caller treats {} as "unknown handle", never a
+    hard error (the connection itself already succeeded)."""
+    return _http_get_json(
+        X_USERINFO_URL,
+        headers={"Authorization": f"Bearer {access_token}"}, urlopen=urlopen)
+
+
+def x_account_summary(access_token: str, urlopen=None) -> dict | None:
+    """Read-only audience size for the CONNECTED account: its own
+    followers/following/post counts. X's search API (finding other
+    accounts or conversations) is a paid tier with no code path here
+    — this reports only the connected account's own public metrics,
+    never another account's, never invented. None on any failure."""
+    params = urllib.parse.urlencode({"user.fields": "public_metrics"})
+    data = _http_get_json(
+        f"{X_USERINFO_URL}?{params}",
+        headers={"Authorization": f"Bearer {access_token}"}, urlopen=urlopen)
+    metrics = (data.get("data") or {}).get("public_metrics")
+    if not metrics:
+        return None
+    return {
+        "username": (data.get("data") or {}).get("username", ""),
+        "followers": metrics.get("followers_count"),
+        "following": metrics.get("following_count"),
+        "posts": metrics.get("tweet_count"),
+    }
+
+
+def x_post(access_token: str, text: str, urlopen=None) -> dict:
+    """POST one tweet. Returns {"data": {"id": ..., "text": ...}}.
+    Raises SaasError on any failure — a raised error is never treated
+    as "posted" by the caller."""
+    opener = urlopen or urllib.request.urlopen
+    body = json.dumps({"text": text}).encode("utf-8")
+    request = urllib.request.Request(
+        X_POST_URL, data=body, method="POST",
+        headers={"Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"})
+    try:
+        with opener(request) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise SaasError(f"X did not accept the post ({exc})")
+
+
+def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
+             site_id: str, draft_id: str, urlopen=None) -> tuple[bool, str]:
+    """Approve-and-post one pending draft. The ONLY path that ever
+    calls the real X post API — creating a draft never posts it, and
+    a draft that is not explicitly approved here is never published.
+    Enforces the posting gate (check_posting_allowed) and the monthly
+    budget cap before spending anything. Returns (posted, message)."""
+    allowed, reason = check_posting_allowed(store, account, site_id, "x",
+                                            config)
+    if not allowed:
+        return False, reason
+    draft = store.get_social_draft(draft_id)
+    if draft is None or draft["site_id"] != site_id or draft["kind"] != "x":
+        return False, "Draft not found."
+    if draft["status"] != "pending":
+        return False, f"This draft was already {draft['status']}."
+    cost = X_REPORTED_COST_PER_LINKED_POST_USD if draft["link_url"] else 0.0
+    spent = store.x_spend_this_month_usd(site_id)
+    if spent + cost > config.x_monthly_budget_usd:
+        return False, (
+            f"Posting this would exceed the ${config.x_monthly_budget_usd:.2f}"
+            f" monthly X budget for this site (already ${spent:.2f} spent "
+            "this month). Nothing was posted.")
+    connection = store.get_connection(site_id, "x")
+    access_token = (connection or {}).get("_detail_raw", {}).get(
+        "access_token", "")
+    if not access_token:
+        return False, "X is not connected for this site."
+    text = draft["text"]
+    tag = ""
+    if draft["link_url"]:
+        site = store.get_site(site_id)
+        signed, tag = sign_agent_link(
+            draft["link_url"], site_id, site["host"], "x", draft_id, store)
+        text = text.replace(draft["link_url"], signed, 1)
+    try:
+        result = x_post(access_token, text, urlopen=urlopen)
+    except SaasError as exc:
+        return False, str(exc)
+    tweet_id = (result.get("data") or {}).get("id", "")
+    store.decide_social_draft(draft_id, "posted", signature_tag=tag,
+                              tweet_id=tweet_id)
+    if cost:
+        store.record_x_post_cost(site_id, draft_id, int(cost * 100))
+    return True, f"Posted to X (id {tweet_id})."
 
 
 # ---------------------------------------------------------------------------

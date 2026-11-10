@@ -35,6 +35,14 @@ Pages:
   POST /account/sites/{site_id}/privacy revenue/count/details toggles
   POST /account/sites/{site_id}/connections/{kind}/disconnect
                                          revoke at provider, then delete
+  GET  /account/sites/{site_id}/connections/x/start
+                                         X OAuth 2.0 + PKCE authorize redirect
+  GET  /account/auth/x/callback         code -> tokens -> connection stored
+  POST /account/sites/{site_id}/social/x/drafts
+                                         compose a draft (never posts it)
+  POST /account/sites/{site_id}/social/x/drafts/{draft_id}/approve
+                                         the ONLY path that posts to X
+  POST /account/sites/{site_id}/social/x/drafts/{draft_id}/reject
 
 Sign-in flow (the ShipItAyiti flow): the landing page carries the
 sign-in and the URL box; after Google sign-in EVERYONE goes straight
@@ -43,8 +51,10 @@ landing page rides along (?site_url=…) so /ops can offer the
 subscribe / add-site step for it. /admin is a separate URL for the
 operator only (see ventoryn.app).
 
-Nothing here publishes or posts anywhere. A job that costs more
-credits than the balance is refused with the balance shown.
+A job that costs more credits than the balance is refused with the
+balance shown. The only route that ever publishes anything external
+is the X draft-approve route above — composing a draft never posts
+it, and nothing else here posts or publishes anywhere.
 """
 
 from __future__ import annotations
@@ -79,16 +89,22 @@ from ventoryn.saas import (
     SaasStore,
     check_posting_allowed,
     exchange_google_code,
+    exchange_x_code,
     google_auth_url,
     google_userinfo,
     handle_customer_sale_webhook,
     handle_platform_webhook,
+    pkce_pair,
     plausible_visitors,
+    post_to_x,
     revoke_provider_token,
     slug_for_url,
     validate_site_url,
     verify_webhook_signature,
     create_checkout_session,
+    x_account_summary,
+    x_auth_url,
+    x_userinfo,
 )
 from ventoryn.totp import provisioning_uri
 
@@ -487,6 +503,128 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                             max_age=SESSION_TTL_DAYS * 24 * 3600,
                             secure=config.cookie_secure)
         return response
+
+    # -- X (Twitter) connection: OAuth 2.0 with PKCE, per site ---------------
+    # Connecting an account never posts anything — see post_to_x / the
+    # social draft routes below for the only path that does.
+    @app.get("/account/sites/{site_id}/connections/x/start")
+    def x_connect_start(request: Request, site_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        if not config.x_oauth_configured or not config.app_registered("x"):
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>X is not available yet — Ventoryn's own app "
+                      "registration for it is still needed. No account "
+                      "was connected and nothing was stored.</p>"
+                      f"<p><a href='/account/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        verifier, challenge = pkce_pair()
+        state = store.create_connection_oauth_state(site_id, "x", verifier)
+        return RedirectResponse(x_auth_url(config, state, challenge),
+                                status_code=303)
+
+    @app.get("/account/auth/x/callback", response_class=HTMLResponse)
+    def x_connect_callback(request: Request, code: str = "",
+                           state: str = "", error: str = ""):
+        account = _account(request)
+        pending = store.consume_connection_oauth_state(state)
+        if error or not code or pending is None or pending["kind"] != "x":
+            return HTMLResponse(
+                _page("Connect X",
+                      "<p>Connecting X did not complete. "
+                      "<a href='/account/login'>Back</a>.</p>"),
+                status_code=400)
+        site = store.get_site(pending["site_id"])
+        if (site is None or account is None
+                or site["account_id"] != account["id"]):
+            return HTMLResponse(
+                _page("Connect X",
+                      "<p>This connection link is not valid.</p>"),
+                status_code=400)
+        try:
+            tokens = exchange_x_code(config, code, pending["code_verifier"])
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        access_token = tokens.get("access_token", "")
+        info = x_userinfo(access_token) if access_token else {}
+        username = (info.get("data") or {}).get("username", "")
+        store.update_connection(
+            site["id"], "x", "connected",
+            f"Connected as @{username}." if username else "Connected.",
+            {"access_token": access_token,
+             "refresh_token": tokens.get("refresh_token", ""),
+             "username": username})
+        return RedirectResponse(f"/account/sites/{site['id']}",
+                                status_code=303)
+
+    # -- X social drafts: compose -> approve-and-post, never automatic ------
+    @app.post("/account/sites/{site_id}/social/x/drafts")
+    def x_draft_create(request: Request, site_id: str,
+                       text: str = Form(...), link_url: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        if text.strip():
+            store.create_social_draft(site_id, "x", text.strip(),
+                                      link_url.strip())
+        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    @app.post("/account/sites/{site_id}/social/x/drafts/{draft_id}/approve")
+    def x_draft_approve(request: Request, site_id: str, draft_id: str,
+                        totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(err)}</p><p><a href='/account/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="account"), status_code=400)
+        posted, message = post_to_x(store, config, account, site_id, draft_id)
+        inner = (f"<p>{esc(message)}</p>"
+                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"{esc(site['url'])}</a>.</p>")
+        return HTMLResponse(
+            _signed_page(site["url"], inner, account, current="account"),
+            status_code=200 if posted else 400)
+
+    @app.post("/account/sites/{site_id}/social/x/drafts/{draft_id}/reject")
+    def x_draft_reject(request: Request, site_id: str, draft_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        store.decide_social_draft(draft_id, "rejected")
+        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
 
     @app.get("/account/logout")
     def logout(request: Request):
@@ -936,6 +1074,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         connections = store.get_connections(site_id)
         plausible_raw = (store.get_connection(site_id, "plausible") or {}
                          ).get("_detail_raw") or {}
+        x_conn = store.get_connection(site_id, "x")
+        x_raw = (x_conn or {}).get("_detail_raw") or {}
+        x_access_token = x_raw.get("access_token", "")
         plausible_key = plausible_raw.get("api_key") if \
             (store.get_connection(site_id, "plausible") or {}
              ).get("status") == "connected" else None
@@ -988,15 +1129,72 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         "spellcheck='false' placeholder='whsec_… (stored "
                         "encrypted, never shown back)'><p><button class='btn' type='submit'>"
                         "Connect Stripe sales</button></p></form>")
+            elif kind == "x":
+                if conn["status"] == "connected":
+                    summary = x_account_summary(x_access_token) \
+                        if x_access_token else None
+                    audience = (
+                        f"<p class='muted'>Audience: {summary['followers']} "
+                        f"followers, {summary['following']} following, "
+                        f"{summary['posts']} posts.</p>" if summary else
+                        "<p class='muted'>Audience numbers unavailable "
+                        "right now.</p>")
+                    drafts = store.list_social_drafts(site_id)
+                    draft_rows = "".join(
+                        f"<div class='card'><p>{esc(d['text'])}</p>"
+                        + (f"<p class='muted'>Link: {esc(d['link_url'])}"
+                           "</p>" if d["link_url"] else "")
+                        + f"<p>Status: <strong>{esc(d['status'])}</strong>"
+                        + (f" (tweet {esc(d['tweet_id'])})"
+                           if d["tweet_id"] else "") + "</p>"
+                        + (f"<form method='post' action='/account/sites/"
+                           f"{esc(site_id)}/social/x/drafts/{esc(d['id'])}"
+                           f"/approve'>{_totp_field(account)}<p>"
+                           "<button class='btn btn-primary' type='submit'>"
+                           "Approve &amp; post</button> "
+                           "<button class='btn' type='submit' "
+                           f"formaction='/account/sites/{esc(site_id)}"
+                           f"/social/x/drafts/{esc(d['id'])}/reject'>"
+                           "Reject</button></p></form>"
+                           if d["status"] == "pending" else "")
+                        + "</div>"
+                        for d in drafts) or (
+                        "<p class='muted'>No drafts yet.</p>")
+                    form = (audience +
+                            "<form method='post' action='/account/sites/"
+                            f"{esc(site_id)}/social/x/drafts'>"
+                            "<label for='x_text'>Draft a post</label>"
+                            "<textarea id='x_text' name='text' maxlength="
+                            "'280' required></textarea>"
+                            "<label for='x_link'>Link to sign (optional — "
+                            "a URL on your own site)</label>"
+                            "<input type='text' id='x_link' name='link_url' "
+                            "placeholder='https://yoursite.com/...'>"
+                            "<p><button class='btn' type='submit'>Save "
+                            "draft</button></p></form>"
+                            "<p class='muted'>Nothing is posted until you "
+                            "click Approve &amp; post on a draft.</p>"
+                            f"<h4>Drafts</h4>{draft_rows}")
+                elif config.x_oauth_configured and config.app_registered("x"):
+                    form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                            f"<p><a class='btn btn-primary' href='/account/"
+                            f"sites/{esc(site_id)}/connections/x/start'>"
+                            "Connect with X</a></p>")
+                else:
+                    form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                            "<p class='muted'>To connect, the operator "
+                            "first registers Ventoryn's app in X's "
+                            "developer console and sets the app "
+                            "credentials — that step is not built here "
+                            "and nothing is faked.</p>")
             else:
-                # Reddit / X: honest about the missing app registration —
-                # the operator registers Ventoryn's app in the provider's
-                # developer console first. Nothing is faked.
+                # Reddit: no free API access exists for this anymore —
+                # honest, permanent "not available" rather than a
+                # half-built flow that can never actually connect.
                 form = (f"<p class='muted'>{esc(conn['note'])}</p>"
-                        "<p class='muted'>To connect, the operator first "
-                        "registers Ventoryn's app in the provider's "
-                        "developer console — that step is not built here "
-                        "and nothing is faked.</p>")
+                        "<p class='muted'>Reddit's API no longer offers "
+                        "the free access this would need — this "
+                        "connection is not available.</p>")
             conn_rows += (f"<div class='card'><h3>{esc(kind.replace('_', ' '))} "
                           f"{badge}</h3><p>{esc(conn['note'])}</p>"
                           f"<p>{esc(consent)}</p>"
@@ -1021,6 +1219,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         rev = store.revenue_for_site(site_id)
         if rev is not None and rev["conversions"]:
             def _attribution_label(c):
+                if c.get("refunded_at"):
+                    return "Refunded"
+                if c.get("disputed_at"):
+                    return "Disputed"
                 if c.get("attribution") == "ventoryn":
                     return "Verified"
                 if c.get("source") == "manual":
@@ -1157,12 +1359,22 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account, current="account"), status_code=404)
-        if kind in ("reddit", "x"):
+        if kind == "reddit":
             return HTMLResponse(
                 _signed_page(site["url"],
-                      "<p>This connection is not available yet — Ventoryn's "
-                      "own app registration for it is still needed. No "
-                      "account was connected and nothing was stored.</p>"
+                      "<p>This connection is not available — Reddit's API "
+                      "no longer offers the free access this would need. "
+                      "No account was connected and nothing was stored.</p>"
+                      f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
+                      account, current="account"),
+                status_code=400)
+        if kind == "x":
+            # X connects via OAuth redirect (see x_connect_start), never
+            # this form-post route.
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>Use the \"Connect with X\" link to connect this "
+                      "account.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
@@ -1253,7 +1465,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 status_code=400)
         conn = store.get_connection(site_id, kind) or {}
         raw = conn.get("_detail_raw") or {}
-        _revoked, note = revoke_provider_token(kind, raw)
+        client_id = config.x_client_id if kind == "x" else ""
+        client_secret = config.x_client_secret if kind == "x" else ""
+        _revoked, note = revoke_provider_token(
+            kind, raw, client_id=client_id, client_secret=client_secret)
         store.disconnect_connection(site_id, kind)
         inner = (f"<p>{esc(kind.replace('_', ' '))} is disconnected. "
                  f"{esc(note)}</p>"

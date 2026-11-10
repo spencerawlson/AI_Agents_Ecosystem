@@ -3776,16 +3776,18 @@ Signups read unavailable because no signup tracking is connected yet.</p>
         Stripe) with connected / not-connected state — the same
         cards and the same form actions as the site-detail page
         (POST /account/sites/{id}/connections/{kind}, disconnect
-        posts). Reddit/X posting needs the platform OAuth app
-        registrations first — until then the connection says "not
-        connected — app registration needed", never faked. X's API
-        is paid and rate-limited."""
+        posts, plus the X OAuth start/callback and social-draft
+        routes). X posting needs the platform OAuth app registration
+        first — until then the connection says "not connected — app
+        registration needed", never faked. X's API is paid and
+        rate-limited. Reddit has no free API access and is not
+        available at all."""
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
         from ventoryn.saas import (
             CONNECTION_CONSENT, CONNECTION_SCOPES,
-            check_posting_allowed,
+            check_posting_allowed, x_account_summary,
         )
 
         sites = _saas_store.list_sites(account["id"])
@@ -3818,6 +3820,9 @@ Signups read unavailable because no signup tracking is connected yet.</p>
                 plausible_raw = (
                     _saas_store.get_connection(s["id"], "plausible")
                     or {}).get("_detail_raw") or {}
+                x_access_token = (_saas_store.get_connection(s["id"], "x")
+                                 or {}).get("_detail_raw", {}).get(
+                                     "access_token", "")
                 for conn in _saas_store.get_connections(s["id"]):
                     kind = conn["kind"]
                     badge = (
@@ -3871,17 +3876,82 @@ Signups read unavailable because no signup tracking is connected yet.</p>
                             "placeholder='Stored, never shown back'>"
                             "<p><button class='btn' type='submit'>"
                             "Connect Stripe sales</button></p></form>")
+                    elif kind == "x":
+                        if conn["status"] == "connected":
+                            summary = x_account_summary(x_access_token) \
+                                if x_access_token else None
+                            audience = (
+                                f"<p class='muted'>Audience: "
+                                f"{summary['followers']} followers, "
+                                f"{summary['following']} following, "
+                                f"{summary['posts']} posts.</p>" if summary
+                                else "<p class='muted'>Audience numbers "
+                                "unavailable right now.</p>")
+                            drafts = _saas_store.list_social_drafts(s["id"])
+                            draft_rows = "".join(
+                                f"<div class='card'><p>{esc(d['text'])}</p>"
+                                + (f"<p class='muted'>Link: "
+                                   f"{esc(d['link_url'])}</p>"
+                                   if d["link_url"] else "")
+                                + f"<p>Status: <strong>{esc(d['status'])}"
+                                "</strong>"
+                                + (f" (tweet {esc(d['tweet_id'])})"
+                                   if d["tweet_id"] else "") + "</p>"
+                                + (f"<form method='post' "
+                                   f"action='/account/sites/{esc(s['id'])}"
+                                   f"/social/x/drafts/{esc(d['id'])}/approve'>"
+                                   f"{totp_field}<p><button class='btn "
+                                   "btn-primary' type='submit'>Approve "
+                                   "&amp; post</button> <button class='btn' "
+                                   "type='submit' formaction='/account/"
+                                   f"sites/{esc(s['id'])}/social/x/drafts/"
+                                   f"{esc(d['id'])}/reject'>Reject</button>"
+                                   "</p></form>"
+                                   if d["status"] == "pending" else "")
+                                + "</div>"
+                                for d in drafts) or (
+                                "<p class='muted'>No drafts yet.</p>")
+                            form = (audience +
+                                    "<form method='post' "
+                                    f"action='/account/sites/{esc(s['id'])}"
+                                    "/social/x/drafts'>"
+                                    "<label for='x_text'>Draft a post"
+                                    "</label><textarea id='x_text' "
+                                    "name='text' maxlength='280' required>"
+                                    "</textarea>"
+                                    "<label for='x_link'>Link to sign "
+                                    "(optional)</label><input type='text' "
+                                    "id='x_link' name='link_url'>"
+                                    "<p><button class='btn' type='submit'>"
+                                    "Save draft</button></p></form>"
+                                    "<p class='muted'>Nothing is posted "
+                                    "until Approve &amp; post on a draft."
+                                    "</p>"
+                                    f"<h4>Drafts</h4>{draft_rows}")
+                        elif (_saas_config.x_oauth_configured
+                              and _saas_config.app_registered("x")):
+                            form = (
+                                f"<p class='muted'>{esc(conn['note'])}</p>"
+                                f"<p><a class='btn btn-primary' "
+                                f"href='/account/sites/{esc(s['id'])}"
+                                "/connections/x/start'>Connect with X</a>"
+                                "</p>")
+                        else:
+                            form = (
+                                f"<p class='muted'>{esc(conn['note'])}</p>"
+                                "<p class='muted'>To connect, the operator "
+                                "first registers Ventoryn's app in X's "
+                                "developer console and sets the app "
+                                "credentials — that step is not built "
+                                "here and nothing is faked.</p>")
                     else:
-                        # Reddit / X: honest about the missing app
-                        # registration — the operator registers
-                        # Ventoryn's app in the provider's developer
-                        # console first. Nothing is faked.
+                        # Reddit: no free API access exists for this
+                        # anymore — honest, permanent "not available".
                         form = (
                             f"<p class='muted'>{esc(conn['note'])}</p>"
-                            "<p class='muted'>To connect, the operator "
-                            "first registers Ventoryn's app in the "
-                            "provider's developer console — that step is "
-                            "not built here and nothing is faked.</p>")
+                            "<p class='muted'>Reddit's API no longer "
+                            "offers the free access this would need — "
+                            "this connection is not available.</p>")
                     cards += (
                         f"<div class='card'><h3>{esc(s['url'])} — "
                         f"{esc(kind.replace('_', ' '))} {badge}</h3>"
@@ -3890,10 +3960,9 @@ Signups read unavailable because no signup tracking is connected yet.</p>
                         f"<p class='muted'>Scopes requested: "
                         f"<code>{esc(scopes)}</code></p>"
                         f"{gate_html}{form}{disconnect_html}</div>")
-            inner = ("""<p class='muted'>Reddit/X posting needs the
-platform OAuth app registrations first — until then the connection
-says "not connected — app registration needed", never faked. X's API
-is paid and rate-limited.</p>""" + cards)
+            inner = ("""<p class='muted'>X posting needs the platform
+OAuth app registration first — until then the connection says "not connected — app registration needed", never faked. X's API is paid and rate-limited; see the budget note on each X card.</p>
+<p class='muted'>Reddit is not available — Reddit no longer offers the free API access this would need.</p>""" + cards)
         return _operator_page(
             "Integrations", inner, account=account,
             current="integrations",
