@@ -265,6 +265,20 @@ def _funnel_rows(store: SaasStore, site: dict,
         f"<tr><td>Revenue</td><td>{revenue_html}</td></tr>")
 
 
+def _integrations_return(value: str | None) -> str | None:
+    """Where an Integrations window sends the owner back to: only a
+    same-site /integrations/... path — never an absolute or
+    protocol-relative URL (no open redirect)."""
+    if (not value or not value.startswith("/integrations/")
+            or value.startswith("//") or "\\" in value
+            or len(value) > 200 or any(c in value for c in "\r\n")):
+        return None
+    return value
+
+
+X_RETURN_COOKIE = "ventoryn_x_return"
+
+
 def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
     """Add the /account/... routes to a dashboard app."""
 
@@ -509,7 +523,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
     # Connecting an account never posts anything — see post_to_x / the
     # social draft routes below for the only path that does.
     @app.get("/account/sites/{site_id}/connections/x/start")
-    def x_connect_start(request: Request, site_id: str):
+    def x_connect_start(request: Request, site_id: str, return_to: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -529,8 +543,17 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 status_code=400)
         verifier, challenge = pkce_pair()
         state = store.create_connection_oauth_state(site_id, "x", verifier)
-        return RedirectResponse(x_auth_url(config, state, challenge),
-                                status_code=303)
+        response = RedirectResponse(x_auth_url(config, state, challenge),
+                                    status_code=303)
+        # Remember where to come back to across the X round trip (an
+        # Integrations window); only a same-site /integrations/ path.
+        back = _integrations_return(return_to)
+        if back:
+            # URL-encoded: ?, = and quotes never reach the cookie value.
+            response.set_cookie(X_RETURN_COOKIE, urllib.parse.quote(back, safe="/"),
+                                max_age=900, httponly=True,
+                                samesite='lax', path='/', secure=config.cookie_secure)
+        return response
 
     @app.get("/account/auth/x/callback", response_class=HTMLResponse)
     def x_connect_callback(request: Request, code: str = "",
@@ -568,8 +591,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             {"access_token": access_token,
              "refresh_token": tokens.get("refresh_token", ""),
              "username": username})
-        return RedirectResponse(f"/account/sites/{site['id']}",
-                                status_code=303)
+        back = _integrations_return(urllib.parse.unquote(
+            request.cookies.get(X_RETURN_COOKIE, "").strip('"')))
+        response = RedirectResponse(back or f"/account/sites/{site['id']}",
+                                    status_code=303)
+        response.delete_cookie(X_RETURN_COOKIE, path='/')
+        return response
 
     # -- X social drafts: compose -> approve-and-post, never automatic ------
     @app.post("/account/sites/{site_id}/social/x/drafts")
@@ -1330,7 +1357,8 @@ funnel counts it. This is the owner-recorded fallback.</p>
     def connection_update(request: Request, site_id: str, kind: str,
                           site_domain: str = Form(""),
                           api_key: str = Form(""),
-                          webhook_secret: str = Form("")):
+                          webhook_secret: str = Form(""),
+                          return_to: str = Form("")):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1393,7 +1421,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"], "<p>Unknown connection.</p>", account, current="account"),
                 status_code=400)
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(_integrations_return(return_to)
+                                or f"/account/sites/{site_id}",
+                                status_code=303)
 
     @app.post("/account/sites/{site_id}/privacy")
     def site_privacy(request: Request, site_id: str,
@@ -1427,7 +1457,8 @@ funnel counts it. This is the owner-recorded fallback.</p>
 
     @app.post("/account/sites/{site_id}/connections/{kind}/disconnect")
     def connection_disconnect(request: Request, site_id: str, kind: str,
-                              totp_code: str = Form("")):
+                              totp_code: str = Form(""),
+                              return_to: str = Form("")):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1449,6 +1480,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
         _revoked, note = revoke_provider_token(
             kind, raw, client_id=client_id, client_secret=client_secret)
         store.disconnect_connection(site_id, kind)
+        back = _integrations_return(return_to)
+        if back:
+            # Disconnected from an Integrations window: back to that app.
+            return RedirectResponse(back, status_code=303)
         inner = (f"<p>{esc(kind.replace('_', ' '))} is disconnected. "
                  f"{esc(note)}</p>"
                  f"<p><a href='/account/sites/{esc(site_id)}'>Back to "

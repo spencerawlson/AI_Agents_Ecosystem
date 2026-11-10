@@ -381,3 +381,26 @@ def test_x_account_summary_none_on_failure(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen",
                         lambda *a, **k: _FakeResponse({}))
     assert saas.x_account_summary("x-tok-123") is None
+
+
+def test_x_connect_from_integrations_returns_to_that_window(client, store, config,
+                                                            monkeypatch):
+    # Started from an Integrations window: after X sends the owner back,
+    # they land on the X app page with the same website's window open.
+    monkeypatch.setattr("urllib.request.urlopen", _fake_x_urlopen)
+    account = _login(client, store)
+    site = store.create_site(account["id"], "https://example.com")
+    back = f"/integrations/x?site={site['id']}"
+    r = client.get(f"/account/sites/{site['id']}/connections/x/start",
+                   params={"return_to": back}, follow_redirects=False)
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+    r = client.get("/account/auth/x/callback",
+                   params={"code": "auth-code", "state": state},
+                   follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == back
+    assert store.get_connection(site["id"], "x")["status"] == "connected"
+    # The one-shot cookie is cleared, so a later connect from the site
+    # page goes back to the site page.
+    assert 'ventoryn_x_return=""' in r.headers.get("set-cookie", "") or \
+        "Max-Age=0" in r.headers.get("set-cookie", "")
