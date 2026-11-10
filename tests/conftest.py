@@ -10,7 +10,11 @@ session. Loopback stays open: Starlette's TestClient and the asyncio
 event loop on Windows use local sockets.
 """
 
+import os
 import socket
+
+# The agents' autopilot loop never runs under tests.
+os.environ["VENTORYN_AUTOPILOT"] = "off"
 
 import pytest
 

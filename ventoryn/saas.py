@@ -530,6 +530,9 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
 #: EXISTS cannot add a column to an existing table). Never remove an
 #: entry from this list.
 _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    # Autopilot: the agents work on every website by default (1);
+    # the owner can turn it off per website (0).
+    ("saas_sites", "autopilot", "INTEGER NOT NULL DEFAULT 1"),
     ("saas_accounts", "totp_secret", "TEXT NOT NULL DEFAULT ''"),
     ("saas_accounts", "totp_salt", "TEXT NOT NULL DEFAULT ''"),
     ("saas_accounts", "totp_enabled", "INTEGER NOT NULL DEFAULT 0"),
@@ -1290,6 +1293,26 @@ class SaasStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM saas_sites WHERE id = ?", (site_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def all_sites(self) -> list[dict]:
+        """Every website on Ventoryn, oldest first (autopilot)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_sites ORDER BY created_at").fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def set_site_autopilot(self, site_id: str, on: bool) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE saas_sites SET autopilot = ? WHERE id = ?",
+                               (1 if on else 0, site_id))
+
+    def last_job(self, site_id: str, job_type: str) -> dict | None:
+        """The most recent job of this type on this site, or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_jobs WHERE site_id = ? AND job_type = ?"
+                " ORDER BY created_at DESC LIMIT 1", (site_id, job_type)).fetchone()
         return _row_dict(row) if row else None
 
     def list_sites(self, account_id: str) -> list[dict]:
