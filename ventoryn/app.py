@@ -3896,204 +3896,257 @@ Signups read unavailable because no signup tracking is connected yet.</p>
             is_operator=_saas_config.is_operator(account["email"]),
             extra_css=_PORTFOLIO_CSS + _REPORT_CSS)
 
+    # -- Integrations: apps -> websites -> a window per website ------------
+    # /integrations is a grid of the service apps (X, Stripe sales,
+    # Plausible, Reddit). Clicking an app opens /integrations/<app>: the
+    # account's websites with their status for that app. Clicking a
+    # website opens a window (<dialog>) with exactly what that app needs
+    # for that website (API key, webhook secret, Connect with X...). The
+    # forms post to the same endpoints as before; return_to brings the
+    # owner back to the app page with the same website's window open.
+    _INTEGRATION_APPS = (
+        ("x", "X", "Post approved updates to each website's own X "
+         "account. Nothing is posted until you approve it. X's API is "
+         "paid and rate-limited.", "#0b0e1e"),
+        ("stripe_sales", "Stripe sales", "Count real paying customers "
+         "from each website's own Stripe account.", "#635bff"),
+        ("plausible", "Plausible", "Optional: bring visitor numbers from "
+         "Plausible. Ventoryn Analytics already counts visitors without "
+         "it.", "#5850ec"),
+        ("reddit", "Reddit", "Not available: Reddit no longer offers the "
+         "free API access this needs.", "#ff4500"),
+    )
+    _INTEGRATIONS_CSS = """
+.v-apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px; margin: 16px 0; }
+.v-app { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px;
+  background: var(--v-card); border: 1px solid var(--v-line);
+  border-radius: var(--v-radius); box-shadow: var(--v-shadow); color: inherit;
+  text-decoration: none; transition: border-color .15s, box-shadow .15s; }
+a.v-app:hover { border-color: var(--v-violet-line); color: inherit;
+  box-shadow: 0 6px 22px rgba(109, 40, 217, .12); }
+.v-app-off { opacity: .7; }
+.v-app-head { display: flex; align-items: center; gap: 12px; }
+.v-app-mark { width: 40px; height: 40px; border-radius: 10px; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 18px; flex: 0 0 auto; }
+.v-app-name { font-weight: 800; font-size: 17px; }
+.v-app p { margin: 0; font-size: 14px; color: var(--v-muted); }
+.v-site-list { list-style: none; padding: 0; margin: 12px 0; }
+.v-site-row { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 16px; background: var(--v-card);
+  border: 1px solid var(--v-line); border-radius: var(--v-radius-sm);
+  margin-bottom: 8px; }
+.v-site-row strong { overflow-wrap: anywhere; }
+.v-site-row button { margin: 0; flex: 0 0 auto; }
+dialog.v-dialog { border: 0; border-radius: 16px; padding: 0;
+  width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+  box-shadow: 0 24px 60px rgba(11, 14, 30, .35); }
+dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
+.v-dialog-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--v-line);
+  position: sticky; top: 0; background: var(--v-card); }
+.v-dialog-head h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.v-dialog-body { padding: 8px 20px 20px; overflow-y: auto; }
+.v-dialog-close { margin: 0; min-height: 40px; }
+.v-crumbs { font-size: 14px; margin: 0 0 6px; }
+"""
+
+    def _integration_status(site_id: str, kind: str) -> tuple[dict, bool]:
+        conn = _saas_store.get_connection(site_id, kind) or {
+            "kind": kind, "status": "not_connected", "note": ""}
+        return conn, conn.get("status") == "connected"
+
+    def _integration_body(account, s, kind: str, conn: dict,
+                          return_to: str) -> str:
+        """What one website needs for one app: the same forms as before
+        (same endpoints), plus return_to so saving lands back here."""
+        from ventoryn.saas import (CONNECTION_CONSENT, CONNECTION_SCOPES,
+                                   check_posting_allowed, x_account_summary)
+
+        rt = f"<input type='hidden' name='return_to' value='{esc(return_to)}'>"
+        totp_field = ""
+        if account.get("totp_enabled"):
+            totp_field = (
+                "<label>Two-factor code (fresh, required to confirm this "
+                "change)</label><input type='text' name='totp_code' "
+                "inputmode='numeric' autocomplete='one-time-code' maxlength='8'>")
+        sid = esc(s["id"])
+        connected = conn.get("status") == "connected"
+        parts = []
+        if conn.get("note"):
+            parts.append(f"<p>{esc(conn['note'])}</p>")
+        if kind in ("reddit", "x"):
+            _ok, gate_reason = check_posting_allowed(
+                _saas_store, account, s["id"], kind, _saas_config)
+            parts.append(f"<p class='muted'>Posting: {esc(gate_reason)}</p>")
+        if kind == "plausible":
+            raw = (_saas_store.get_connection(s["id"], "plausible") or {}
+                   ).get("_detail_raw") or {}
+            parts.append(
+                f"<form method='post' action='/account/sites/{sid}/connections/plausible'>{rt}"
+                f"<label for='pl-dom-{sid}'>Plausible site domain</label>"
+                f"<input type='text' id='pl-dom-{sid}' name='site_domain' "
+                f"value='{esc(raw.get('site_domain', s['host']))}'>"
+                f"<label for='pl-key-{sid}'>Plausible API key</label>"
+                f"<input type='password' id='pl-key-{sid}' name='api_key' "
+                f"autocomplete='off' placeholder='Stored encrypted, never shown back'>"
+                f"<p><button class='btn btn-primary' type='submit'>"
+                f"{'Update' if connected else 'Connect'} Plausible</button></p></form>")
+        elif kind == "stripe_sales":
+            webhook_url = f"{_saas_config.base_url}/account/billing/webhook"
+            parts.append(
+                f"<ol class='muted'><li>In this website's Stripe account, add a webhook "
+                f"endpoint: <code>{esc(webhook_url)}</code></li>"
+                f"<li>Add <code>ventoryn_site_id</code> = <code>{sid}</code> to the "
+                f"checkout metadata, so sales are counted for this website.</li>"
+                f"<li>Paste the endpoint's signing secret below.</li></ol>"
+                f"<form method='post' action='/account/sites/{sid}/connections/stripe_sales'>{rt}"
+                f"<label for='st-sec-{sid}'>Stripe webhook signing secret</label>"
+                f"<input type='password' id='st-sec-{sid}' name='webhook_secret' "
+                f"autocomplete='off' spellcheck='false' "
+                f"placeholder='whsec_… (stored encrypted, never shown back)'>"
+                f"<p><button class='btn btn-primary' type='submit'>"
+                f"{'Update' if connected else 'Connect'} Stripe sales</button></p></form>")
+        elif kind == "x":
+            if connected:
+                token = (conn.get("_detail_raw") or (
+                    _saas_store.get_connection(s["id"], "x") or {}).get(
+                        "_detail_raw") or {}).get("access_token", "")
+                summary = x_account_summary(token) if token else None
+                parts.append(
+                    f"<p class='muted'>Audience: {summary['followers']} followers, "
+                    f"{summary['following']} following, {summary['posts']} posts.</p>"
+                    if summary else
+                    "<p class='muted'>Audience numbers unavailable right now.</p>")
+                parts.append(
+                    f"<p><a class='btn' href='/account/sites/{sid}#connections'>"
+                    f"Drafts and posting for this website</a></p>")
+            elif _saas_config.x_oauth_configured and _saas_config.app_registered("x"):
+                parts.append(
+                    f"<p class='muted'>You will sign in to X and approve Ventoryn's "
+                    f"access for this website's account, then come back here.</p>"
+                    f"<p><a class='btn btn-primary' href='/account/sites/{sid}"
+                    f"/connections/x/start?return_to="
+                    f"{esc(urllib.parse.quote(return_to, safe=''))}'>Connect with X</a></p>")
+            else:
+                parts.append(
+                    "<p class='muted'>The operator has not set up Ventoryn's X app "
+                    "yet, so this website cannot connect. Nothing is faked.</p>")
+        else:
+            parts.append("<p class='muted'>Reddit no longer offers the free API "
+                         "access this would need, so this connection is not "
+                         "available.</p>")
+        consent = CONNECTION_CONSENT.get(kind, "")
+        scopes = CONNECTION_SCOPES.get(kind, "")
+        if consent:
+            parts.append(f"<p class='muted'>{esc(consent)}</p>")
+        if scopes:
+            parts.append(f"<p class='muted'>Access requested: <code>{esc(scopes)}</code></p>")
+        if connected:
+            parts.append(
+                f"<form method='post' action='/account/sites/{sid}/connections/"
+                f"{esc(kind)}/disconnect'>{rt}{totp_field}<p><button class='btn' "
+                f"type='submit'>Disconnect</button></p></form>")
+        return "".join(parts)
+
     @app.get("/integrations", response_class=HTMLResponse)
     def integrations_page(request: Request):
-        """Per site, the real connections (Reddit, X, Plausible,
-        Stripe) with connected / not-connected state — the same
-        cards and the same form actions as the site-detail page
-        (POST /account/sites/{id}/connections/{kind}, disconnect
-        posts, plus the X OAuth start/callback and social-draft
-        routes). X posting needs the platform OAuth app registration
-        first — until then the connection says "not connected — app
-        registration needed", never faked. X's API is paid and
-        rate-limited. Reddit has no free API access and is not
-        available at all."""
+        """The service apps, each with how many websites use it."""
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
-        from ventoryn.saas import (
-            CONNECTION_CONSENT, CONNECTION_SCOPES,
-            check_posting_allowed, x_account_summary,
-        )
-
         sites = _saas_store.list_sites(account["id"])
-        if not sites:
-            inner = ("<div class='card'><p>No websites yet — add one "
-                     "to connect it.</p><p><a class='btn btn-primary' "
-                     "href='/account/dashboard'>Add a website</a></p>"
-                     "</div>")
-        else:
-            totp_field = ""
-            if account.get("totp_enabled"):
-                totp_field = (
-                    "<label>Two-factor code (fresh — required to "
-                    "confirm this change)</label><input type='text' "
-                    "name='totp_code' inputmode='numeric' "
-                    "autocomplete='one-time-code' maxlength='8'>")
-            cards = ""
-            for s in sites:
-                # Recommended next, at the top of this site's group:
-                # without Stripe sales connected, the funnel cannot
-                # verify paying customers — say so plainly.
-                stripe_conn = (_saas_store.get_connection(
-                    s["id"], "stripe_sales") or {})
-                if stripe_conn.get("status") != "connected":
-                    cards += (
-                        f"<div class='v-notice v-notice-warn'>"
-                        f"Connect Stripe sales for {esc(s['host'])} to "
-                        f"count paying customers — the funnel cannot "
-                        f"verify sales without it.</div>")
-                plausible_raw = (
-                    _saas_store.get_connection(s["id"], "plausible")
-                    or {}).get("_detail_raw") or {}
-                x_access_token = (_saas_store.get_connection(s["id"], "x")
-                                 or {}).get("_detail_raw", {}).get(
-                                     "access_token", "")
-                for conn in _saas_store.get_connections(s["id"]):
-                    kind = conn["kind"]
-                    badge = (
-                        "<span class='badge badge-ok'>Connected</span>"
-                        if conn["status"] == "connected" else
-                        "<span class='badge badge-off'>Not connected"
-                        "</span>")
-                    consent = CONNECTION_CONSENT.get(kind, "")
-                    scopes = CONNECTION_SCOPES.get(kind, "")
-                    gate_html = ""
-                    if kind in ("reddit", "x"):
-                        _ok, gate_reason = check_posting_allowed(
-                            _saas_store, account, s["id"], kind,
-                            _saas_config)
-                        gate_html = f"<p>Posting: {esc(gate_reason)}</p>"
-                    disconnect_html = ""
-                    if conn["status"] == "connected":
-                        disconnect_html = (
-                            f"<form method='post' action='/account/sites/"
-                            f"{esc(s['id'])}/connections/{kind}/disconnect'>"
-                            f"{totp_field}<p><button class='btn' "
-                            f"type='submit'>Disconnect</button></p></form>")
-                    if kind == "plausible":
-                        form = (
-                            "<form method='post' "
-                            f"action='/account/sites/{esc(s['id'])}/connections/plausible'>"
-                            "<label for='plausible_domain'>Plausible site "
-                            "domain</label><input type='text' "
-                            "id='plausible_domain' name='site_domain' "
-                            f"value='{esc(plausible_raw.get('site_domain', s['host']))}'>"
-                            "<label for='plausible_key'>Plausible API "
-                            "key</label><input type='text' "
-                            "id='plausible_key' name='api_key' "
-                            "placeholder='Stored, never shown back'>"
-                            "<p><button class='btn' type='submit'>"
-                            "Connect Plausible</button></p></form>")
-                    elif kind == "stripe_sales":
-                        webhook_url = (
-                            f"{_saas_config.base_url}/account/billing/webhook")
-                        form = (
-                            f"<p class='muted'>Point your Stripe webhook "
-                            f"at <code>{esc(webhook_url)}</code> and add "
-                            f"<code>ventoryn_site_id</code> = "
-                            f"<code>{esc(s['id'])}</code> to your checkout "
-                            f"metadata, so sales are counted for this site."
-                            f"</p><form method='post' action='/account/sites/"
-                            f"{esc(s['id'])}/connections/stripe_sales'>"
-                            "<label for='stripe_secret'>Stripe webhook "
-                            "signing secret</label><input type='text' "
-                            "id='stripe_secret' name='webhook_secret' "
-                            "placeholder='Stored, never shown back'>"
-                            "<p><button class='btn' type='submit'>"
-                            "Connect Stripe sales</button></p></form>")
-                    elif kind == "x":
-                        if conn["status"] == "connected":
-                            summary = x_account_summary(x_access_token) \
-                                if x_access_token else None
-                            audience = (
-                                f"<p class='muted'>Audience: "
-                                f"{summary['followers']} followers, "
-                                f"{summary['following']} following, "
-                                f"{summary['posts']} posts.</p>" if summary
-                                else "<p class='muted'>Audience numbers "
-                                "unavailable right now.</p>")
-                            drafts = _saas_store.list_social_drafts(s["id"])
-                            draft_rows = "".join(
-                                f"<div class='card'><p>{esc(d['text'])}</p>"
-                                + (f"<p class='muted'>Link: "
-                                   f"{esc(d['link_url'])}</p>"
-                                   if d["link_url"] else "")
-                                + f"<p>Status: <strong>{esc(d['status'])}"
-                                "</strong>"
-                                + (f" (tweet {esc(d['tweet_id'])})"
-                                   if d["tweet_id"] else "") + "</p>"
-                                + (f"<form method='post' "
-                                   f"action='/account/sites/{esc(s['id'])}"
-                                   f"/social/x/drafts/{esc(d['id'])}/approve'>"
-                                   f"{totp_field}<p><button class='btn "
-                                   "btn-primary' type='submit'>Approve "
-                                   "&amp; post</button> <button class='btn' "
-                                   "type='submit' formaction='/account/"
-                                   f"sites/{esc(s['id'])}/social/x/drafts/"
-                                   f"{esc(d['id'])}/reject'>Reject</button>"
-                                   "</p></form>"
-                                   if d["status"] == "pending" else "")
-                                + "</div>"
-                                for d in drafts) or (
-                                "<p class='muted'>No drafts yet.</p>")
-                            form = (audience +
-                                    "<form method='post' "
-                                    f"action='/account/sites/{esc(s['id'])}"
-                                    "/social/x/drafts'>"
-                                    "<label for='x_text'>Draft a post"
-                                    "</label><textarea id='x_text' "
-                                    "name='text' maxlength='280' required>"
-                                    "</textarea>"
-                                    "<label for='x_link'>Link to sign "
-                                    "(optional)</label><input type='text' "
-                                    "id='x_link' name='link_url'>"
-                                    "<p><button class='btn' type='submit'>"
-                                    "Save draft</button></p></form>"
-                                    "<p class='muted'>Nothing is posted "
-                                    "until Approve &amp; post on a draft."
-                                    "</p>"
-                                    f"<h4>Drafts</h4>{draft_rows}")
-                        elif (_saas_config.x_oauth_configured
-                              and _saas_config.app_registered("x")):
-                            form = (
-                                f"<p class='muted'>{esc(conn['note'])}</p>"
-                                f"<p><a class='btn btn-primary' "
-                                f"href='/account/sites/{esc(s['id'])}"
-                                "/connections/x/start'>Connect with X</a>"
-                                "</p>")
-                        else:
-                            form = (
-                                f"<p class='muted'>{esc(conn['note'])}</p>"
-                                "<p class='muted'>To connect, the operator "
-                                "first registers Ventoryn's app in X's "
-                                "developer console and sets the app "
-                                "credentials — that step is not built "
-                                "here and nothing is faked.</p>")
-                    else:
-                        # Reddit: no free API access exists for this
-                        # anymore — honest, permanent "not available".
-                        form = (
-                            f"<p class='muted'>{esc(conn['note'])}</p>"
-                            "<p class='muted'>Reddit's API no longer "
-                            "offers the free access this would need — "
-                            "this connection is not available.</p>")
-                    cards += (
-                        f"<div class='card'><h3>{esc(s['url'])} — "
-                        f"{esc(kind.replace('_', ' '))} {badge}</h3>"
-                        f"<p>{esc(conn['note'])}</p>"
-                        f"<p>{esc(consent)}</p>"
-                        f"<p class='muted'>Scopes requested: "
-                        f"<code>{esc(scopes)}</code></p>"
-                        f"{gate_html}{form}{disconnect_html}</div>")
-            inner = ("""<p class='muted'>X posting needs the platform
-OAuth app registration first — until then the connection says "not connected — app registration needed", never faked. X's API is paid and rate-limited; see the budget note on each X card.</p>
-<p class='muted'>Reddit is not available — Reddit no longer offers the free API access this would need.</p>""" + cards)
+        cards = ""
+        for kind, name, blurb, color in _INTEGRATION_APPS:
+            n = sum(1 for s in sites if _integration_status(s["id"], kind)[1])
+            if kind == "reddit":
+                status = "<span class='badge badge-off'>Not available</span>"
+            elif not sites:
+                status = "<span class='badge badge-off'>No websites yet</span>"
+            else:
+                status = (f"<span class='badge{' badge-ok' if n else ' badge-off'}'>"
+                          f"Connected on {n} of {len(sites)} website"
+                          f"{'s' if len(sites) != 1 else ''}</span>")
+            head = (f"<div class='v-app-head'><span class='v-app-mark' "
+                    f"style='background:{color}' aria-hidden='true'>{esc(name[0])}"
+                    f"</span><span class='v-app-name'>{esc(name)}</span></div>")
+            if kind == "reddit":
+                cards += (f"<div class='v-app v-app-off'>{head}<p>{esc(blurb)}</p>"
+                          f"<div>{status}</div></div>")
+            else:
+                cards += (f"<a class='v-app' href='/integrations/{kind}'>{head}"
+                          f"<p>{esc(blurb)}</p><div>{status}</div></a>")
+        # Recommended next: without Stripe sales the funnel cannot verify
+        # paying customers — say so plainly, linking to that site's window.
+        hints = "".join(
+            f"<div class='v-notice v-notice-warn'>"
+            f"<a href='/integrations/stripe_sales?site={esc(s['id'])}'>"
+            f"Connect Stripe sales for {esc(s['host'])}</a> to count paying "
+            f"customers — the funnel cannot verify sales without it.</div>"
+            for s in sites if not _integration_status(s["id"], "stripe_sales")[1])
+        inner = (f"{hints}<p class='muted'>Choose an app to see your websites "
+                 f"and connect each one.</p><div class='v-apps'>{cards}</div>")
         return _operator_page(
-            "Integrations", inner, account=account,
-            current="integrations",
+            "Integrations", inner, account=account, current="integrations",
             is_operator=_saas_config.is_operator(account["email"]),
-            extra_css=_PORTFOLIO_CSS)
+            extra_css=_PORTFOLIO_CSS + _INTEGRATIONS_CSS)
+
+    @app.get("/integrations/{kind}", response_class=HTMLResponse)
+    def integration_app_page(request: Request, kind: str, site: str = ""):
+        """One app: the account's websites, each opening its own window."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        meta = next((a for a in _INTEGRATION_APPS if a[0] == kind), None)
+        if meta is None or kind == "reddit":
+            raise HTTPException(404, "integration not found")
+        _k, name, blurb, color = meta
+        sites = _saas_store.list_sites(account["id"])
+        rows, dialogs = "", ""
+        for s in sites:
+            conn, connected = _integration_status(s["id"], kind)
+            sid = esc(s["id"])
+            badge = ("<span class='badge badge-ok'>Connected</span>" if connected
+                     else "<span class='badge badge-off'>Not connected</span>")
+            rows += (f"<li class='v-site-row'><div><strong>{esc(s['host'])}</strong> "
+                     f"{badge}</div><button class='btn' type='button' "
+                     f"data-open='dlg-{sid}'>{'Manage' if connected else 'Connect'}"
+                     f"</button></li>")
+            body = _integration_body(account, s, kind, conn,
+                                     f"/integrations/{kind}?site={s['id']}")
+            dialogs += (f"<dialog class='v-dialog' id='dlg-{sid}' aria-labelledby='dlgt-{sid}'>"
+                        f"<div class='v-dialog-head'><h2 id='dlgt-{sid}'>{esc(name)} for "
+                        f"{esc(s['host'])}</h2><button class='btn v-dialog-close' "
+                        f"type='button' data-close>Close</button></div>"
+                        f"<div class='v-dialog-body'>{body}</div></dialog>")
+        if not sites:
+            rows = ("<li class='v-site-row'><span>No websites yet.</span>"
+                    "<a class='btn btn-primary' href='/account/sites/new'>"
+                    "Add a website</a></li>")
+        open_id = f"dlg-{site}" if any(s["id"] == site for s in sites) else ""
+        script = ("<script>(function(){"
+                  "document.querySelectorAll('[data-open]').forEach(function(b){"
+                  "b.addEventListener('click',function(){var d=document.getElementById("
+                  "b.getAttribute('data-open'));if(d&&d.showModal)d.showModal();});});"
+                  "document.querySelectorAll('dialog.v-dialog').forEach(function(d){"
+                  "d.querySelectorAll('[data-close]').forEach(function(c){"
+                  "c.addEventListener('click',function(){d.close();});});"
+                  "d.addEventListener('click',function(e){if(e.target===d)d.close();});});"
+                  + (f"var o=document.getElementById('{esc(open_id)}');"
+                     f"if(o&&o.showModal)o.showModal();" if open_id else "")
+                  + "})();</script>")
+        inner = (f"<p class='v-crumbs'><a href='/integrations'>Integrations</a></p>"
+                 f"<div class='v-app-head' style='margin:4px 0 8px'><span class='v-app-mark' "
+                 f"style='background:{color}' aria-hidden='true'>{esc(name[0])}</span>"
+                 f"<span class='v-app-name'>{esc(name)}</span></div>"
+                 f"<p class='muted'>{esc(blurb)}</p>"
+                 f"<h2>Your websites</h2><ul class='v-site-list'>{rows}</ul>"
+                 f"{dialogs}{script}")
+        return _operator_page(
+            name, inner, account=account, current="integrations",
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=_PORTFOLIO_CSS + _INTEGRATIONS_CSS)
 
     @app.get("/customers", response_class=HTMLResponse)
     def customers_page(request: Request):

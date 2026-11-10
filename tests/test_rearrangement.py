@@ -376,8 +376,7 @@ def test_integrations_stripe_hint():
     _seed_customer(store, account)
     r = client.get("/integrations")
     assert r.status_code == 200
-    assert ("Connect Stripe sales for ada.example.com to count paying "
-            "customers") in r.text
+    assert "Connect Stripe sales for ada.example.com</a> to count paying" in r.text
 
 
 # ---------------------------------------------------------------------------

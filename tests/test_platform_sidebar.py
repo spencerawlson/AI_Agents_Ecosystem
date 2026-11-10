@@ -270,13 +270,14 @@ def test_integrations_states_plainly_reddit_x_need_app_registration():
     store.create_site(account["id"], "https://ada.example.com")
     r = client.get("/integrations")
     assert r.status_code == 200
-    assert "not connected — app registration needed" in r.text
-    # The honesty note spans a line break in the HTML, so assert
-    # the two halves separately.
-    assert "X's API" in r.text
-    assert "paid and rate-limited" in r.text
+    # The apps grid: every service, honest about cost and availability.
     for kind in ("Reddit", "X", "Plausible", "Stripe"):
         assert kind in r.text, kind
+    assert "API is paid and rate-limited" in r.text
+    assert "Not available" in r.text  # Reddit
+    # The X app page: the not-registered state is stated plainly.
+    x = client.get("/integrations/x")
+    assert "has not set up Ventoryn" in x.text
 
 
 # ---------------------------------------------------------------------------
