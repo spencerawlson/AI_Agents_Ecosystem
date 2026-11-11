@@ -151,7 +151,10 @@ SIDEBAR_CSS = """
 .app-header { min-height: 83px; display: flex; align-items: center;
   justify-content: space-between; gap: 20px; padding: 12px 28px; }
 .app-page-head { display: flex; align-items: center; gap: 16px; min-width: 0; }
-.app-header h1 { font-size: 28px; letter-spacing: -1px; line-height: 1.1; margin: 0; }
+.app-page-title { min-width: 0; flex: 1 1 auto; }
+.app-header h1 { font-size: 28px; letter-spacing: -1px; line-height: 1.1; margin: 0;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-header h1.h1-url { font-size: 18px; letter-spacing: -.2px; }
 .app-header p { margin: 5px 0 0; font-size: 14px; color: #2d2944; }
 .app-header-actions { display: flex; align-items: center; gap: 25px;
   flex: 0 0 auto; }
@@ -262,6 +265,7 @@ SIDEBAR_CSS = """
   .sidebar-toggle { display: inline-flex; }
   .app-header { padding: 13px 18px; align-items: flex-start; }
   .app-header h1 { font-size: 22px; }
+  .app-header h1.h1-url { font-size: 15px; }
   .app-header p { font-size: 12px; }
   .app-header-actions { gap: 9px; }
   .app-main { padding: 0 14px 22px; }
@@ -469,13 +473,14 @@ def platform_head_html(title: str, subtitle: str = "", *,
     subtitle_html = (f"<p>{esc(subtitle)}</p>" if subtitle else "")
     badge_html = (f"<b class='header-badge'>{int(pending_approvals)}</b>"
                   if pending_approvals > 0 else "")
+    title_cls = " class='h1-url'" if "://" in title else ""
     return (
         f"<header class='app-header'>"
         f"<div class='app-page-head'>"
         f"<button class='sidebar-toggle' type='button' aria-expanded='false' "
         f"aria-controls='app-sidebar' aria-label='Open menu'>"
         f"{icon('menu', 23)}</button>"
-        f"<div><h1>{esc(title)}</h1>{subtitle_html}</div>"
+        f"<div class='app-page-title'><h1{title_cls}>{esc(title)}</h1>{subtitle_html}</div>"
         f"</div>"
         f"<div class='app-header-actions'>"
         f"{pause_pill}"
