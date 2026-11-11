@@ -2286,7 +2286,13 @@ def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
         return False, "Draft not found."
     if draft["status"] != "pending":
         return False, f"This draft was already {draft['status']}."
-    cost = X_REPORTED_COST_PER_LINKED_POST_USD if draft["link_url"] else 0.0
+    # Every post costs something on X's pay-per-use API: $0.20 with a
+    # link (every Ventoryn link post), $0.015 without (reported rates,
+    # ventoryn/campaign_cost.py). Recorded in whole cents, rounded up.
+    from ventoryn.campaign_cost import x_post_cost_cents
+
+    cost_cents = x_post_cost_cents(bool(draft["link_url"]))
+    cost = cost_cents / 100
     spent = store.x_spend_this_month_usd(site_id)
     if spent + cost > config.x_monthly_budget_usd:
         return False, (
@@ -2312,8 +2318,7 @@ def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
     tweet_id = (result.get("data") or {}).get("id", "")
     store.decide_social_draft(draft_id, "posted", signature_tag=tag,
                               tweet_id=tweet_id)
-    if cost:
-        store.record_x_post_cost(site_id, draft_id, int(cost * 100))
+    store.record_x_post_cost(site_id, draft_id, cost_cents)
     return True, f"Posted to X (id {tweet_id})."
 
 
