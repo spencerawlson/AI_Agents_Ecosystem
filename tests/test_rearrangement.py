@@ -374,9 +374,11 @@ def test_integrations_stripe_hint():
     app, store = _app_with()
     client, account = _customer_client(app, store)
     _seed_customer(store, account)
-    r = client.get("/integrations")
+    # The hint moved off Integrations into Alerts (bell + /alerts).
+    assert "<div class='v-notice v-notice-warn'>" not in client.get("/integrations").text
+    r = client.get("/alerts")
     assert r.status_code == 200
-    assert "Connect Stripe sales for ada.example.com</a> to count paying" in r.text
+    assert "Connect Stripe sales for ada.example.com to count paying" in r.text
 
 
 # ---------------------------------------------------------------------------

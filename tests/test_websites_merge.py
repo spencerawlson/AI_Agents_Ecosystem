@@ -48,6 +48,8 @@ def test_my_account_no_longer_lists_websites_or_jobs():
     client, store, account = _client()
     store.create_site(account["id"], "https://shop.example.com")
     html = client.get("/account/dashboard").text
-    assert "Your websites" not in html and "Recent jobs" not in html
-    assert "shop.example.com" not in html
+    # The page body only — the header's alerts panel may name the site.
+    main = html.split("<main", 1)[-1]
+    assert "Your websites" not in main and "Recent jobs" not in main
+    assert "shop.example.com" not in main
     assert "Add a website" in html  # the plan card keeps the way in
