@@ -2348,8 +2348,8 @@ nothing in them was published.</p>
         title, body = result
         return _operator_page(
             title,
-            f"""<article class="card v-doc">{body}</article>
-<a class="v-back" href="/reports">{icon('arrow_left', 15)} Back to reports</a>""",
+            f"""<div class="v-doc-wrap"><article class="card v-doc">{body}</article>
+<a class="v-back" href="/reports">{icon('arrow_left', 15)} Back to reports</a></div>""",
             account=account, current="reports", is_operator=True,
             extra_css=ui.DOC_CSS)
 

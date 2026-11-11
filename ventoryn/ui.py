@@ -175,7 +175,9 @@ input:focus, select:focus, textarea:focus { outline: none;
 
 # Rendered markdown documents (mission reports): readable measure.
 DOC_CSS = """
-.v-doc { max-width: 820px; padding: 24px 28px; }
+.v-doc { max-width: 820px; padding: 24px 28px; margin-inline: auto; }
+/* The back link lines up under the centered document. */
+.v-doc-wrap { max-width: 820px; margin-inline: auto; }
 .v-doc h1 { margin-top: 0; font-size: 24px; }
 .v-doc img { max-width: 100%; height: auto; }
 .v-doc pre { overflow-x: auto; background: #faf9fe; padding: 12px;
