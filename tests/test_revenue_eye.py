@@ -64,4 +64,36 @@ def test_toggle_starts_hidden_and_only_shows_where_revenue_is_hidden():
     html = client.get("/portfolio").text
     assert "<button class='rev-toggle' id='rev-toggle' type='button' role='switch' hidden aria-checked='false'" in html
     assert "<span class='rev-track' aria-hidden='true'><span class='rev-knob'></span></span>" in html
-    assert "querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site]')" in html
+    assert "querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site],[data-rev-site-profit]')" in html
+
+
+def test_overview_cards_can_be_revealed_by_the_switch():
+    client, _, _, site = _setup()
+    html = client.get("/ops").text
+    assert "id='rev-toggle'" in html
+    assert f"<span data-rev-site='{site['id']}'>—</span>" in html
+    assert f"<span data-rev-site-profit='{site['id']}'>—</span>" in html
+    assert "$49.00" not in html
+
+
+def test_costs_are_credits_used_at_the_plan_rate():
+    client, store, account, site = _setup()
+    store.grant_credits(account["id"], 100, "test")
+    job = store.charge_credits(account["id"], "seo_article", site["id"])  # 10 credits
+    store.set_job_result(job["id"], "done", "ok")
+    failed = store.charge_credits(account["id"], "analyze", site["id"])
+    store.set_job_result(failed["id"], "failed", "refunded")
+    assert store.site_credits_used(site["id"]) == 10
+    html = client.get("/portfolio").text
+    assert "<span class='v-stat-label'>Costs</span><span class='v-stat-value'>$0.20</span>" in html
+    data = client.get("/api/websites/revenue").json()
+    assert data["site_profit"] == {site["id"]: "$48.80"}
+    assert data["net_profit"] == "$48.80"
+
+
+def test_overview_shows_revenue_costs_and_net_profit():
+    client, _, _, _ = _setup()
+    html = client.get("/ops").text
+    for label in ("Revenue", "Costs", "Net profit"):
+        assert f"<span class='v-stat-label'>{label}</span>" in html
+    assert "data-rev-total>—</span>" in html and "data-rev-profit>—</span>" in html

@@ -503,6 +503,39 @@ def create_app(
             "net_profit": round(pnl.net_profit, 2),
         }
 
+    def _credit_usd() -> float:
+        """What one credit is worth: the plan price over the monthly
+        allowance ($20 / 1,000 credits = $0.02)."""
+        from ventoryn.saas import PLAN_PRICE_USD
+
+        return PLAN_PRICE_USD / max(1, int(_saas_config.monthly_credits or 0))
+
+    def _site_cost_usd(site_id: str) -> float:
+        """A website's cost: the credits its agent work used, valued at
+        the plan rate."""
+        return round(_saas_store.site_credits_used(site_id) * _credit_usd(), 2)
+
+    def _money_stats_html(account, *, first: str = "") -> str:
+        """Revenue / Costs / Net profit for the account — the same
+        totals on Websites and Overview. Hidden revenue reads "—" and
+        is marked so the header Revenue switch can reveal it."""
+        rows = ([_biz_row(b) for b in _visible_businesses(account)]
+                + _site_business_rows(account))
+        hidden = any(r["revenue"] is None for r in rows)
+        revenue = sum(r["revenue"] for r in rows if r["revenue"] is not None)
+        costs = sum(r["total_costs"] or 0 for r in rows)
+        profit = sum(r["net_profit"] for r in rows if r["net_profit"] is not None)
+        n = 2 if first else 1
+        return (f"<div class='v-stats'>{first}"
+                f"<div class='v-stat v-stat-{n}'><span class='v-stat-label'>Revenue</span>"
+                f"<span class='v-stat-value' data-rev-total>"
+                f"{'—' if hidden else money(revenue)}</span></div>"
+                f"<div class='v-stat v-stat-{n + 1}'><span class='v-stat-label'>Costs</span>"
+                f"<span class='v-stat-value'>{money(costs)}</span></div>"
+                f"<div class='v-stat v-stat-3'><span class='v-stat-label'>Net profit</span>"
+                f"<span class='v-stat-value' data-rev-profit>"
+                f"{'—' if hidden else money(profit)}</span></div></div>")
+
     def _site_business_rows(account) -> list[dict]:
         """The account's own SaaS sites as business rows, so the
         portfolio, report and Live Ops render them like any other
@@ -518,6 +551,7 @@ def create_app(
             rev = _saas_store.revenue_for_site(site["id"])
             revenue = (rev["revenue"]["total_cents"] / 100
                        if rev and rev["revenue"] else None)
+            cost = _site_cost_usd(site["id"])
             rows.append({
                 "id": f"site:{site['id']}",
                 "name": site["host"] or site["url"],
@@ -526,8 +560,8 @@ def create_app(
                 "status": "active",
                 "revenue": (round(revenue, 2) if revenue is not None
                             else None),
-                "total_costs": 0.0,
-                "net_profit": (round(revenue, 2) if revenue is not None
+                "total_costs": cost,
+                "net_profit": (round(revenue - cost, 2) if revenue is not None
                                else None),
             })
         return rows
@@ -559,7 +593,7 @@ def create_app(
     _PORTFOLIO_CSS = """
 /* Portfolio: KPI cards + business cards in the platform palette.
    The accent strip is the landing page's violet -> blue gradient. */
-.v-stats { display: grid; grid-template-columns: repeat(3, 1fr);
+.v-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px; margin: 18px 0 10px; }
 @media (max-width: 640px) { .v-stats { grid-template-columns: 1fr; } }
 .v-stat { position: relative; overflow: hidden; border-radius: var(--v-radius);
@@ -1846,18 +1880,23 @@ if (demoToggle && demoValue) {{
         account = _current_account(request)
         if account is None:
             return JSONResponse({"error": "sign in"}, status_code=401)
-        sites = {}
-        total = 0.0
+        sites, site_profit = {}, {}
+        total = costs = 0.0
         for site in _saas_store.list_sites(account["id"]):
+            cost = _site_cost_usd(site["id"])
+            costs += cost
             raw = _saas_store.site_revenue_total(site["id"])
             if raw is not None:
-                sites[site["id"]] = f"${raw['total_cents'] / 100:,.2f}"
-                total += raw["total_cents"] / 100
+                rev = raw["total_cents"] / 100
+                sites[site["id"]] = f"${rev:,.2f}"
+                site_profit[site["id"]] = money(rev - cost)
+                total += rev
         reg = [_biz_row(b) for b in _visible_businesses(account)]
         reg_rev = sum(r["revenue"] for r in reg if r["revenue"] is not None)
         reg_profit = sum(r["net_profit"] for r in reg if r["net_profit"] is not None)
-        return JSONResponse({"sites": sites, "total": money(total + reg_rev),
-                             "net_profit": money(total + reg_profit)},
+        return JSONResponse({"sites": sites, "site_profit": site_profit,
+                             "total": money(total + reg_rev),
+                             "net_profit": money(total - costs + reg_profit)},
                             headers={"Cache-Control": "no-store"})
 
     @app.get("/portfolio", response_class=HTMLResponse)
@@ -2013,16 +2052,12 @@ if (demoToggle && demoValue) {{
                          f"from this account. "
                          f"<a href='/businesses'>View all businesses</a></p>"
                          f"<div class='v-biz-grid'>{_cards(reg_rows)}</div>")
-        inner = f"""<div class='v-stats'>
-<div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>
-<span class='v-stat-value'>{len(biz_rows)}</span></div>
-<div class='v-stat v-stat-2'><span class='v-stat-label'>Revenue</span>
-<span class='v-stat-value' data-rev-total>{_money(total_revenue) if not any_hidden else "—"}</span></div>
-<div class='v-stat v-stat-3'><span class='v-stat-label'>Net profit</span>
-<span class='v-stat-value' data-rev-profit>{_money(total_profit) if not any_hidden else "—"}</span></div></div>
-<p class='muted'>Costs per website read $0 here: the site's own costs
-are its credits, and credits are not dollars. Revenue is real — the
-sum of recorded paying customers per site.</p>{hidden_note}
+        _first = ("<div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>"
+                  f"<span class='v-stat-value'>{len(biz_rows)}</span></div>")
+        inner = f"""{_money_stats_html(account, first=_first)}
+<p class='muted'>Costs are the credits each website's agent work used,
+valued at the plan rate ({money(_credit_usd(), 2)} a credit). Revenue is
+real — the sum of recorded paying customers per site.</p>{hidden_note}
 <p><a class='btn' href='/account/sites/new'>Add a website</a></p>
 <h2>Your websites</h2>
 {_site_list(site_rows)}
@@ -2500,7 +2535,16 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         counts = data["counts"]
 
         def _money(value):
-            return "hidden" if value is None else money(value)
+            return "—" if value is None else money(value)
+
+        def _rev_cell(b: dict, value, kind: str = "site") -> str:
+            """A website's revenue / net profit; when hidden, marked so
+            the header Revenue switch can reveal it (net profit equals
+            revenue for a website: its costs are credits, not dollars)."""
+            if value is None and str(b["id"]).startswith("site:"):
+                return (f"<span data-rev-{kind}='{esc(str(b['id'])[5:])}'>"
+                        f"—</span>")
+            return _money(value)
 
         def _biz_extra(b: dict) -> str:
             """One line per website card: verified customers for
@@ -2531,9 +2575,9 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             + (" — <a class='pill' href='/businesses'>Unclaimed — claim"
                "</a>" if b.get("owner_email", "x") is None else "")
             + f"</p>"
-            f"<dl><dt>Revenue</dt><dd>{_money(b['revenue'])}</dd>"
+            f"<dl><dt>Revenue</dt><dd>{_rev_cell(b, b['revenue'])}</dd>"
             f"<dt>Costs</dt><dd>{money(b['total_costs'])}</dd>"
-            f"<dt>Net profit</dt><dd>{_money(b['net_profit'])}</dd></dl>"
+            f"<dt>Net profit</dt><dd>{_rev_cell(b, b['net_profit'], 'site-profit')}</dd></dl>"
             f"{_biz_extra(b)}"
             f"</article>"
             for i, b in enumerate(snap["businesses"])) or (
@@ -2611,7 +2655,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             middle = f"{analyze_html}\n{websites_section}"
         else:
             middle = f"{websites_section}\n{analyze_html}"
-        inner = f"""{banner}{_progress_grid_html(data)}
+        inner = f"""{banner}{_money_stats_html(account)}{_progress_grid_html(data)}
 {decision_html}
 {_agent_costs_card_html(account)}
 {middle}
