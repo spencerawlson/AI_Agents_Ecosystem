@@ -53,7 +53,9 @@ def _app():
     return app, store, audit
 
 
-def test_overview_shows_real_ai_spend_to_the_owner():
+def test_overview_has_no_agent_costs_card_and_jobs_keep_their_price():
+    # Agent costs left Overview: Costs is the platforms' API spend and
+    # Credits shows the agents' work. Each job still shows its price.
     app, store, audit = _app()
     audit.record("research", "run_completed", run_id="r1", task_id="t1",
                  cost_usd=0.0123, tokens_used=2500)
@@ -62,15 +64,13 @@ def test_overview_shows_real_ai_spend_to_the_owner():
     site = store.create_site(owner["id"], "https://shop.example.com")
     store.charge_credits(owner["id"], "seo_article", site["id"], is_operator=True)
     html = client.get("/ops").text
-    assert "<h2>Agent costs</h2>" in html
-    assert "$0.0123" in html and "2,500 tokens" in html
-    assert "10 credits (not charged)" in html
-    assert "href='/agents'>Cost per agent</a>" in html
+    assert "<h2>Agent costs</h2>" not in html
+    assert "<span class='v-stat-label'>Credits</span>" in html
     jobs = client.get("/portfolio").text
     assert "10 credits — not charged (owner)" in jobs
 
 
-def test_customer_sees_credits_not_platform_spend():
+def test_customer_overview_shows_credits_left_not_platform_ai_spend():
     app, store, audit = _app()
     audit.record("research", "run_completed", run_id="r1", task_id="t1",
                  cost_usd=0.0123, tokens_used=2500)
@@ -80,7 +80,7 @@ def test_customer_sees_credits_not_platform_spend():
     site = store.create_site(cust["id"], "https://ada.example.com")
     store.charge_credits(cust["id"], "geo_audit", site["id"])
     html = client.get("/ops").text
-    assert "<h2>Agent costs</h2>" in html
-    assert "5 credits" in html
+    assert ("<span class='v-stat-label'>Credits</span><span class='v-stat-value'>45</span>"
+            "<span class='v-stat-sub'>left</span>") in html
     assert "$0.0123" not in html  # the platform's AI spend is the owner's
     assert OPERATOR_EMAIL not in html
