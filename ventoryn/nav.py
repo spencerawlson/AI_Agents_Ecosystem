@@ -163,6 +163,11 @@ SIDEBAR_CSS = """
   justify-content: center; width: 44px; height: 44px; border-radius: 50%;
   color: #1f1938; text-decoration: none; }
 .notification:hover { background: #f1ebff; }
+.rev-toggle { border: 0; background: none; padding: 0; cursor: pointer; }
+.rev-toggle[hidden] { display: none; }
+.rev-toggle[aria-pressed='true'] { color: #7c3aed; }
+.rev-toggle span { display: inline-flex; }
+.rev-toggle span[hidden] { display: none; }
 .header-badge { position: absolute; top: 2px; right: 0; min-width: 18px;
   height: 18px; padding: 0 5px; border-radius: 999px; background: #7c3aed;
   color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
@@ -337,6 +342,9 @@ def sidebar_html(current: str | None, is_operator: bool, *,
         f"<div class='sidebar-overlay' aria-hidden='true'></div>")
 
 
+REVENUE_TOGGLE_JS = "<script>document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('rev-toggle');if(!b)return;var cells=document.querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site]');if(!cells.length)return;b.hidden=false;var KEY='ventoryn.revealRevenue',shown=false;cells.forEach(function(el){el.setAttribute('data-masked',el.textContent);});function mark(on){shown=on;b.setAttribute('aria-pressed',on?'true':'false');var t=on?'Hide revenue':'Show revenue';b.setAttribute('aria-label',t);b.title=t;b.querySelector('.rev-on').hidden=!on;b.querySelector('.rev-off').hidden=on;try{on?sessionStorage.setItem(KEY,'1'):sessionStorage.removeItem(KEY);}catch(e){}}function hide(){cells.forEach(function(el){el.textContent=el.getAttribute('data-masked');});mark(false);}function show(){fetch('/api/websites/revenue',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(!r.ok)throw r;return r.json();}).then(function(d){document.querySelectorAll('[data-rev-total]').forEach(function(el){el.textContent=d.total;});document.querySelectorAll('[data-rev-profit]').forEach(function(el){el.textContent=d.net_profit;});document.querySelectorAll('[data-rev-site]').forEach(function(el){var v=d.sites[el.getAttribute('data-rev-site')];if(v)el.textContent=v;});mark(true);}).catch(function(){});}b.addEventListener('click',function(){shown?hide():show();});var keep=false;try{keep=sessionStorage.getItem(KEY)==='1';}catch(e){}if(keep)show();});</script>"
+
+
 def platform_head_html(title: str, subtitle: str = "", *,
                        pending_approvals: int = 0,
                        pause_pill: str = "") -> str:
@@ -358,6 +366,13 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"</div>"
         f"<div class='app-header-actions'>"
         f"{pause_pill}"
+        # Revenue show/hide: one toggle for the whole page. Hidden
+        # unless the page has hidden revenue to reveal; a click fetches
+        # the owner's figures, another hides them (see the script).
+        f"<button class='notification rev-toggle' id='rev-toggle' type='button' "
+        f"hidden aria-pressed='false' aria-label='Show revenue' title='Show revenue'>"
+        f"<span class='rev-off'>{icon('eye_off', 23)}</span>"
+        f"<span class='rev-on' hidden>{icon('eye', 23)}</span></button>"
         f"<a class='notification' href='/approvals' aria-label='Approvals'>"
         f"{icon('bell', 23)}{badge_html}</a>"
         f"<div class='avatar-menu'>"
@@ -369,4 +384,4 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"<a href='/account/logout'>Sign out</a>"
         f"</div></div>"
         f"</div>"
-        f"</header>")
+        f"</header>" + REVENUE_TOGGLE_JS)

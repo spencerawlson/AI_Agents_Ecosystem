@@ -26,7 +26,10 @@ def _setup():
 def test_page_keeps_revenue_hidden_until_the_eye_is_clicked():
     client, _, _, site = _setup()
     html = client.get("/portfolio").text
-    assert "data-rev-eye" in html and "aria-label='Show revenue'" in html
+    # One toggle, in the header in front of the bell (no per-card eyes).
+    assert "id='rev-toggle'" in html and "aria-label='Show revenue'" in html
+    assert html.index("id='rev-toggle'") < html.index("aria-label='Approvals'")
+    assert "data-rev-eye" not in html and "class='v-eye'" not in html
     assert f"<span data-rev-site='{site['id']}'>hidden</span>" in html
     assert "$49.00" not in html  # the figure is never in the page itself
 
@@ -54,3 +57,10 @@ def test_saved_privacy_setting_is_unchanged_by_reveal():
     client.get("/api/websites/revenue")
     assert not store.get_site(site["id"]).get("revenue_show")
     assert store.revenue_for_site(site["id"])["revenue"] is None
+
+
+def test_toggle_starts_hidden_and_only_shows_where_revenue_is_hidden():
+    client, _, _, _ = _setup()
+    html = client.get("/portfolio").text
+    assert "<button class='notification rev-toggle' id='rev-toggle' type='button' hidden" in html
+    assert "querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site]')" in html

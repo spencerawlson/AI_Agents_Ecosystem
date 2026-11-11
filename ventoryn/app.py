@@ -567,14 +567,16 @@ def create_app(
   border: 1px solid var(--v-line); box-shadow: var(--v-shadow); }
 .v-stat::before { content: ""; position: absolute; inset: 0 0 auto 0;
   height: 4px; }
-.v-stat-1 { background: linear-gradient(135deg, var(--v-navy), var(--v-navy-2));
+/* The highlighted first stat card (Websites, Analytics, Customers):
+   deep emerald. The sidebar and the rest of the brand stay navy. */
+.v-stat-1 { background: linear-gradient(135deg, #064e3b, #065f46);
   border-color: transparent; color: #fff; }
-.v-stat-1 .v-stat-label { color: var(--v-violet-line); }
+.v-stat-1 .v-stat-label { color: #a7f3d0; }
 .v-stat-2::before { background: linear-gradient(90deg, var(--v-violet), var(--v-blue)); }
 .v-stat-3::before { background: linear-gradient(90deg, var(--v-green), var(--v-green-soft)); }
 .v-stat-label { display: block; font-size: 12px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .06em; color: var(--v-muted); }
-.v-stat-value { display: block; font-size: 30px; font-weight: 800;
+.v-stat-value { display: block; font-size: 22px; font-weight: 800;
   margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .v-biz-grid { display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -598,14 +600,6 @@ def create_app(
 .v-site-table tbody tr:hover td { background: color-mix(in srgb, var(--v-violet) 6%, transparent); }
 .v-site-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .v-site-name { font-weight: 700; }
-.v-eye { display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; margin-left: 4px; vertical-align: middle;
-  border: 1px solid var(--v-line); border-radius: 8px; background: var(--v-card);
-  color: var(--v-muted); cursor: pointer; padding: 0; }
-.v-eye:hover, .v-eye:focus-visible { color: var(--v-violet-deep); border-color: var(--v-violet); }
-.v-eye[aria-pressed='true'] .v-eye-slash { display: none; }
-.v-site-table th .v-eye { width: 22px; height: 22px; margin: -4px 0 -4px 4px; }
-.v-site-table th .v-eye svg { width: 14px; height: 14px; }
 .v-site-tools .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; }
 .v-site-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -1988,38 +1982,9 @@ if (demoToggle && demoValue) {{
             return (f"{tools}<div class='v-site-list' id='site-list' tabindex='0' "
                     f"role='region' aria-label='Your websites'><table class='v-site-table'>"
                     f"<thead><tr><th>Website</th><th class='num'>Visitors (30 days)</th>"
-                    f"<th class='num'>Paying customers</th><th class='num'>Revenue{' ' + _eye if any_hidden else ''}</th>"
+                    f"<th class='num'>Paying customers</th><th class='num'>Revenue</th>"
                     f"<th>Autopilot</th><th></th></tr></thead><tbody>{body}</tbody>"
                     f"</table></div>")
-
-        # The eye: hidden revenue stays out of the page until the owner
-        # asks; one click fetches it (no-store) and shows it, another
-        # click hides it again. The saved privacy setting never changes.
-        _eye = ("<button type='button' class='v-eye' data-rev-eye aria-pressed='false' "
-                "aria-label='Show revenue' title='Show revenue'>"
-                "<svg viewBox='0 0 24 24' width='16' height='16' aria-hidden='true'>"
-                "<path d='M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z' fill='none' "
-                "stroke='currentColor' stroke-width='2' stroke-linejoin='round'/>"
-                "<circle cx='12' cy='12' r='3' fill='none' stroke='currentColor' stroke-width='2'/>"
-                "<path class='v-eye-slash' d='M3 3l18 18' stroke='currentColor' "
-                "stroke-width='2' stroke-linecap='round'/></svg></button>")
-        _eye_js = (
-            "<script>(function(){"
-            "var btns=document.querySelectorAll('[data-rev-eye]');if(!btns.length)return;"
-            "var shown=false,cells=document.querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site]');"
-            "cells.forEach(function(el){el.setAttribute('data-masked',el.textContent);});"
-            "function mark(on){shown=on;btns.forEach(function(b){b.setAttribute('aria-pressed',on?'true':'false');"
-            "var t=on?'Hide revenue':'Show revenue';b.setAttribute('aria-label',t);b.title=t;});}"
-            "function hide(){cells.forEach(function(el){el.textContent=el.getAttribute('data-masked');});mark(false);}"
-            "function show(){fetch('/api/websites/revenue',{credentials:'same-origin',cache:'no-store'})"
-            ".then(function(r){if(!r.ok)throw r;return r.json();}).then(function(d){"
-            "document.querySelectorAll('[data-rev-total]').forEach(function(el){el.textContent=d.total;});"
-            "document.querySelectorAll('[data-rev-profit]').forEach(function(el){el.textContent=d.net_profit;});"
-            "document.querySelectorAll('[data-rev-site]').forEach(function(el){"
-            "var v=d.sites[el.getAttribute('data-rev-site')];if(v)el.textContent=v;});mark(true);})"
-            ".catch(function(){});}"
-            "btns.forEach(function(b){b.addEventListener('click',function(){shown?hide():show();});});"
-            "})();</script>")
 
         hidden_note = ("<p class='muted'>Revenue from a site whose "
                        "revenue display is off is not included in these "
@@ -2051,10 +2016,10 @@ if (demoToggle && demoValue) {{
         inner = f"""<div class='v-stats'>
 <div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>
 <span class='v-stat-value'>{len(biz_rows)}</span></div>
-<div class='v-stat v-stat-2'><span class='v-stat-label'>Revenue{' ' + _eye if any_hidden else ''}</span>
-<span class='v-stat-value' data-rev-total>{_money(total_revenue) if not any_hidden else "hidden"}</span></div>
+<div class='v-stat v-stat-2'><span class='v-stat-label'>Revenue</span>
+<span class='v-stat-value' data-rev-total>{_money(total_revenue) if not any_hidden else "—"}</span></div>
 <div class='v-stat v-stat-3'><span class='v-stat-label'>Net profit</span>
-<span class='v-stat-value' data-rev-profit>{_money(total_profit) if not any_hidden else "hidden"}</span></div></div>
+<span class='v-stat-value' data-rev-profit>{_money(total_profit) if not any_hidden else "—"}</span></div></div>
 <p class='muted'>Costs per website read $0 here: the site's own costs
 are its credits, and credits are not dollars. Revenue is real — the
 sum of recorded paying customers per site.</p>{hidden_note}
@@ -2065,7 +2030,7 @@ sum of recorded paying customers per site.</p>{hidden_note}
 <div class='table-wrap'><table>
 <tr><th>Website</th><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>
 {job_rows}</table></div>
-{reg_group}{_eye_js if any_hidden else ""}"""
+{reg_group}"""
         return _operator_page(
             "Websites", inner, account=account, current="portfolio",
             is_operator=_saas_config.is_operator(account["email"]),
