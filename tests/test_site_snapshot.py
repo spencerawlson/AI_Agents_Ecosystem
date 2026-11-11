@@ -282,7 +282,7 @@ def test_flagged_rows_carry_tips_and_ok_rows_do_not():
     assert "Submit the site at news.ycombinator.com/submit" in html
     assert "Save Page Now" in html
     assert "Brave has no submit form" in html
-    # Ok rows carry no "?" affordance: the value closes the span directly.
+    # Ok rows carry no info badge: the value closes the span directly.
     assert "Custom / not detected</span>" in html
     assert "All (no robots.txt)</span>" in html
     # Tooltip markup: button + describedby + role, one id per tip, no dupes.
@@ -296,6 +296,21 @@ def test_flagged_rows_carry_tips_and_ok_rows_do_not():
     # The tip's inline code is escaped, never emitted as markup.
     assert "&lt;meta name=" in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' not in html
+
+
+def test_tip_badge_is_round_green_info():
+    # Regression: the platform's global `button` rule sets min-height: 44px,
+    # which stretched the 16px badge into a tall oval on the live site.
+    # The badge must override it, and render as a green circle with a
+    # white "i" (the Revenue card's emerald), not an amber "?" outline.
+    rule = site_snapshot.SNAPSHOT_CSS.split(".v-snap-tip {", 1)[1].split("}", 1)[0]
+    assert "min-height: 0" in rule and "min-width: 0" in rule
+    assert "#064e3b" in rule and "#065f46" in rule
+    assert "color: #fff" in rule
+    data = _collect_bad()
+    html = site_snapshot.render_card(BAD_SITE, {"status": "done", "data": data})
+    assert ">i</button>" in html
+    assert ">?</button>" not in html
 
 
 def test_good_site_has_only_two_tips():
