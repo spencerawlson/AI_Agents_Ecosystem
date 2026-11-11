@@ -49,7 +49,8 @@ JOB_HINTS = {
     "seo_article": "Optional keywords to target; otherwise Ventoryn "
                    "maps them from your site.",
     "video_render": "Ventoryn drafts the script from your site, then "
-                    "renders it.",
+                    "renders it — with an ElevenLabs voiceover, or a HeyGen "
+                    "presenter, when the server has those keys.",
     "x_campaign": "30 days, one post a day, each linking to a page of your "
                   "site. Nothing is posted until you approve it in Approvals.",
 }
@@ -100,6 +101,12 @@ def preflight(job_type: str, inputs: dict) -> None:
                "and restart)" if "AI key" in blocker else "")
         raise JobUnavailable(f"{JOB_LABELS.get(job_type, job_type)} — "
                              f"{blocker}{fix}. Nothing was charged.")
+    if job_type == "video_render" and inputs.get("presenter") == "heygen":
+        from core.media_providers import presenter_blocker
+
+        why = presenter_blocker()
+        if why:
+            raise JobUnavailable(f"HeyGen presenter — {why}. Nothing was charged.")
     if job_type == "community_listening" and not parse_list(inputs.get("keywords")):
         raise JobInputError("Community listening needs at least one keyword "
                             "(comma-separated). Nothing was charged.")
@@ -284,6 +291,51 @@ def _run_seo(site, inputs, ctx):
     return f"Article drafted for “{keyword}” · report {name}", name
 
 
+def _make_video(site, script, videos, stem, inputs, ctx):
+    """Render the video. With a HeyGen presenter requested, HeyGen makes
+    it; otherwise Ventoryn renders the slides, with an ElevenLabs
+    voiceover when the server has it (and the owner did not turn it
+    off). Paid usage is recorded for the website's Costs."""
+    from core import media_providers as mp
+    from core.video_render import SIZES, render_video, validate_script
+
+    store = ctx.get("store")
+    narration = " ".join(str(s.get("narration") or "") for s in script["scenes"])
+
+    def record(provider, units, unit, cost):
+        if store is not None:
+            store.record_media_usage(site["account_id"], site["id"], provider,
+                                     units, unit, cost, job_ref=stem)
+
+    def priced(cost):
+        return f"${cost:.2f}" if cost is not None else "price not set"
+
+    if inputs.get("presenter") == "heygen":
+        made = mp.heygen_presenter_video(narration, videos / f"{stem}.mp4",
+                                         title=script["title"])
+        record("heygen", made["seconds"], "seconds", made["cost_usd"])
+        return ({"video": made["path"], "srt": "", "duration_s": round(made["seconds"], 1),
+                 "scenes": len(script["scenes"])},
+                [f"Presenter: HeyGen avatar, {made['seconds']:.0f}s ({priced(made['cost_usd'])})"])
+    extras = []
+    audio = None
+    if str(inputs.get("voiceover", "on")) != "off" and mp.voice_ready():
+        voice = mp.elevenlabs_voiceover(narration, videos / f"{stem}.mp3")
+        record("elevenlabs", voice["characters"], "characters", voice["cost_usd"])
+        seconds = mp.audio_seconds(Path(voice["path"]))
+        if seconds:
+            mp.fit_scenes_to_audio(script, seconds)
+            errors = validate_script(script)
+            if errors:
+                raise RuntimeError("voiceover too long for the video: " + "; ".join(errors))
+        audio = Path(voice["path"])
+        extras.append(f"Voiceover: ElevenLabs, {voice['characters']:,} characters "
+                      f"({priced(voice['cost_usd'])})")
+    rendered = render_video(script, videos / f"{stem}.mp4", size=SIZES["vertical"],
+                            audio=audio)
+    return rendered, extras
+
+
 def _run_video(site, inputs, ctx):
     from core.video_render import SIZES, render_video, validate_script
     from orchestrator.models import TaskStatus
@@ -310,13 +362,13 @@ def _run_video(site, inputs, ctx):
     videos = ctx["reports_dir"] / "videos"
     videos.mkdir(parents=True, exist_ok=True)
     stem = f"{_slug(_host(site))}_{ctx['stamp']}"
-    rendered = render_video(script, videos / f"{stem}.mp4",
-                            size=SIZES["vertical"])
+    rendered, extras = _make_video(site, script, videos, stem, inputs, ctx)
     lines = [f"# Video — {script['title']} ({ctx['date']})", "",
              "> **NOT POSTED.** The MP4 is a file for you to post by hand.", "",
-             f"- Video: `{videos / (stem + '.mp4')}`",
-             f"- Subtitles: `{rendered['srt']}`",
+             f"- Video: `{rendered['video']}`",
+             *([f"- Subtitles: `{rendered['srt']}`"] if rendered.get("srt") else []),
              f"- {rendered['duration_s']}s · {rendered['scenes']} scenes · vertical",
+             *[f"- {x}" for x in extras],
              "", "## Scenes", ""]
     for i, scene in enumerate(script["scenes"], 1):
         lines.append(f"{i}. **{scene.get('on_screen_text', '')}** — "

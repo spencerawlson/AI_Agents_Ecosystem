@@ -583,6 +583,17 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
     cost_usd_cents INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_media_spend (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    job_ref TEXT NOT NULL DEFAULT '',
+    units REAL NOT NULL,
+    unit TEXT NOT NULL,
+    amount_usd REAL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS saas_social_spend (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
@@ -2019,6 +2030,29 @@ class SaasStore:
                 " WHERE site_id = ? AND created_at >= ?",
                 (site_id, _iso(month_start))).fetchone()
         return int(row[0]) / 100
+
+    def record_media_usage(self, account_id: str, site_id: str, provider: str,
+                           units: float, unit: str, amount_usd: float | None,
+                           job_ref: str = "") -> None:
+        """Usage of a paid media API (ElevenLabs characters, HeyGen video
+        seconds) for one website. ``amount_usd`` is None when the owner
+        has not set his plan's rate — the usage is still recorded. Kept
+        apart from social posting spend so it never counts toward the
+        posting caps."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_media_spend (id, account_id, site_id, provider, job_ref,"
+                " units, unit, amount_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (_new_id(), account_id, site_id, provider, job_ref, float(units), unit,
+                 None if amount_usd is None else float(amount_usd), _iso(_now())))
+
+    def media_spend_usd(self, site_id: str) -> float:
+        """Dollar spend on media APIs for a website (priced usage only)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(amount_usd), 0) FROM saas_media_spend"
+                " WHERE site_id = ? AND amount_usd IS NOT NULL", (site_id,)).fetchone()
+        return float(row[0])
 
     def record_social_spend(self, account_id: str, site_id: str,
                             provider: str, draft_id: str,

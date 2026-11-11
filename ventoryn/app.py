@@ -516,7 +516,8 @@ def create_app(
         charged for its posts (X, Facebook, Instagram) — recorded only
         for posts the provider confirmed published. Agent work is paid
         in credits, shown on its own card, not here."""
-        return round(_saas_store.social_spend_in_period("", site_id=site_id), 2)
+        return round(_saas_store.social_spend_in_period("", site_id=site_id)
+                     + _saas_store.media_spend_usd(site_id), 2)
 
     def _credits_left(account) -> tuple[int, str]:
         """(credits left, what it is measured against). A customer's
@@ -2093,8 +2094,9 @@ if (demoToggle && demoValue) {{
         _first = ("<div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>"
                   f"<span class='v-stat-value'>{len(biz_rows)}</span></div>")
         inner = f"""{_money_stats_html(account, first=_first)}
-<p class='muted'>Costs are what the platforms' paid APIs charged for your
-websites' posts (X, Facebook, Instagram). The agents' work is paid in
+<p class='muted'>Costs are what paid APIs charged for your websites: posts
+on X, Facebook and Instagram, and voiceovers and presenter videos
+(ElevenLabs, HeyGen). The agents' work is paid in
 credits — see Credits. Revenue is real — the sum of recorded paying
 customers per site.</p>{hidden_note}
 <p><a class='btn' href='/websites/sites/new'>Add a website</a></p>
