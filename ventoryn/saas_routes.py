@@ -72,6 +72,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
 from ventoryn.qrcode import qr_svg
+from ventoryn.campaign_cost import (
+    MAX_DAYS, MAX_POSTS_PER_DAY, X_RATE_LINKED_POST_USD,
+    X_RATE_PLAIN_POST_USD, X_RATE_SOURCE, estimate_x_campaign,
+    x_post_cost_usd)
+from ventoryn.campaign_cost import describe as describe_estimate
 from ventoryn.saas import (
     job_cost_label,
     APP_REGISTRATION_KINDS,
@@ -597,6 +602,50 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                                     status_code=303)
         response.delete_cookie(X_RETURN_COOKIE, path='/')
         return response
+
+    def _x_estimate_card(site_id: str, spent: float) -> str:
+        """What an X campaign would cost, shown before anything is
+        posted: 1 linked post a day for 30 days by default, recalculated
+        in the page as the owner changes the plan (same rates)."""
+        est = estimate_x_campaign(posts_per_day=1, days=30, with_link=True,
+                                  spent_this_month_usd=spent,
+                                  monthly_budget_usd=config.x_monthly_budget_usd)
+        return (
+            f"<div class='card v-estimate' id='x-estimate' "
+            f"data-plain='{X_RATE_PLAIN_POST_USD}' data-link='{X_RATE_LINKED_POST_USD}' "
+            f"data-left='{est['budget_left_usd']}' data-budget='{est['monthly_budget_usd']}'>"
+            f"<h4>Campaign cost estimate</h4>"
+            f"<div class='v-estimate-inputs'>"
+            f"<label>Posts a day <input type='number' id='est-ppd' min='0' "
+            f"max='{MAX_POSTS_PER_DAY}' step='1' value='1'></label>"
+            f"<label>Days <input type='number' id='est-days' min='1' "
+            f"max='{MAX_DAYS}' step='1' value='30'></label>"
+            f"<label><input type='checkbox' id='est-link' checked> "
+            f"With a link (signed, so sales are counted)</label></div>"
+            f"<p id='est-out'>{esc(describe_estimate(est))}</p>"
+            f"<p class='muted'>{esc(X_RATE_SOURCE)}. X bills each post to the "
+            f"developer account behind Ventoryn's X app; Ventoryn stops posting "
+            f"at this website's monthly X budget.</p>"
+            "<style>.v-estimate-inputs{display:flex;flex-wrap:wrap;gap:12px 20px;"
+            "align-items:flex-end}.v-estimate-inputs label{margin:0}"
+            ".v-estimate-inputs input[type=number]{width:110px;display:block;margin-top:4px}"
+            "#est-out{font-weight:600}</style>"
+            "<script>(function(){var c=document.getElementById('x-estimate');if(!c)return;"
+            "var p=document.getElementById('est-ppd'),d=document.getElementById('est-days'),"
+            "l=document.getElementById('est-link'),o=document.getElementById('est-out');"
+            "function f(n){return '$'+n.toFixed(2);}"
+            "function run(){var ppd=Math.max(0,Math.min(" + str(MAX_POSTS_PER_DAY) + ",+p.value||0)),"
+            "days=Math.max(1,Math.min(" + str(MAX_DAYS) + ",Math.floor(+d.value||1))),"
+            "rate=+(l.checked?c.dataset.link:c.dataset.plain),posts=Math.round(ppd*days),"
+            "total=Math.round(posts*rate*100)/100,left=+c.dataset.left,budget=+c.dataset.budget,"
+            "kind=l.checked?'with a link':'without a link',"
+            "s=posts+' X posts '+kind+' over '+days+' days at $'+rate.toFixed(3)+' each: about '+f(total)+'.';"
+            "if(total<=left){s+=\" Fits this month's X budget (\"+f(left)+' of '+f(budget)+' left).';}"
+            "else{s+=' That is more than the '+f(left)+\" left in this month's \"+f(budget)+"
+            "' X budget \u2014 it covers '+Math.min(posts,Math.floor(Math.round(left*1000)/Math.round(rate*1000)))+' of those posts.';}"
+            "o.textContent=s;}"
+            "[p,d,l].forEach(function(el){el.addEventListener('input',run);el.addEventListener('change',run);});"
+            "})();</script></div>")
 
     # -- X social drafts: compose -> approve-and-post, never automatic ------
     @app.post("/account/sites/{site_id}/social/x/drafts")
@@ -1139,10 +1188,17 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         "<p class='muted'>Audience numbers unavailable "
                         "right now.</p>")
                     drafts = store.list_social_drafts(site_id)
+                    x_spent = store.x_spend_this_month_usd(site_id)
                     draft_rows = "".join(
                         f"<div class='card'><p>{esc(d['text'])}</p>"
                         + (f"<p class='muted'>Link: {esc(d['link_url'])}"
                            "</p>" if d["link_url"] else "")
+                        + (f"<p class='v-cost-line'>Cost if posted: about "
+                           f"<strong>${x_post_cost_usd(bool(d['link_url'])):.3f}</strong> on X "
+                           f"({'post with a link' if d['link_url'] else 'plain post'}, "
+                           f"reported rate). X budget this month: "
+                           f"${x_spent:.2f} of ${config.x_monthly_budget_usd:.2f} used.</p>"
+                           if d["status"] == "pending" else "")
                         + f"<p>Status: <strong>{esc(d['status'])}</strong>"
                         + (f" (tweet {esc(d['tweet_id'])})"
                            if d["tweet_id"] else "") + "</p>"
@@ -1159,7 +1215,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         + "</div>"
                         for d in drafts) or (
                         "<p class='muted'>No drafts yet.</p>")
-                    form = (audience +
+                    form = (audience + _x_estimate_card(site_id, x_spent) +
                             "<form method='post' action='/account/sites/"
                             f"{esc(site_id)}/social/x/drafts'>"
                             "<label for='x_text'>Draft a post</label>"

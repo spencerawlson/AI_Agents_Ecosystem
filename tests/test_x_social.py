@@ -308,7 +308,7 @@ def test_post_to_x_approve_posts_and_signs_link(store, monkeypatch):
     assert store.x_spend_this_month_usd(site["id"]) == pytest.approx(0.20)
 
 
-def test_post_to_x_without_link_costs_nothing(store, monkeypatch):
+def test_post_to_x_without_link_costs_the_plain_rate(store, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _fake_x_urlopen)
     account = _account(store)
     site = store.create_site(account["id"], "https://example.com")
@@ -317,7 +317,9 @@ def test_post_to_x_without_link_costs_nothing(store, monkeypatch):
     config = SaasConfig(x_app_registered=True, x_monthly_budget_usd=5.0)
     posted, _ = saas.post_to_x(store, config, account, site["id"], draft["id"])
     assert posted is True
-    assert store.x_spend_this_month_usd(site["id"]) == 0.0
+    # X's reported plain-post rate is $0.015 — recorded as 2 cents
+    # (rounded up, so the monthly cap is never under-counted).
+    assert store.x_spend_this_month_usd(site["id"]) == pytest.approx(0.02)
 
 
 def test_post_to_x_refuses_over_budget(store, monkeypatch):
@@ -404,3 +406,20 @@ def test_x_connect_from_integrations_returns_to_that_window(client, store, confi
     # page goes back to the site page.
     assert 'ventoryn_x_return=""' in r.headers.get("set-cookie", "") or \
         "Max-Age=0" in r.headers.get("set-cookie", "")
+
+
+def test_site_page_shows_campaign_estimate_and_cost_before_posting(client, store, monkeypatch):
+    # The page reads the connected account's audience; keep it offline.
+    monkeypatch.setattr(saas, "x_account_summary", lambda *a, **k: None, raising=False)
+    import ventoryn.saas_routes as routes
+    monkeypatch.setattr(routes, "x_account_summary", lambda *a, **k: None, raising=False)
+    account = _login(client, store)
+    site = store.create_site(account["id"], "https://example.com")
+    _connect_x(store, site["id"])
+    store.create_social_draft(site["id"], "x", "Launch day", "https://example.com/a")
+    html = client.get(f"/account/sites/{site['id']}").text
+    assert "Campaign cost estimate" in html
+    assert "30 X posts with a link over 30 days at $0.200 each: about $6.00." in html
+    assert "more than the $5.00 left" in html and "covers 25 of those posts" in html
+    assert "Cost if posted: about <strong>$0.200</strong> on X (post with a link" in html
+    assert "X budget this month: $0.00 of $5.00 used." in html
