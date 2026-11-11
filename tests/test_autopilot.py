@@ -19,7 +19,7 @@ NOW = datetime.now(timezone.utc)
 def fake_jobs(monkeypatch):
     calls = []
 
-    def fake_run(job_type, site, inputs, *, orchestrator, reports_dir, now=None):
+    def fake_run(job_type, site, inputs, *, orchestrator, reports_dir, now=None, store=None):
         calls.append((job_type, site["id"]))
         if site["host"].startswith("broken"):
             raise RuntimeError("site unreachable")
@@ -43,11 +43,11 @@ def test_every_website_gets_its_jobs_then_waits_a_week(store, config, fake_jobs)
     store.grant_credits(b["account_id"], 100, "test")
     ran = _run(store, config, max_jobs=10)
     assert {(j["site_id"], j["job_type"]) for j in ran} == {
-        (a["id"], "analyze"), (a["id"], "seo_article"),
-        (b["id"], "analyze"), (b["id"], "seo_article")}
+        (a["id"], "analyze"), (a["id"], "seo_article"), (a["id"], "x_campaign"),
+        (b["id"], "analyze"), (b["id"], "seo_article"), (b["id"], "x_campaign")}
     assert all(j["status"] == "done" and j["result"].startswith("Automatic") for j in ran)
     assert _run(store, config, max_jobs=10, now=NOW + timedelta(days=6)) == []
-    assert len(_run(store, config, max_jobs=10, now=NOW + timedelta(days=7, seconds=1))) == 4
+    assert len(_run(store, config, max_jobs=10, now=NOW + timedelta(days=7, seconds=1))) == 6
 
 
 def test_customers_pay_normal_credits_and_are_skipped_when_short(store, config):
@@ -85,7 +85,7 @@ def test_owner_can_turn_it_off_and_on(client, store, config):
     assert r.status_code == 303
     assert _run(store, config, max_jobs=10) == []
     client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "1"})
-    assert len(_run(store, config, max_jobs=10)) == 2
+    assert len(_run(store, config, max_jobs=10)) == 3
 
 
 def test_cannot_toggle_someone_elses_site(client, store):
