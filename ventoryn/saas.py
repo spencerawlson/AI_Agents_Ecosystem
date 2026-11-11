@@ -1490,6 +1490,20 @@ class SaasStore:
                 (site_id,)).fetchone()
         return int(row[0])
 
+    def site_revenue_total(self, site_id: str) -> dict | None:
+        """The site's verified revenue {"total_cents", "currency"},
+        ignoring the display setting — for the owner's own on-demand
+        reveal only (the eye button). None without a Stripe sales
+        connection: no Stripe, no revenue figure."""
+        connection = self.get_connection(site_id, "stripe_sales")
+        if not (connection and connection.get("status") == "connected"):
+            return None
+        countable = [c for c in self.list_conversions(site_id)
+                     if not c.get("refunded_at") and not c.get("disputed_at")]
+        total = sum(int(c["amount_cents"]) for c in countable)
+        currency = (countable[0]["currency"] if countable else "usd")
+        return {"total_cents": total, "currency": currency}
+
     def revenue_for_site(self, site_id: str) -> dict | None:
         """Revenue + count + detail rows for one site's report/funnel
         — or None when the site does not exist. The three display
@@ -1521,12 +1535,7 @@ class SaasStore:
                 conversions = [dict(c, amount_cents=None)
                                for c in conversions]
         if show_revenue and stripe_connected:
-            all_conversions = self.list_conversions(site_id)
-            countable = [c for c in all_conversions
-                        if not c.get("refunded_at") and not c.get("disputed_at")]
-            total = sum(int(c["amount_cents"]) for c in countable)
-            currency = (countable[0]["currency"] if countable else "usd")
-            revenue = {"total_cents": total, "currency": currency}
+            revenue = self.site_revenue_total(site_id)
         return {"paying_customers": count if show_count else None,
                 "revenue": revenue,
                 "conversions": conversions}
