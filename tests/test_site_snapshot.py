@@ -1,5 +1,6 @@
 """Website snapshot: preview, specs, traffic band, presence — real data only."""
 
+import re
 import sys
 import time
 from pathlib import Path
@@ -222,3 +223,176 @@ def test_old_site_without_snapshot_gets_one_when_opened(env):
     assert site_snapshot.snapshot_store_for(store).get(site["id"]) is None
     client.get(f"/websites/sites/{site['id']}")
     assert _wait_done(store, site["id"])["status"] == "done"
+
+
+# -- "how to fix it" tips + generated drafts ---------------------------------
+
+BAD_HOME = """<!doctype html><html><head>
+<title>Hi</title>
+</head><body>
+<a href="/about">About</a><a href="/shop">Shop</a><a href="/about">About again</a>
+<a href="https://other.example.com/x">Elsewhere</a><a href="#top">Top</a>
+<a href="mailto:hi@example.com">Mail</a><a href="/robots.txt">Robots</a>
+<a href="/sitemap.xml">Map</a>
+</body></html>"""
+BAD_SITE = {"id": "bad1", "url": "http://bad.example.com", "host": "bad.example.com"}
+
+
+def fake_bad_pages(url):
+    if url.endswith(("/robots.txt", "/sitemap.xml", "/llms.txt")):
+        return {"status": 404, "body": "", "headers": {}, "bytes": 0, "ms": 5}
+    return {"status": 200, "final_url": "http://bad.example.com/", "body": BAD_HOME,
+            "headers": {}, "bytes": len(BAD_HOME), "ms": 2400}
+
+
+def fake_bad_json(url, headers=None, data=None):
+    if "tranco-list.eu" in url:
+        return 200, {"ranks": []}
+    if "hn.algolia.com" in url:
+        return 200, {"nbHits": 0}
+    if "web.archive.org" in url:
+        return 200, [["timestamp"]]
+    if "api.search.brave.com" in url:
+        return 200, {"web": {"results": []}}
+    return 0, None
+
+
+def _collect_bad():
+    return site_snapshot.collect(
+        BAD_SITE, env={"BRAVE_SEARCH_API_KEY": "brave-k"},
+        page_fetch=fake_bad_pages, json_get=fake_bad_json)
+
+
+def test_hn_and_archive_never_are_warn():
+    # "Never submitted" / "Never archived" are actionable gaps, not green.
+    data = _collect_bad()
+    presence = _by_label(data["presence"])
+    assert presence["Hacker News"]["status"] == "warn"
+    assert presence["Internet Archive"]["status"] == "warn"
+    assert presence["Pages found in search (Brave)"]["status"] == "warn"
+    assert presence["Mentioned on other sites"]["status"] == "warn"
+
+
+def test_flagged_rows_carry_tips_and_ok_rows_do_not():
+    data = _collect_bad()
+    html = site_snapshot.render_card(BAD_SITE, {"status": "done", "data": data})
+    # 11 flagged Specs rows + 4 flagged Presence rows carry a tip.
+    assert html.count("class='v-snap-tip'") == 15
+    assert "Add a plain-text file called llms.txt" in html
+    assert "Submit the site at news.ycombinator.com/submit" in html
+    assert "Save Page Now" in html
+    assert "Brave has no submit form" in html
+    # Ok rows carry no "?" affordance: the value closes the span directly.
+    assert "Custom / not detected</span>" in html
+    assert "All (no robots.txt)</span>" in html
+    # Tooltip markup: button + describedby + role, one id per tip, no dupes.
+    assert "role='tooltip'" in html
+    assert "aria-label='How to fix: llms.txt (for AI assistants)'" in html
+    ids = re.findall(r"id='(v-snap-tip-\d+)'", html)
+    assert len(ids) == 15 and len(set(ids)) == 15
+    # 6 of the 15 flagged rows also carry a generated draft.
+    assert html.count("<details class='v-snap-gen'>") == 6
+    assert "Generate the llms.txt" in html and "Generate the submission" in html
+    # The tip's inline code is escaped, never emitted as markup.
+    assert "&lt;meta name=" in html
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' not in html
+
+
+def test_good_site_has_only_two_tips():
+    calls = []
+    data = site_snapshot.collect(SITE, env={}, page_fetch=fake_pages,
+                                 json_get=fake_json_factory(calls))
+    html = site_snapshot.render_card(SITE, {"status": "done", "data": data})
+    # Only the two genuinely flagged rows: missing llms.txt, one blocked AI crawler.
+    assert html.count("class='v-snap-tip'") == 2
+    assert "Add a plain-text file called llms.txt" in html
+    assert "blocks some AI crawlers" in html
+
+
+def test_tip_for_ok_rows_is_none():
+    assert site_snapshot._tip_for({"label": "Platform", "value": "Shopify", "status": "ok"}) is None
+    assert site_snapshot._tip_for({"label": "Platform", "value": "x", "status": "warn"}) is None
+    tip = site_snapshot._tip_for({"label": "llms.txt (for AI assistants)",
+                                  "value": "Missing", "status": "warn"})
+    assert tip and "llms.txt" in tip["text"] and tip["link"][0] == "https://llmstxt.org/"
+
+
+def test_tip_links_are_official():
+    allowed = {"letsencrypt.org", "schema.org", "search.google.com", "llmstxt.org",
+               "news.ycombinator.com", "web.archive.org"}
+    for label, entry in site_snapshot._TIPS.items():
+        text, link = entry("") if callable(entry) else entry
+        assert text and len(text) <= 400, label
+        if link:
+            from urllib.parse import urlsplit
+            assert urlsplit(link[0]).hostname in allowed, (label, link)
+
+
+def test_generated_drafts_use_only_real_data():
+    data = _collect_bad()
+    specs = _by_label(data["specs"])
+    llms = specs["llms.txt (for AI assistants)"]["generated"]["content"]
+    assert "[Home](http://bad.example.com)" in llms
+    assert "[About](http://bad.example.com/about)" in llms
+    assert "[Shop](http://bad.example.com/shop)" in llms
+    assert "other.example.com" not in llms and "robots.txt" not in llms
+    assert "mailto" not in llms and "#top" not in llms
+    assert llms.count("http://bad.example.com/about") == 1  # deduped
+    jd = specs["Structured data"]["generated"]["content"]
+    assert '"name": "Hi"' in jd and '"url": "http://bad.example.com/"' in jd
+    assert "description" not in jd and "inLanguage" not in jd  # missing -> omitted, not invented
+    robots = specs["robots.txt"]["generated"]["content"]
+    assert robots.startswith("User-agent: *\nAllow: /\n")
+    assert "Sitemap:" not in robots  # no sitemap exists, so none is claimed
+    sitemap = specs["Sitemap"]["generated"]["content"]
+    assert "<loc>http://bad.example.com/about</loc>" in sitemap
+    assert "other.example.com" not in sitemap
+    hn = _by_label(data["presence"])["Hacker News"]["generated"]["content"]
+    assert hn == "Title: Hi\nURL: http://bad.example.com/"
+    title = specs["Title"]["generated"]["content"]
+    assert title == "Hi — bad.example.com"  # built from the page's own words only
+    assert specs["Meta description"].get("generated") is None  # "Hi" cannot make 50 chars
+
+
+def test_no_generate_where_not_draftable():
+    data = _collect_bad()
+    presence = _by_label(data["presence"])
+    assert "generated" not in presence["Pages found in search (Brave)"]
+    assert "generated" not in presence["Mentioned on other sites"]
+    assert "generated" not in presence["Internet Archive"]
+    traffic = _by_label(data["traffic"])
+    assert "generated" not in traffic["Visitors (real numbers)"]
+    assert "generated" not in traffic["Global popularity rank (Tranco)"]
+
+
+def test_draft_helpers():
+    snap = site_snapshot
+    assert snap._same_origin_pages("https://x.example.com", [
+        "/about", "https://x.example.com/about/", "/about?y=1", "https://elsewhere.example.org/",
+        "#top", "mailto:a@b.c", "/robots.txt", "/sitemap.xml", "/llms.txt", "/shop",
+    ]) == ["https://x.example.com", "https://x.example.com/about", "https://x.example.com/shop"]
+    assert snap._draft_llms_txt("https://x.example.com", "Shop", "Nice shop", ["/about"]) == (
+        "# Shop\n\n> Nice shop\n\n## Pages\n\n- [Home](https://x.example.com)\n"
+        "- [About](https://x.example.com/about)\n")
+    assert snap._draft_robots_txt("https://x.example.com", True) == (
+        "User-agent: *\nAllow: /\nSitemap: https://x.example.com/sitemap.xml\n")
+    assert snap._draft_robots_txt("https://x.example.com", False) == "User-agent: *\nAllow: /\n"
+    assert snap._draft_sitemap_xml("https://x.example.com", ["/a&b"]) == (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        '  <url>\n    <loc>https://x.example.com</loc>\n  </url>\n'
+        '  <url>\n    <loc>https://x.example.com/a&amp;b</loc>\n  </url>\n</urlset>\n')
+    assert snap._draft_hn_submission("", "Big Launch", "", "https://x.example.com") == (
+        "Title: Big Launch\nURL: https://x.example.com/")
+    assert snap._draft_hn_submission("", "", "", "https://x.example.com") is None
+    long_desc = ("word " * 40).strip()
+    trimmed = snap._draft_meta_description("T", "H", long_desc)
+    assert 50 <= len(trimmed) <= 155 and not trimmed.endswith("wor")
+    assert snap._draft_meta_description(
+        "Ada's Shop — handmade planners shipped across Canada", "Planners", "") == (
+        "Planners — Ada's Shop — handmade planners shipped across Canada")
+    assert snap._draft_meta_description("Hi", "", "") is None
+    assert snap._draft_title("A" * 80, "", "", "x.example.com") == "A" * 60
+    assert snap._draft_title("", "Planners", "Ada's Shop", "x.example.com") == (
+        "Planners — Ada's Shop — x.example.com")
+    assert snap._draft_title("", "", "", "x.io") is None
