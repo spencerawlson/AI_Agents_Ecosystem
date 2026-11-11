@@ -62,7 +62,7 @@ import urllib.parse
 from ventoryn.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
                        CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
 from ventoryn.totp import provisioning_uri
-from ventoryn import ui
+from ventoryn import site_jobs, ui
 from ventoryn.icons import icon
 from ventoryn.social_costs import estimate_cost, rate_note
 from ventoryn.ui import money
@@ -2314,7 +2314,7 @@ real — the sum of recorded paying customers per site.</p>{hidden_note}
         # pending and in the Decided section below. Nothing may still
         # look pending after it was decided.
         banner = _decide_banner_html(gate, decided)
-        inner = f"""<div class="v-approvals">{banner}<div class="card"><p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p></div>
+        inner = f"""<div class="v-approvals">{banner}{_approvals_campaigns_html(account)}<div class="card"><p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p></div>
 <div class="card"><h2>Pending ({len(pending) + draft_pending_count})</h2>
 <table>
 <tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
@@ -4075,8 +4075,169 @@ shows verified conversions only.</p>"""
             is_operator=_saas_config.is_operator(account["email"]),
             extra_css=_PORTFOLIO_CSS)
 
+
+    def _start_campaign_card(account, started: str = "") -> str:
+        """Agents: start an X campaign for a website chosen from a
+        dropdown, with the cost estimated before anything runs."""
+        from ventoryn.campaign_cost import (MAX_DAYS, X_RATE_LINKED_POST_USD,
+                                            X_RATE_PLAIN_POST_USD, X_RATE_SOURCE)
+        from ventoryn.saas import CREDIT_COSTS
+
+        sites = _saas_store.list_sites(account["id"])
+        if not sites:
+            return ("<div class='card' id='start-campaign'><h2>Start a campaign</h2>"
+                    "<p>Add a website first, then the agents can draft a campaign "
+                    "for it.</p></div>")
+        budget = _saas_config.x_monthly_budget_usd
+        opts = "".join(
+            f"<option value='{esc(s['id'])}' data-left="
+            f"'{max(0.0, round(budget - _saas_store.x_spend_this_month_usd(s['id']), 2))}'>"
+            f"{esc(s['host'] or s['url'])}</option>" for s in sites)
+        note = ""
+        if started:
+            site = _saas_store.get_site(started)
+            if site and site["account_id"] == account["id"]:
+                note = (f"<p class='v-camp-started'>The agent is drafting a campaign for "
+                        f"<strong>{esc(site['host'])}</strong>. It appears in "
+                        f"<a href='/approvals'>Approvals</a> in a minute or two.</p>")
+        recent = _saas_store.list_campaigns(account["id"], limit=8)
+        hosts = {s["id"]: s["host"] for s in sites}
+        status_text = {"proposed": "waiting for your approval", "scheduled": "approved — posting",
+                       "rejected": "rejected", "done": "finished"}
+        recent_html = "".join(
+            f"<li><a href='/approvals#campaign-{esc(c['id'])}'>{esc(hosts.get(c['site_id'], ''))}</a>"
+            f" — {c['days']} days — {esc(status_text.get(c['status'], c['status']))}"
+            f"{' (autopilot)' if c['source'] == 'autopilot' else ''}</li>" for c in recent)
+        blocker = site_jobs.server_blocker("x_campaign") if site_jobs else None
+        return (
+            f"<div class='card' id='start-campaign'><h2>Start a campaign</h2>{note}"
+            "<p class='muted'>The agents draft the posts from your website's own pages. "
+            "Nothing is posted until you approve the campaign in Approvals.</p>"
+            + (f"<p class='v-camp-warn'>Unavailable on this server: {esc(blocker)}.</p>" if blocker else "")
+            + f"<form method='post' action='/agents/campaigns' class='v-camp-form' id='camp-form' "
+            f"data-plain='{X_RATE_PLAIN_POST_USD}' data-link='{X_RATE_LINKED_POST_USD}'>"
+            f"<label>Website<select name='site_id' id='camp-site'>{opts}</select></label>"
+            f"<label>Platform<select name='platform' disabled><option>X</option></select></label>"
+            f"<label>Days<input type='number' name='days' id='camp-days' min='1' max='{MAX_DAYS}' value='30'></label>"
+            f"<label>Posts a day<input type='number' name='posts_per_day' id='camp-ppd' min='1' max='2' step='1' value='1'></label>"
+            f"<label class='v-camp-check'><input type='checkbox' name='with_link' value='1' id='camp-link' checked> "
+            f"With a link (signed, so sales are counted)</label>"
+            f"<p id='camp-est' class='v-camp-est'></p>"
+            f"<p class='muted'>{esc(X_RATE_SOURCE)}. Drafting costs "
+            f"{CREDIT_COSTS['x_campaign']} credits.</p>"
+            f"<p><button class='btn btn-primary' type='submit'{' disabled' if blocker else ''}>"
+            f"Start a campaign</button></p></form>"
+            + (f"<h3>Recent campaigns</h3><ul>{recent_html}</ul>" if recent_html else "")
+            + "<style>.v-camp-form{display:grid;grid-template-columns:repeat(auto-fit,"
+            "minmax(170px,1fr));gap:12px 16px;align-items:end}.v-camp-form label{margin:0}"
+            ".v-camp-form select,.v-camp-form input[type=number]{width:100%;margin-top:4px}"
+            ".v-camp-form .v-camp-check,.v-camp-form p{grid-column:1/-1;margin:0}"
+            ".v-camp-est{font-weight:600}.v-camp-warn{color:#92400e}"
+            ".v-camp-started{background:#ecfdf5;border:1px solid #a7f3d0;padding:10px 12px;"
+            "border-radius:10px}</style>"
+            + "<script>(function(){var f=document.getElementById('camp-form');if(!f)return;"
+            "var s=document.getElementById('camp-site'),d=document.getElementById('camp-days'),"
+            "p=document.getElementById('camp-ppd'),l=document.getElementById('camp-link'),"
+            "o=document.getElementById('camp-est');function m(n){return '$'+n.toFixed(2);}"
+            "function run(){var days=Math.max(1,Math.floor(+d.value||1)),ppd=Math.max(1,Math.min(2,Math.floor(+p.value||1))),"
+            "posts=Math.min(60,days*ppd),rate=+(l.checked?f.dataset.link:f.dataset.plain),"
+            "total=Math.round(posts*rate*100)/100,"
+            "left=+(s.options[s.selectedIndex].getAttribute('data-left')||0),"
+            "fit=Math.floor(Math.round(left*1000)/Math.round(rate*1000));"
+            "o.textContent='Estimated cost: '+posts+' X posts at $'+rate.toFixed(3)+' = about '+m(total)+"
+            "(total<=left?' — fits this month\\u2019s X budget ('+m(left)+' left).':"
+            "' — more than the '+m(left)+' left in this month\\u2019s X budget; it covers '+Math.min(posts,fit)+' posts.');}"
+            "[s,d,p,l].forEach(function(e){e.addEventListener('input',run);e.addEventListener('change',run);});run();"
+            "})();</script></div>")
+
+    @app.post("/agents/campaigns")
+    def start_campaign(request: Request, site_id: str = Form(...), days: str = Form("30"),
+                       posts_per_day: str = Form("1"), with_link: str = Form("")):
+        """Start the campaign agent for one website: charge the job,
+        draft in the background, the proposal lands in Approvals."""
+        import threading
+        from ventoryn import autopilot as _auto
+        from ventoryn.saas import CREDIT_COSTS, InsufficientCredits
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = _saas_store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            raise HTTPException(404, "website not found")
+
+        def _back(msg: str, code: int = 400):
+            return HTMLResponse(_operator_page(
+                "Agents", f"<div class='card'><p>{esc(msg)}</p><p><a href='/agents#start-campaign'>"
+                f"Back to Agents</a></p></div>", account=account, current="agents",
+                is_operator=_saas_config.is_operator(account["email"])), status_code=code)
+
+        blocker = site_jobs.server_blocker("x_campaign")
+        if blocker:
+            return _back(f"Campaigns are unavailable on this server: {blocker}. Nothing was charged.", 503)
+        try:
+            d = max(1, min(int(days), 365))
+            ppd = max(1, min(int(float(posts_per_day)), 2))
+        except ValueError:
+            return _back("Days and posts a day must be numbers. Nothing was charged.")
+        is_op = _saas_config.is_operator(account["email"])
+        try:
+            job = _saas_store.charge_credits(account["id"], "x_campaign", site["id"],
+                                             is_operator=is_op)
+        except InsufficientCredits:
+            return _back(f"Drafting a campaign costs {CREDIT_COSTS['x_campaign']} credits and "
+                         f"the balance is {_saas_store.credit_balance(account['id'])}. "
+                         "Nothing was charged.", 402)
+        threading.Thread(
+            target=_auto.execute, name="campaign-draft", daemon=True,
+            args=(_saas_store, _saas_config, account, site, "x_campaign"),
+            kwargs={"orchestrator": state["orchestrator"], "reports_dir": _reports_dir(),
+                    "inputs": {"source": "manual", "days": d, "posts_per_day": ppd,
+                               "with_link": "1" if with_link else "0"},
+                    "job": job}).start()
+        return RedirectResponse(f"/agents?campaign={site['id']}#start-campaign", status_code=303)
+
+    def _reports_dir():
+        from ventoryn.saas_routes import REPORTS_DIR
+        return REPORTS_DIR
+
+    def _approvals_campaigns_html(account) -> str:
+        """Approvals: campaign proposals, scheduled campaigns, and the
+        SEO article drafts the agents wrote."""
+        from ventoryn import campaigns as _camp
+
+        totp = getattr(app.state, "totp_field", lambda a: "")(account)
+        proposed = _saas_store.list_campaigns(account["id"], status="proposed")
+        scheduled = _saas_store.list_campaigns(account["id"], status="scheduled", limit=10)
+        cards = "".join(_camp.proposal_card(_saas_store, _saas_config, c, totp)
+                        for c in proposed)
+        out = (f"<style>{_camp.CAMPAIGN_CSS}</style>"
+               f"<h2>Campaign proposals ({len(proposed)})</h2>"
+               + (cards or "<div class='card'><p class='muted'>No campaign waiting. Start one "
+                  "from <a href='/agents#start-campaign'>Agents</a>, or let the autopilot "
+                  "propose one each week.</p></div>"))
+        if scheduled:
+            out += ("<div class='card'><h2>Approved campaigns</h2><ul>"
+                    + "".join(_camp.scheduled_summary(_saas_store, c) for c in scheduled)
+                    + "</ul></div>")
+        hosts = {s["id"]: s["host"] for s in _saas_store.list_sites(account["id"])}
+        articles = [j for j in _saas_store.list_jobs(account["id"], limit=60)
+                    if j["job_type"] == "seo_article" and j["status"] == "done"][:10]
+        if articles:
+            rows = "".join(
+                f"<tr><td>{esc(hosts.get(j['site_id'], ''))}</td>"
+                f"<td>{esc((j['result'] or '').replace('Automatic — ', '').split(' · report')[0])}</td>"
+                f"<td>{esc(str(j['created_at'])[:10])}</td>"
+                f"<td><a href='/account/sites/{esc(j['site_id'])}/articles/{esc(j['id'])}'>Read</a></td></tr>"
+                for j in articles)
+            out += ("<div class='card'><h2>SEO article drafts</h2><p class='muted'>Written by the "
+                    "agents, never published. Read one, then copy it to your site if you like it.</p>"
+                    "<div class='table-wrap'><table><tr><th>Website</th><th>Draft</th>"
+                    f"<th>Date</th><th></th></tr>{rows}</table></div></div>")
+        return out
+
     @app.get("/agents", response_class=HTMLResponse)
-    def agents_page(request: Request):
+    def agents_page(request: Request, campaign: str = ""):
         """The real agents from the orchestrator registry, with live
         status from the audit log (agent_stats_from_audit): tasks
         completed, tokens, cost, last task. Display name + role come
@@ -4153,6 +4314,7 @@ shows verified conversions only.</p>"""
         inner = (f"<p class='muted'>Agents research and draft. "
                  f"Nothing is published until you approve it on "
                  f"<a href='/approvals'>Approvals</a>.</p>"
+                 f"{_start_campaign_card(account, campaign)}"
                  f"{roster_html}"
                  f"{_team_doing_html(stats_list, events)}"
                  f"<div class='card'><h2>What just happened</h2>"

@@ -32,7 +32,8 @@ from ventoryn import site_jobs
 from ventoryn.saas import CREDIT_COSTS, InsufficientCredits
 
 #: (job type, days between runs)
-AUTOPILOT_JOBS: tuple[tuple[str, int], ...] = (("analyze", 7), ("seo_article", 7))
+AUTOPILOT_JOBS: tuple[tuple[str, int], ...] = (
+    ("analyze", 7), ("seo_article", 7), ("x_campaign", 7))
 RETRY_AFTER_FAILURE = timedelta(days=1)
 TICK_SECONDS = 600
 AUTO_PREFIX = "Automatic — "
@@ -59,6 +60,10 @@ def due_jobs(store, site: dict, now: datetime) -> list[str]:
     for job_type, days in AUTOPILOT_JOBS:
         if site_jobs.server_blocker(job_type):
             continue
+        # One open proposal at a time: no new campaign while the owner
+        # has not decided the last one.
+        if job_type == "x_campaign" and store.open_campaign_for_site(site["id"]):
+            continue
         last = store.last_job(site["id"], job_type)
         if last is None:
             due.append(job_type)
@@ -73,24 +78,31 @@ def due_jobs(store, site: dict, now: datetime) -> list[str]:
 
 
 def execute(store, config, account: dict, site: dict, job_type: str, *,
-            orchestrator, reports_dir: Path) -> dict:
-    """Charge, run, record — refund on failure. Returns the job row."""
+            orchestrator, reports_dir: Path, inputs: dict | None = None,
+            job: dict | None = None) -> dict:
+    """Charge (unless ``job`` was already charged), run, record —
+    refund on failure. Returns the job row."""
     is_op = config.is_operator(account.get("email"))
-    job = store.charge_credits(account["id"], job_type, site["id"], is_operator=is_op)
+    if job is None:
+        job = store.charge_credits(account["id"], job_type, site["id"], is_operator=is_op)
+    auto = not (inputs or {}).get("source") == "manual"
+    prefix = AUTO_PREFIX if auto else ""
     try:
-        summary, _report = site_jobs.run(job_type, site, {}, orchestrator=orchestrator,
-                                         reports_dir=reports_dir)
-        store.set_job_result(job["id"], "done", AUTO_PREFIX + summary)
+        summary, _report = site_jobs.run(job_type, site, inputs or {},
+                                         orchestrator=orchestrator,
+                                         reports_dir=reports_dir, store=store)
+        store.set_job_result(job["id"], "done", prefix + summary)
         store.record_activity_event(
             account["id"], "job",
-            f"{site_jobs.JOB_LABELS[job_type].split(' — ')[0]} ran automatically on "
+            f"{site_jobs.JOB_LABELS[job_type].split(' — ')[0]} ran "
+            f"{'automatically ' if auto else ''}on "
             f"{site['url']}: {summary.split(' · report')[0]}")
     except Exception as exc:  # noqa: BLE001 - refund and record
         charged = job["credits_charged"]
         if charged:
             store.grant_credits(account["id"], charged,
                                 f"Refund — automatic {job_type} job failed")
-        store.set_job_result(job["id"], "failed", f"{AUTO_PREFIX}failed ({exc})"
+        store.set_job_result(job["id"], "failed", f"{prefix}failed ({exc})"
                              + (f" — refunded {charged} credits" if charged else ""))
     return store.get_job(job["id"])
 
@@ -120,6 +132,13 @@ def run_once(store, config, *, orchestrator, reports_dir: Path,
     """Run up to ``max_jobs`` due jobs across all websites."""
     now = now or datetime.now(timezone.utc)
     expire_stale_jobs(store, now)
+    # Approved campaigns: post whatever is due (each through the same
+    # gate and X budget as a manual post).
+    try:
+        from ventoryn import campaigns
+        campaigns.post_due(store, config, now)
+    except Exception as exc:  # noqa: BLE001 - posting must not stop the agents
+        print(f"autopilot: posting ERROR {exc}", flush=True)
     ran: list[dict] = []
     for site in store.all_sites():
         account = store.get_account(site["account_id"])
@@ -133,7 +152,8 @@ def run_once(store, config, *, orchestrator, reports_dir: Path,
                 continue
             try:
                 ran.append(execute(store, config, account, site, job_type,
-                                   orchestrator=orchestrator, reports_dir=reports_dir))
+                                   orchestrator=orchestrator, reports_dir=reports_dir,
+                                   inputs={"source": "autopilot"}))
             except InsufficientCredits:
                 continue
     return ran

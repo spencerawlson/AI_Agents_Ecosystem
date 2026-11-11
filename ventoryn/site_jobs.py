@@ -37,6 +37,7 @@ JOB_LABELS = {
     "social_report": "Social media report — from your export file",
     "seo_article": "SEO article draft",
     "video_render": "Video render — script to MP4 + subtitles",
+    "x_campaign": "X campaign — posts drafted for your approval",
 }
 
 #: What each job asks for beyond the site itself (shown as hints).
@@ -49,6 +50,8 @@ JOB_HINTS = {
                    "maps them from your site.",
     "video_render": "Ventoryn drafts the script from your site, then "
                     "renders it.",
+    "x_campaign": "30 days, one post a day, each linking to a page of your "
+                  "site. Nothing is posted until you approve it in Approvals.",
 }
 
 MAX_UPLOAD_BYTES = 5_000_000
@@ -73,7 +76,7 @@ def _llm_enabled() -> bool:
 def server_blocker(job_type: str) -> str | None:
     """Why this server cannot run the job at all, or None. Short — it
     is shown in the job picker; the full fix is in the run message."""
-    if job_type in ("seo_article", "video_render") and not _llm_enabled():
+    if job_type in ("seo_article", "video_render", "x_campaign") and not _llm_enabled():
         return "needs an AI key on the server"
     if job_type == "video_render":
         if shutil.which("ffmpeg") is None:
@@ -323,7 +326,36 @@ def _run_video(site, inputs, ctx):
             f"{rendered['scenes']} scenes) · report {name}"), name
 
 
+def _run_x_campaign(site, inputs, ctx):
+    """Draft an X campaign and save it as a proposal (nothing posted)."""
+    from ventoryn import campaigns
+    from ventoryn.campaign_cost import X_RATE_LINKED_POST_USD, X_RATE_PLAIN_POST_USD
+
+    store = ctx.get("store")
+    if store is None:
+        raise RuntimeError("campaign drafting needs the account store")
+    days = max(1, min(int(inputs.get("days") or 30), 365))
+    ppd = max(0.1, min(float(inputs.get("posts_per_day") or 1), 4))
+    with_link = str(inputs.get("with_link", "1")) not in ("0", "", "false", "off")
+    posts = campaigns.draft_posts(site, days=days, posts_per_day=ppd,
+                                  with_link=with_link)
+    campaign = campaigns.propose(store, site, posts, days=days, posts_per_day=ppd,
+                                 with_link=with_link,
+                                 source=inputs.get("source") or "manual")
+    rate = X_RATE_LINKED_POST_USD if with_link else X_RATE_PLAIN_POST_USD
+    lines = [f"# X campaign proposal — {site['url']} ({ctx['date']})", "",
+             "> **NOTHING WAS POSTED.** Review and approve it in Approvals.", "",
+             f"- {len(posts)} posts over {days} days — about ${len(posts) * rate:.2f} on X",
+             "", "## Posts", ""]
+    lines += [f"{i}. {p['text']}" + (f" — {p['link']}" if p["link"] else "")
+              for i, p in enumerate(posts, 1)]
+    name = _write(ctx["reports_dir"], f"campaign_{_slug(_host(site))}_{ctx['stamp']}.md", lines)
+    return (f"Campaign proposed: {len(posts)} X posts over {days} days, about "
+            f"${len(posts) * rate:.2f} on X — review it in Approvals · report {name}"), name
+
+
 _RUNNERS = {
+    "x_campaign": _run_x_campaign,
     "analyze": _run_analyze,
     "geo_audit": _run_geo,
     "community_listening": _run_listening,
@@ -336,10 +368,13 @@ RUNNABLE = frozenset(_RUNNERS)
 
 
 def run(job_type: str, site: dict, inputs: dict, *, orchestrator,
-        reports_dir: Path, now: datetime | None = None) -> tuple[str, str]:
-    """Run one job. Returns (summary, report_name); raises on failure."""
+        reports_dir: Path, now: datetime | None = None,
+        store=None) -> tuple[str, str]:
+    """Run one job. Returns (summary, report_name); raises on failure.
+    ``store`` is the account store, for jobs that save drafts (campaigns)."""
     now = now or datetime.now(timezone.utc)
     ctx = {"now": now, "date": now.strftime("%Y-%m-%d"),
            "stamp": now.strftime("%Y%m%d-%H%M%S"),
-           "reports_dir": Path(reports_dir), "orchestrator": orchestrator}
+           "reports_dir": Path(reports_dir), "orchestrator": orchestrator,
+           "store": store}
     return _RUNNERS[job_type](site, inputs, ctx)

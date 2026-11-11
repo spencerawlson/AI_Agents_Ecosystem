@@ -83,7 +83,7 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import File, Form, Request, UploadFile
+from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from ventoryn import site_jobs
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -2288,6 +2288,94 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 "justify-content:space-between;gap:12px}"
                 ".v-autopilot-head h3{margin:0}</style></div>")
 
+    # -- campaigns: approve (2FA) / reject / remove a post ---------------------
+    app.state.totp_field = _totp_field
+
+    def _own_campaign(account, campaign_id):
+        c = store.get_campaign(campaign_id)
+        return c if c and c["account_id"] == account["id"] else None
+
+    @app.post("/campaigns/{campaign_id}/approve")
+    def campaign_approve(request: Request, campaign_id: str,
+                         totp_code: str = Form("")):
+        from ventoryn import campaigns as _camp
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        c = _own_campaign(account, campaign_id)
+        if c is None or c["status"] != "proposed":
+            raise HTTPException(404, "campaign not found")
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(_signed_page(
+                "Approvals", f"<p>{esc(err)}</p><p><a href='/approvals#campaign-"
+                f"{esc(campaign_id)}'>Back</a>.</p>", account, current="approvals"),
+                status_code=400)
+        _camp.schedule(store, c)
+        return RedirectResponse(f"/approvals?campaign={campaign_id}", status_code=303)
+
+    @app.post("/campaigns/{campaign_id}/reject")
+    def campaign_reject(request: Request, campaign_id: str):
+        from ventoryn import campaigns as _camp
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        c = _own_campaign(account, campaign_id)
+        if c is None or c["status"] != "proposed":
+            raise HTTPException(404, "campaign not found")
+        _camp.reject(store, c)
+        return RedirectResponse("/approvals", status_code=303)
+
+    @app.post("/campaigns/{campaign_id}/posts/{draft_id}/remove")
+    def campaign_remove_post(request: Request, campaign_id: str, draft_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        c = _own_campaign(account, campaign_id)
+        d = store.get_social_draft(draft_id)
+        if c is None or d is None or d.get("campaign_id") != campaign_id:
+            raise HTTPException(404, "post not found")
+        store.remove_campaign_draft(draft_id)
+        return RedirectResponse(f"/approvals#campaign-{campaign_id}", status_code=303)
+
+    @app.get("/account/sites/{site_id}/articles/{job_id}", response_class=HTMLResponse)
+    def article_view(request: Request, site_id: str, job_id: str):
+        """Read an SEO article draft the agents wrote for this website.
+        Only the owner's own finished seo_article job; the file must sit
+        inside this website's draft folder."""
+        from ventoryn.reports import render_markdown, report_path
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        job = store.get_job(job_id)
+        if (site is None or site["account_id"] != account["id"] or job is None
+                or job["site_id"] != site_id or job["job_type"] != "seo_article"
+                or job["status"] != "done"):
+            raise HTTPException(404, "article not found")
+        import re as _re
+        m = _re.search(r"report (\S+\.md)", job["result"] or "")
+        report = report_path(m.group(1)) if m else None
+        text = report.read_text(encoding="utf-8", errors="replace") if report else ""
+        dm = _re.search(r"- Draft: `([^`]+)`", text)
+        if not dm:
+            raise HTTPException(404, "article not found")
+        draft = Path(dm.group(1)).resolve()
+        folder = (REPORTS_DIR / "seo").resolve()
+        if folder not in draft.parents or not draft.is_file():
+            raise HTTPException(404, "article not found")
+        body = render_markdown(draft.read_text(encoding="utf-8", errors="replace"))
+        return HTMLResponse(_signed_page(
+            f"Article draft — {site['host']}",
+            "<p class='muted'>A draft the agents wrote. Nothing was published — "
+            "copy it to your site when you are happy with it.</p>"
+            f"<article class='card v-doc'>{body}</article>"
+            "<p><a href='/approvals'>Back to Approvals</a></p>",
+            account, current="approvals"))
+
     @app.post("/account/sites/{site_id}/autopilot")
     def site_autopilot(request: Request, site_id: str, on: str = Form("1"),
                        return_to: str = Form("")):
@@ -2369,7 +2457,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             # run it off the event loop.
             summary, _report = await asyncio.to_thread(
                 site_jobs.run, job_type, site, inputs,
-                orchestrator=orchestrator, reports_dir=REPORTS_DIR)
+                orchestrator=orchestrator, reports_dir=REPORTS_DIR, store=store)
             store.set_job_result(job["id"], "done", summary)
             # The admin's recent-activity feed: a real job ran.
             store.record_activity_event(
