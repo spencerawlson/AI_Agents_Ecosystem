@@ -1490,6 +1490,16 @@ class SaasStore:
                 (site_id,)).fetchone()
         return int(row[0])
 
+    def site_credits_used(self, site_id: str) -> int:
+        """Credits the website's finished agent jobs used. A job the
+        owner ran is not charged, so it counts at its list price — the
+        work still cost something. Failed jobs were refunded: excluded."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT job_type, credits_charged FROM saas_jobs"
+                " WHERE site_id = ? AND status = 'done'", (site_id,)).fetchall()
+        return sum(int(r[1] or 0) or CREDIT_COSTS.get(r[0], 0) for r in rows)
+
     def site_revenue_total(self, site_id: str) -> dict | None:
         """The site's verified revenue {"total_cents", "currency"},
         ignoring the display setting — for the owner's own on-demand
