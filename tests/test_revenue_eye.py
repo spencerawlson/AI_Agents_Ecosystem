@@ -62,5 +62,6 @@ def test_saved_privacy_setting_is_unchanged_by_reveal():
 def test_toggle_starts_hidden_and_only_shows_where_revenue_is_hidden():
     client, _, _, _ = _setup()
     html = client.get("/portfolio").text
-    assert "<button class='notification rev-toggle' id='rev-toggle' type='button' hidden" in html
+    assert "<button class='rev-toggle' id='rev-toggle' type='button' role='switch' hidden aria-checked='false'" in html
+    assert "<span class='rev-track' aria-hidden='true'><span class='rev-knob'></span></span>" in html
     assert "querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site]')" in html
