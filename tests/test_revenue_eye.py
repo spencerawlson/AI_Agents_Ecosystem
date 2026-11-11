@@ -76,19 +76,36 @@ def test_overview_cards_can_be_revealed_by_the_switch():
     assert "$49.00" not in html
 
 
-def test_costs_are_credits_used_at_the_plan_rate():
+def test_costs_are_what_the_platform_apis_charged():
     client, store, account, site = _setup()
     store.grant_credits(account["id"], 100, "test")
-    job = store.charge_credits(account["id"], "seo_article", site["id"])  # 10 credits
+    job = store.charge_credits(account["id"], "seo_article", site["id"])  # credits, not a cost
     store.set_job_result(job["id"], "done", "ok")
-    failed = store.charge_credits(account["id"], "analyze", site["id"])
-    store.set_job_result(failed["id"], "failed", "refunded")
-    assert store.site_credits_used(site["id"]) == 10
+    store.record_x_post_cost(site["id"], "d1", 20)                       # X: $0.20
+    store.record_social_spend(account["id"], site["id"], "facebook", "d2", 0.05)
     html = client.get("/portfolio").text
-    assert "<span class='v-stat-label'>Costs</span><span class='v-stat-value'>$0.20</span>" in html
+    assert "<span class='v-stat-label'>Costs</span><span class='v-stat-value'>$0.25</span>" in html
     data = client.get("/api/websites/revenue").json()
-    assert data["site_profit"] == {site["id"]: "$48.80"}
-    assert data["net_profit"] == "$48.80"
+    assert data["site_profit"] == {site["id"]: "$48.75"}
+    assert data["net_profit"] == "$48.75"
+
+
+def test_owner_credits_go_down_as_jobs_run():
+    import re
+    from _signin import OPERATOR_EMAIL
+
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(saas_store=store, saas_config=config))
+    account = sign_in(client, store, email=OPERATOR_EMAIL, sub="sub-op", name="Op")
+    site = store.create_site(account["id"], "https://shop.example.com")
+    def credits():
+        html = client.get("/ops").text
+        return int(re.search(r"Credits</span><span class='v-stat-value'>([\d,]+)<", html)
+                   .group(1).replace(",", ""))
+    before = credits()
+    job = store.charge_credits(account["id"], "seo_article", site["id"], is_operator=True)
+    store.set_job_result(job["id"], "done", "ok")
+    assert credits() == before - 10
 
 
 def test_overview_shows_revenue_costs_and_net_profit():

@@ -512,9 +512,29 @@ def create_app(
         return PLAN_PRICE_USD / max(1, int(_saas_config.monthly_credits or 0))
 
     def _site_cost_usd(site_id: str) -> float:
-        """A website's cost: the credits its agent work used, valued at
-        the plan rate."""
-        return round(_saas_store.site_credits_used(site_id) * _credit_usd(), 2)
+        """A website's cost: what the platforms' paid APIs actually
+        charged for its posts (X, Facebook, Instagram) — recorded only
+        for posts the provider confirmed published. Agent work is paid
+        in credits, shown on its own card, not here."""
+        return round(_saas_store.social_spend_in_period("", site_id=site_id), 2)
+
+    def _credits_left(account) -> tuple[int, str]:
+        """(credits left, what it is measured against). A customer's
+        balance goes down as jobs charge it. The owner is never charged,
+        so his card counts this month's allowance minus the list price
+        of the jobs that ran — it goes down as the agents work, too."""
+        from datetime import datetime, timezone
+        from ventoryn.saas import CREDIT_COSTS
+
+        if not _saas_config.is_operator(account["email"]):
+            return _saas_store.credit_balance(account["id"]), "left"
+        allowance = int(_saas_config.monthly_credits or 0)
+        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0,
+                                                   microsecond=0).isoformat()
+        used = sum(CREDIT_COSTS.get(j["job_type"], 0)
+                   for j in _saas_store.jobs_since(account["id"], start)
+                   if j["status"] == "done")
+        return max(0, allowance - used), f"of {allowance:,} this month"
 
     def _money_stats_html(account, *, first: str = "") -> str:
         """Revenue / Costs / Net profit for the account — the same
@@ -526,6 +546,7 @@ def create_app(
         revenue = sum(r["revenue"] for r in rows if r["revenue"] is not None)
         costs = sum(r["total_costs"] or 0 for r in rows)
         profit = sum(r["net_profit"] for r in rows if r["net_profit"] is not None)
+        credits, credits_note = _credits_left(account)
         n = 2 if first else 1
         return (f"<div class='v-stats'>{first}"
                 f"<div class='v-stat v-stat-{n}'><span class='v-stat-label'>Revenue</span>"
@@ -535,7 +556,10 @@ def create_app(
                 f"<span class='v-stat-value'>{money(costs)}</span></div>"
                 f"<div class='v-stat v-stat-3'><span class='v-stat-label'>Net profit</span>"
                 f"<span class='v-stat-value' data-rev-profit>"
-                f"{'—' if hidden else money(profit)}</span></div></div>")
+                f"{'—' if hidden else money(profit)}</span></div>"
+                f"<div class='v-stat v-stat-3'><span class='v-stat-label'>Credits</span>"
+                f"<span class='v-stat-value'>{credits:,}</span>"
+                f"<span class='v-stat-sub'>{esc(credits_note)}</span></div></div>")
 
     def _site_business_rows(account) -> list[dict]:
         """The account's own SaaS sites as business rows, so the
@@ -611,6 +635,8 @@ def create_app(
 .v-stat-3::before { background: linear-gradient(90deg, var(--v-green), var(--v-green-soft)); }
 .v-stat-label { display: block; font-size: 12px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .06em; color: var(--v-muted); }
+.v-stat-sub { display: block; margin-top: 4px; font-size: 12px; color: var(--v-muted); }
+.v-stat-1 .v-stat-sub { color: #a7f3d0; }
 .v-stat-value { display: block; font-size: 22px; font-weight: 800;
   margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .v-biz-grid { display: grid;
@@ -2067,9 +2093,10 @@ if (demoToggle && demoValue) {{
         _first = ("<div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>"
                   f"<span class='v-stat-value'>{len(biz_rows)}</span></div>")
         inner = f"""{_money_stats_html(account, first=_first)}
-<p class='muted'>Costs are the credits each website's agent work used,
-valued at the plan rate ({money(_credit_usd(), 2)} a credit). Revenue is
-real — the sum of recorded paying customers per site.</p>{hidden_note}
+<p class='muted'>Costs are what the platforms' paid APIs charged for your
+websites' posts (X, Facebook, Instagram). The agents' work is paid in
+credits — see Credits. Revenue is real — the sum of recorded paying
+customers per site.</p>{hidden_note}
 <p><a class='btn' href='/websites/sites/new'>Add a website</a></p>
 <h2>Your websites</h2>
 {_site_list(site_rows)}
@@ -2782,7 +2809,6 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             middle = f"{websites_section}\n{analyze_html}"
         inner = f"""{banner}{_money_stats_html(account)}{_progress_grid_html(data)}
 {decision_html}
-{_agent_costs_card_html(account)}
 {middle}
 {_results_html(data)}
 {_live_activity_feed_html(snap["events"])}
