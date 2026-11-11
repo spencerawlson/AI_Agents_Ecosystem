@@ -4250,6 +4250,10 @@ shows verified conversions only.</p>"""
         owned = _owned_business_ids(account)
         pending = len([a for a in state["approvals"].pending()
                        if _approval_visible(account, a, owned)])
+        # Same number as the header: single social posts waiting count too.
+        pending += sum(1 for s in _saas_store.list_sites(account["id"])
+                       for d in _saas_store.list_social_drafts(s["id"])
+                       if d.get("status") == "pending")
         alerts = account_alerts(_saas_store, account, pending)
         body = (f"<ul class='v-alerts'>{alert_rows_html(alerts)}</ul>" if alerts else
                 "<div class='card'><p>Nothing needs your attention right now.</p></div>")
