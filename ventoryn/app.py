@@ -567,14 +567,16 @@ def create_app(
   border: 1px solid var(--v-line); box-shadow: var(--v-shadow); }
 .v-stat::before { content: ""; position: absolute; inset: 0 0 auto 0;
   height: 4px; }
-.v-stat-1 { background: linear-gradient(135deg, var(--v-navy), var(--v-navy-2));
+/* The highlighted first stat card (Websites, Analytics, Customers):
+   deep emerald. The sidebar and the rest of the brand stay navy. */
+.v-stat-1 { background: linear-gradient(135deg, #064e3b, #065f46);
   border-color: transparent; color: #fff; }
-.v-stat-1 .v-stat-label { color: var(--v-violet-line); }
+.v-stat-1 .v-stat-label { color: #a7f3d0; }
 .v-stat-2::before { background: linear-gradient(90deg, var(--v-violet), var(--v-blue)); }
 .v-stat-3::before { background: linear-gradient(90deg, var(--v-green), var(--v-green-soft)); }
 .v-stat-label { display: block; font-size: 12px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .06em; color: var(--v-muted); }
-.v-stat-value { display: block; font-size: 30px; font-weight: 800;
+.v-stat-value { display: block; font-size: 22px; font-weight: 800;
   margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .v-biz-grid { display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -2015,9 +2017,9 @@ if (demoToggle && demoValue) {{
 <div class='v-stat v-stat-1'><span class='v-stat-label'>Websites</span>
 <span class='v-stat-value'>{len(biz_rows)}</span></div>
 <div class='v-stat v-stat-2'><span class='v-stat-label'>Revenue</span>
-<span class='v-stat-value' data-rev-total>{_money(total_revenue) if not any_hidden else "hidden"}</span></div>
+<span class='v-stat-value' data-rev-total>{_money(total_revenue) if not any_hidden else "—"}</span></div>
 <div class='v-stat v-stat-3'><span class='v-stat-label'>Net profit</span>
-<span class='v-stat-value' data-rev-profit>{_money(total_profit) if not any_hidden else "hidden"}</span></div></div>
+<span class='v-stat-value' data-rev-profit>{_money(total_profit) if not any_hidden else "—"}</span></div></div>
 <p class='muted'>Costs per website read $0 here: the site's own costs
 are its credits, and credits are not dollars. Revenue is real — the
 sum of recorded paying customers per site.</p>{hidden_note}
