@@ -580,12 +580,24 @@ def create_app(
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px; margin: 18px 0; }
 /* Websites page: the site list scrolls, so 20+ sites never swamp it. */
-.v-site-list { max-height: min(72vh, 860px); overflow-y: auto;
+.v-site-list { max-height: min(72vh, 860px); overflow: auto;
   overscroll-behavior: contain; padding: 2px 6px 2px 2px; margin: 12px 0 18px;
   border-radius: var(--v-radius); scrollbar-width: thin;
   scrollbar-color: var(--v-line) transparent; }
 .v-site-list:focus-visible { outline: 2px solid var(--v-violet); outline-offset: 2px; }
-.v-site-list .v-biz-grid { margin: 0; }
+.v-site-list { background: var(--v-card); border: 1px solid var(--v-line);
+  box-shadow: var(--v-shadow); padding: 0; }
+.v-site-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.v-site-table th { position: sticky; top: 0; z-index: 1; background: var(--v-card);
+  text-align: left; font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--v-muted); padding: 12px 16px;
+  border-bottom: 1px solid var(--v-line); white-space: nowrap; }
+.v-site-table td { padding: 12px 16px; border-bottom: 1px solid var(--v-line);
+  vertical-align: middle; white-space: nowrap; }
+.v-site-table tbody tr:last-child td { border-bottom: 0; }
+.v-site-table tbody tr:hover td { background: color-mix(in srgb, var(--v-violet) 6%, transparent); }
+.v-site-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.v-site-name { font-weight: 700; }
 .v-site-tools .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; }
 .v-site-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -1886,27 +1898,68 @@ if (demoToggle && demoValue) {{
                 "Ventoryn works to bring it new paying "
                 "customers.</p></div>")
         def _site_list(rows) -> str:
-            # Scrollable, with a filter once the list is long enough to
-            # need one — 20 websites must not turn the page into a wall.
+            """Your websites as a compact list — one row per website,
+            the key numbers only; the full funnel lives on each
+            website's own page. Scrolls, with a filter past 6 rows."""
             if not rows:
                 return _cards(rows)
+            from ventoryn.analytics import analytics_for
+
+            va = analytics_for(_saas_store)
+            dash = "<span class='muted'>—</span>"
+            body = ""
+            for r in rows:
+                site = _saas_store.get_site(str(r["id"])[5:])
+                if site is None:
+                    continue
+                sid = esc(site["id"])
+                summary = va.summary(site["id"])
+                visitors = (f"{summary['visitors']:,}" if summary["installed"]
+                            else f"<a class='muted' href='/account/sites/{sid}#ventoryn-analytics'>Set up</a>")
+                rev = _saas_store.revenue_for_site(site["id"])
+                stripe_on = (_saas_store.get_connection(site["id"], "stripe_sales")
+                             or {}).get("status") == "connected"
+                if rev is None:
+                    paying, revenue = dash, dash
+                else:
+                    paying = ("hidden" if rev["paying_customers"] is None
+                              else f"{rev['paying_customers']:,}")
+                    if not stripe_on:
+                        revenue = (f"<a class='muted' href='/integrations/stripe_sales"
+                                   f"?site={sid}'>Connect Stripe</a>")
+                    elif rev["revenue"] is None:
+                        revenue = "hidden"
+                    else:
+                        revenue = (f"${rev['revenue']['total_cents'] / 100:,.2f}")
+                auto = ("<span class='badge badge-ok'>On</span>"
+                        if int(site.get("autopilot", 1) or 0)
+                        else "<span class='badge badge-off'>Off</span>")
+                body += (f"<tr><td><a class='v-site-name' href='/account/sites/{sid}'>"
+                         f"{esc(r['name'])}</a></td>"
+                         f"<td class='num'>{visitors}</td><td class='num'>{paying}</td>"
+                         f"<td class='num'>{revenue}</td><td>{auto}</td>"
+                         f"<td><a href='{esc(site['url'])}' target='_blank' "
+                         f"rel='noopener noreferrer'>Open</a></td></tr>")
+            n = len(rows)
             tools = ""
-            if len(rows) > 6:
+            if n > 6:
                 tools = (f"<div class='v-site-tools'><label class='sr-only' "
                          f"for='site-filter'>Filter websites</label>"
                          f"<input id='site-filter' type='search' "
-                         f"placeholder='Filter {len(rows)} websites' "
-                         f"autocomplete='off'><span class='muted' id='site-count'>"
-                         f"{len(rows)} websites</span></div>"
+                         f"placeholder='Filter {n} websites' autocomplete='off'>"
+                         f"<span class='muted' id='site-count'>{n} websites</span></div>"
                          "<script>(function(){var f=document.getElementById('site-filter');"
                          "var c=document.getElementById('site-count');"
-                         "f.addEventListener('input',function(){var q=f.value.trim().toLowerCase(),n=0;"
-                         "document.querySelectorAll('#site-list .v-biz').forEach(function(el){"
-                         "var hit=!q||el.textContent.toLowerCase().indexOf(q)>=0;el.hidden=!hit;if(hit)n++;});"
-                         "c.textContent=n+(n===1?' website':' websites');});})();</script>")
+                         "f.addEventListener('input',function(){var q=f.value.trim().toLowerCase(),k=0;"
+                         "document.querySelectorAll('#site-list tbody tr').forEach(function(el){"
+                         "var hit=!q||el.textContent.toLowerCase().indexOf(q)>=0;el.hidden=!hit;if(hit)k++;});"
+                         "c.textContent=k+(k===1?' website':' websites');});})();</script>")
             return (f"{tools}<div class='v-site-list' id='site-list' tabindex='0' "
-                    f"role='region' aria-label='Your websites'>"
-                    f"<div class='v-biz-grid'>{_cards(rows)}</div></div>")
+                    f"role='region' aria-label='Your websites'><table class='v-site-table'>"
+                    f"<thead><tr><th>Website</th><th class='num'>Visitors (30 days)</th>"
+                    f"<th class='num'>Paying customers</th><th class='num'>Revenue</th>"
+                    f"<th>Autopilot</th><th></th></tr></thead><tbody>{body}</tbody>"
+                    f"</table></div>")
 
         hidden_note = ("<p class='muted'>Revenue from a site whose "
                        "revenue display is off is not included in these "

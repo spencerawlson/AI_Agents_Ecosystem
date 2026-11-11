@@ -31,8 +31,17 @@ def test_websites_sit_in_a_scrollable_region():
 def test_long_list_gets_a_filter():
     html = _page(20)
     assert "id='site-filter'" in html and "Filter 20 websites" in html
-    assert html.count("<article class='v-biz") >= 20
+    assert html.count("<a class='v-site-name'") == 20
 
 
 def test_no_websites_still_shows_the_empty_state():
     assert "Add your first website" in _page(0)
+
+
+def test_each_website_is_one_row_with_its_key_numbers():
+    html = _page(2)
+    assert "<table class='v-site-table'>" in html
+    for head in ("Website", "Visitors (30 days)", "Paying customers", "Revenue", "Autopilot"):
+        assert f">{head}</th>" in html
+    assert html.count("<a class='v-site-name' href='/account/sites/") == 2
+    assert "Connect Stripe</a>" in html and "badge-ok'>On<" in html

@@ -24,10 +24,12 @@ def test_site_card_carries_the_funnel_and_link():
     client, store, account = _client()
     site = store.create_site(account["id"], "https://shop.example.com")
     html = client.get("/portfolio").text
-    assert "Visitors (last 30 days)" in html and "Paying customers" in html
+    # One row per website: key numbers here, full funnel on its page.
+    assert "Visitors (30 days)" in html and "Paying customers" in html
     assert (f"href='https://shop.example.com' target='_blank' "
-            f"rel='noopener noreferrer'>Open website</a>" in html)
-    assert f"<h3><a href='/account/sites/{site['id']}'>shop.example.com</a></h3>" in html
+            f"rel='noopener noreferrer'>Open</a>" in html)
+    assert (f"<a class='v-site-name' href='/account/sites/{site['id']}'>"
+            f"shop.example.com</a>" in html)
 
 
 def test_recent_jobs_on_websites_with_site_column():
