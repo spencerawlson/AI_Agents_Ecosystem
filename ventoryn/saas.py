@@ -98,6 +98,7 @@ MONTHLY_CREDIT_ALLOWANCE_DEFAULT = 1000
 #: what each job will cost when it lands.
 CREDIT_COSTS: dict[str, int] = {
     "analyze": 5,              # site + GEO audit of one URL
+    "x_campaign": 10,          # an X campaign drafted for approval
     "geo_audit": 5,            # GEO answer-readiness audit
     "community_listening": 5,  # one listening run (Reddit, past week)
     "social_report": 5,        # social analytics report from an export
@@ -544,6 +545,19 @@ CREATE TABLE IF NOT EXISTS saas_connection_oauth_states (
     code_verifier TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_campaigns (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'x',
+    days INTEGER NOT NULL,
+    posts_per_day REAL NOT NULL,
+    with_link INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'proposed',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
 CREATE TABLE IF NOT EXISTS saas_social_drafts (
     id TEXT PRIMARY KEY,
     site_id TEXT NOT NULL,
@@ -579,6 +593,11 @@ CREATE TABLE IF NOT EXISTS saas_social_spend (
 #: EXISTS cannot add a column to an existing table). Never remove an
 #: entry from this list.
 _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    # Campaigns: drafts belong to a campaign, get a posting date when
+    # the owner approves it, and keep a note when a post is held.
+    ("saas_social_drafts", "campaign_id", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_social_drafts", "scheduled_for", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_social_drafts", "note", "TEXT NOT NULL DEFAULT ''"),
     # Autopilot: the agents work on every website by default (1);
     # the owner can turn it off per website (0).
     ("saas_sites", "autopilot", "INTEGER NOT NULL DEFAULT 1"),
@@ -1837,14 +1856,95 @@ class SaasStore:
     # A draft is never posted by creating it — only an explicit, separate
     # approve action (post_to_x) calls the provider. Compose != approve.
     def create_social_draft(self, site_id: str, kind: str, text: str,
-                            link_url: str = "") -> dict:
+                            link_url: str = "", campaign_id: str = "") -> dict:
         draft_id = _new_id()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO saas_social_drafts (id, site_id, kind, text,"
-                " link_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (draft_id, site_id, kind, text, link_url, _iso(_now())))
+                " link_url, campaign_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (draft_id, site_id, kind, text, link_url, campaign_id, _iso(_now())))
         return self.get_social_draft(draft_id)
+
+    # -- campaigns ----------------------------------------------------------
+    def create_campaign(self, site_id: str, account_id: str, *, days: int,
+                        posts_per_day: float, with_link: bool,
+                        source: str = "manual", platform: str = "x") -> dict:
+        campaign_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_campaigns (id, site_id, account_id, platform,"
+                " days, posts_per_day, with_link, source, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (campaign_id, site_id, account_id, platform, int(days),
+                 float(posts_per_day), 1 if with_link else 0, source, _iso(_now())))
+        return self.get_campaign(campaign_id)
+
+    def get_campaign(self, campaign_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM saas_campaigns WHERE id = ?",
+                                     (campaign_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_campaigns(self, account_id: str, status: str | None = None,
+                       limit: int = 30) -> list[dict]:
+        q = "SELECT * FROM saas_campaigns WHERE account_id = ?"
+        args: list = [account_id]
+        if status:
+            q += " AND status = ?"
+            args.append(status)
+        q += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        with self._lock:
+            rows = self._conn.execute(q, args).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def open_campaign_for_site(self, site_id: str) -> dict | None:
+        """A proposal still waiting for the owner, if any."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_campaigns WHERE site_id = ? AND status = 'proposed'"
+                " ORDER BY created_at DESC LIMIT 1", (site_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def campaign_drafts(self, campaign_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_social_drafts WHERE campaign_id = ?"
+                " ORDER BY created_at, rowid", (campaign_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def set_campaign_status(self, campaign_id: str, status: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_campaigns SET status = ?, decided_at = ? WHERE id = ?",
+                (status, _iso(_now()), campaign_id))
+
+    def schedule_draft(self, draft_id: str, when_iso: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_social_drafts SET status = 'scheduled', scheduled_for = ?"
+                " WHERE id = ? AND status = 'pending'", (when_iso, draft_id))
+
+    def remove_campaign_draft(self, draft_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_social_drafts SET status = 'rejected', decided_at = ?"
+                " WHERE id = ? AND status IN ('pending', 'scheduled', 'held')",
+                (_iso(_now()), draft_id))
+
+    def hold_draft(self, draft_id: str, note: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_social_drafts SET status = 'held', note = ? WHERE id = ?",
+                (note[:300], draft_id))
+
+    def due_scheduled_drafts(self, now_iso: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_social_drafts WHERE status = 'scheduled'"
+                " AND scheduled_for <> '' AND scheduled_for <= ?"
+                " ORDER BY scheduled_for", (now_iso,)).fetchall()
+        return [_row_dict(r) for r in rows]
 
     def get_social_draft(self, draft_id: str) -> dict | None:
         with self._lock:
@@ -1854,10 +1954,14 @@ class SaasStore:
         return _row_dict(row) if row else None
 
     def list_social_drafts(self, site_id: str, limit: int = 20) -> list[dict]:
+        """Single posts only. A campaign's posts are managed with their
+        campaign (campaign_drafts) — approved as a whole and posted on
+        their dates — so they never appear here with an Approve & post
+        button of their own."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM saas_social_drafts WHERE site_id = ?"
-                " ORDER BY created_at DESC LIMIT ?",
+                " AND campaign_id = '' ORDER BY created_at DESC LIMIT ?",
                 (site_id, limit)).fetchall()
         return [_row_dict(r) for r in rows]
 
@@ -1871,7 +1975,7 @@ class SaasStore:
             cur = self._conn.execute(
                 "UPDATE saas_social_drafts SET status = ?, signature_tag = ?,"
                 " tweet_id = ?, decided_at = ?"
-                " WHERE id = ? AND status = 'pending'",
+                " WHERE id = ? AND status IN ('pending', 'scheduled')",
                 (status, signature_tag, tweet_id, _iso(_now()), draft_id))
         return cur.rowcount > 0
 
@@ -2476,7 +2580,7 @@ def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
     draft = store.get_social_draft(draft_id)
     if draft is None or draft["site_id"] != site_id or draft["kind"] != "x":
         return False, "Draft not found."
-    if draft["status"] != "pending":
+    if draft["status"] not in ("pending", "scheduled"):
         return False, f"This draft was already {draft['status']}."
     # Every post costs something on X's pay-per-use API: $0.20 with a
     # link (every Ventoryn link post), $0.015 without (reported rates,
