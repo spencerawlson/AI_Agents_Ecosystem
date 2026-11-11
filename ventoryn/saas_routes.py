@@ -2082,6 +2082,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 <div class='v-job-field' data-jobs='social_report'>
 <label for='job_export'>Social export file <span class='muted'>(CSV or JSON, up to 5 MB)</span></label>
 <input id='job_export' name='export' type='file' accept='.csv,.json,text/csv,application/json'></div>
+{_video_fields()}
 <p id='job_hint' class='muted'></p>
 <p><button class='btn btn-primary' type='submit'>Run job</button></p></form>
 <p class='muted'>Nothing is published or posted without your approval.</p></div>
@@ -2399,10 +2400,27 @@ funnel counts it. This is the owner-recorded fallback.</p>
         back = "/portfolio" if return_to == "/portfolio" else f"/websites/sites/{site_id}#autopilot"
         return RedirectResponse(back, status_code=303)
 
+    def _video_fields() -> str:
+        """Video job options: ElevenLabs voiceover and HeyGen presenter,
+        each available only when the server has its keys."""
+        from core import media_providers as mp
+
+        vb, pb = mp.voice_blocker(), mp.presenter_blocker()
+        voice = (f"<label><input type='checkbox' name='voiceover' value='on' checked> "
+                 f"Voiceover (ElevenLabs)</label>" if not vb else
+                 f"<p class='muted'>Voiceover (ElevenLabs): {esc(vb)}.</p>")
+        presenter = (f"<label><input type='checkbox' name='presenter' value='heygen'> "
+                     f"Talking presenter (HeyGen) — makes the whole video</label>" if not pb else
+                     f"<p class='muted'>Presenter (HeyGen): {esc(pb)}.</p>")
+        return (f"<div class='v-job-field' data-jobs='video_render'>{voice}{presenter}"
+                f"<p class='muted'>Both are paid APIs; their usage is added to this "
+                f"website's Costs.</p></div>")
+
     @app.post("/websites/sites/{site_id}/jobs")
     async def run_job(request: Request, site_id: str,
                       job_type: str = Form(...),
                       keywords: str = Form(""), community: str = Form(""),
+                      voiceover: str = Form("off"), presenter: str = Form(""),
                       export: UploadFile | None = File(None)):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -2416,7 +2434,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"], "<p>Unknown job type.</p>", account, current="websites"),
                 status_code=400)
-        inputs = {"keywords": keywords[:300], "community": community[:300]}
+        inputs = {"keywords": keywords[:300], "community": community[:300],
+                  "voiceover": "on" if voiceover == "on" else "off",
+                  "presenter": "heygen" if presenter == "heygen" else ""}
         if export is not None and job_type == "social_report":
             inputs["export_bytes"] = await export.read(
                 site_jobs.MAX_UPLOAD_BYTES + 1)
