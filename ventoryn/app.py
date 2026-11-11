@@ -2013,8 +2013,9 @@ if (demoToggle && demoValue) {{
                          f"{esc(r['name'])}</a></td>"
                          f"<td class='num'>{visitors}</td><td class='num'>{paying}</td>"
                          f"<td class='num'>{revenue}</td><td>{auto}</td>"
-                         f"<td><a href='{esc(site['url'])}' target='_blank' "
-                         f"rel='noopener noreferrer'>Open</a></td></tr>")
+                         # Open = the website's page in Ventoryn (its
+                         # snapshot, specs, funnel) — not the live site.
+                         f"<td><a href='/websites/sites/{sid}'>Open</a></td></tr>")
             n = len(rows)
             tools = ""
             if n > 6:
