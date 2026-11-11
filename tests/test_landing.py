@@ -277,12 +277,12 @@ def test_portfolio_scoped_and_redesigned():
     # Stripe is connected. (The privacy form sets all three toggles,
     # so send all three as on.)
     r = client_a.post(
-        f"/account/sites/{site['id']}/connections/stripe_sales",
+        f"/websites/sites/{site['id']}/connections/stripe_sales",
         data={"webhook_secret": "whsec_test"},
         follow_redirects=False)
     assert r.status_code == 303
     r = client_a.post(
-        f"/account/sites/{site['id']}/privacy",
+        f"/websites/sites/{site['id']}/privacy",
         data={"revenue_show": "on", "count_show": "on",
               "details_show": "on",
               "totp_code": fresh_totp_code(store, account_a["id"])},
@@ -331,12 +331,12 @@ def test_report_scoped_to_the_account():
     # toggle on (fresh 2FA code; the privacy form sets all three
     # toggles, so send all three as on).
     r = client_a.post(
-        f"/account/sites/{site['id']}/connections/stripe_sales",
+        f"/websites/sites/{site['id']}/connections/stripe_sales",
         data={"webhook_secret": "whsec_test"},
         follow_redirects=False)
     assert r.status_code == 303
     r = client_a.post(
-        f"/account/sites/{site['id']}/privacy",
+        f"/websites/sites/{site['id']}/privacy",
         data={"revenue_show": "on", "count_show": "on",
               "details_show": "on",
               "totp_code": fresh_totp_code(store, account_a["id"])},
@@ -730,7 +730,7 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
     assert r.status_code == 200
     assert "Add your website" in r.text
     assert "ada.example.com" in r.text
-    r = client.post("/account/sites",
+    r = client.post("/websites/sites",
                     data={"url": "https://ada.example.com",
                           "country": "ca", "language": "en"},
                     follow_redirects=False)
@@ -750,7 +750,7 @@ def test_bare_domain_carried_through_to_site_add():
     app, store = _app_with()
     client, account = _customer_client(app, store, CUSTOMER_A)
     store.set_subscription(account["id"], "active", "sub_ada")
-    r = client.post("/account/sites",
+    r = client.post("/websites/sites",
                     data={"url": "ada.example.com",
                           "country": "ca", "language": "en"},
                     follow_redirects=False)

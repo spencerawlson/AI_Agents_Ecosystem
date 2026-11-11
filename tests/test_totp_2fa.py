@@ -164,7 +164,7 @@ def test_fresh_account_cannot_reach_any_product_page_until_setup():
                 sub="google-sub-ada", name="Ada")
     for path in ("/ops", "/portfolio", "/approvals", "/report",
                  "/account/dashboard", "/account/subscribe",
-                 "/account/sites/new"):
+                 "/websites/sites/new"):
         r = client.get(path, follow_redirects=False)
         assert r.status_code == 303, path
         assert r.headers["location"].startswith(
@@ -303,13 +303,13 @@ def test_sensitive_action_demands_fresh_2fa_code():
                       sub="google-sub-ada", name="Ada")
     site = store.create_site(account["id"], "https://ada.example.com")
     # No fresh code: refused.
-    r = client.post(f"/account/sites/{site['id']}/privacy",
+    r = client.post(f"/websites/sites/{site['id']}/privacy",
                     data={"revenue_show": "on"})
     assert r.status_code == 400
     assert store.get_site(site["id"])["revenue_show"] == 0
     # A fresh code: accepted.
     r = client.post(
-        f"/account/sites/{site['id']}/privacy",
+        f"/websites/sites/{site['id']}/privacy",
         data={"revenue_show": "on", "count_show": "on",
               "details_show": "on",
               "totp_code": fresh_totp_code(store, account["id"])},

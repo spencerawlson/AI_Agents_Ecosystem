@@ -9,7 +9,7 @@ that is Spencer's call, flagged in the report, not silently changed.
 ONE deliberate exception (Spencer, 2026-11-09): the website snapshot's
 screenshot of the customer's OWN site, shown only on that owner's site
 page and served by the owner-only route
-/account/sites/<id>/snapshot-image. It is customer content, not a
+/websites/sites/<id>/snapshot-image. It is customer content, not a
 Ventoryn graphic. The template scan below allows exactly that <img>
 and nothing else.
 """
@@ -82,7 +82,7 @@ def test_no_bitmap_in_any_rendered_page():
         (client, "/report"),
         (client, "/account/dashboard"),
         (client, "/account/subscribe"),
-        (client, "/account/sites/new"),
+        (client, "/websites/sites/new"),
         (client, "/account/security"),
         (raw, "/account/two-factor/setup"),
         (admin, "/admin"),
@@ -115,7 +115,7 @@ def test_no_bitmap_reference_in_page_templates():
         # scanned.)
     ]
     snapshot_img = re.compile(
-        r"<img class='v-snap-shot' src='/account/sites/\{sid\}/snapshot-image'")
+        r"<img class='v-snap-shot' src='/websites/sites/\{sid\}/snapshot-image'")
     for path in sources:
         text = path.read_text(encoding="utf-8")
         if path.name == "site_snapshot.py":

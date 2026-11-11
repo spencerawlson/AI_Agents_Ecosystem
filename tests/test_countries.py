@@ -104,7 +104,7 @@ def test_landing_and_ops_and_site_add_carry_the_full_selector():
     assert "<option value='ca' selected>" in r.text
     assert "Haiti (ht)" in r.text
     # The site-add form: same selector.
-    r = client.get("/account/sites/new")
+    r = client.get("/websites/sites/new")
     assert r.status_code == 200
     assert "<option value='ca' selected>" in r.text
     assert "Japan (jp)" in r.text
@@ -144,14 +144,14 @@ def test_site_add_accepts_any_valid_code_and_rejects_invalid():
     for code, url in (("jp", "https://jp.example.com"),
                       ("ht", "https://ht.example.com"),
                       ("ng", "https://ng.example.com")):
-        r = client.post("/account/sites",
+        r = client.post("/websites/sites",
                         data={"url": url, "country": code,
                               "language": "en"},
                         follow_redirects=False)
         assert r.status_code == 303, (code, r.text)
     sites = store.list_sites(account["id"])
     assert {s["country"] for s in sites} == {"jp", "ht", "ng"}
-    r = client.post("/account/sites",
+    r = client.post("/websites/sites",
                     data={"url": "https://bad.example.com",
                           "country": "xx", "language": "en"})
     assert r.status_code == 400

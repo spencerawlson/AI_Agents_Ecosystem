@@ -8,7 +8,7 @@ output is the on-page summary (site score, GEO score, top findings).
 
 Preview jobs NEVER write the full Markdown report file and never
 expose one: the full report comes only from the paid Analyze job on
-a website page (5 credits, ``POST /account/sites/{site_id}/jobs``).
+a website page (5 credits, ``POST /websites/sites/{site_id}/jobs``).
 Anonymous previews are rate-limited per client IP (see
 ``PREVIEW_PER_IP_PER_HOUR``) so the free endpoint cannot be hammered.
 

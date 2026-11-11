@@ -153,22 +153,22 @@ def test_only_tags_ventoryn_issued_count_as_signed_visits(env):
 
 def test_site_page_shows_snippet_and_status(env):
     _app, client, _store, _account, site = env
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     assert "Ventoryn Analytics" in html and "Not installed" in html
     assert f'data-site=&quot;{site["id"]}&quot;' in html
     assert "/v.js" in html
     _collect(client, site)
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     assert "Receiving data" in html
 
 
 def test_funnel_uses_analytics_then_plausible(env):
     _app, client, _store, _account, site = env
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     assert "install <a href=" in html  # not installed, no Plausible
     _collect(client, site)
     _collect(client, site, name="signup")
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     assert "(Ventoryn Analytics)" in html
     analytics = client.get("/analytics").text
     assert "(Ventoryn Analytics)" in analytics
@@ -188,12 +188,12 @@ def test_check_installation(env, monkeypatch):
     _app, client, _store, _account, site = env
     monkeypatch.setattr("core.site_audit.http_fetch", lambda url: (
         200, f"<head>{snippet(site['id'], 'https://ventoryn.app')}</head>"))
-    r = client.post(f"/account/sites/{site['id']}/analytics/check",
+    r = client.post(f"/websites/sites/{site['id']}/analytics/check",
                     follow_redirects=True)
     assert "snippet is on your home page" in r.text
     monkeypatch.setattr("core.site_audit.http_fetch",
                         lambda url: (200, "<head></head>"))
-    r = client.post(f"/account/sites/{site['id']}/analytics/check",
+    r = client.post(f"/websites/sites/{site['id']}/analytics/check",
                     follow_redirects=True)
     assert "not on your home page yet" in r.text
 
