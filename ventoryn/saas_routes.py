@@ -2521,9 +2521,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
             kind = "ok" if ok == "ok" else "warn"
             notice = (f"<div class='v-notice v-notice-{kind}'>"
                       f"{esc(message)}</div>")
-        code = esc(snippet(site["id"], config.base_url))
-        return (f"<div class='card' id='ventoryn-analytics'>"
-                f"<h2>Ventoryn Analytics</h2>{notice}{status}"
+        install = ""
+        if not va["installed"]:
+            code = esc(snippet(site["id"], config.base_url))
+            install = (
                 f"<p>Add this line inside <code>&lt;head&gt;</code> on every "
                 f"page of {esc(site['host'])}:</p>"
                 f"<pre class='v-snippet'><code>{code}</code></pre>"
@@ -2536,7 +2537,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"<code>script-src</code> and <code>connect-src</code>.</p>"
                 f"<form method='post' action='/websites/sites/{esc(site['id'])}"
                 f"/analytics/check'><button class='btn' type='submit'>"
-                f"Check my installation</button></form></div>")
+                f"Check my installation</button></form>")
+        return (f"<div class='card' id='ventoryn-analytics'>"
+                f"<h2>Ventoryn Analytics</h2>{notice}{status}{install}</div>")
 
     @app.post("/websites/sites/{site_id}/snapshot")
     def snapshot_refresh(request: Request, site_id: str):
