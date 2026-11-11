@@ -4239,14 +4239,9 @@ shows verified conversions only.</p>"""
                     f"<th>Date</th><th></th></tr>{rows}</table></div></div>")
         return out
 
-    @app.get("/alerts", response_class=HTMLResponse)
-    def alerts_page(request: Request):
-        """Everything that needs the owner's attention, in one list."""
-        from ventoryn.alerts import ALERTS_CSS, account_alerts, alert_rows_html
+    def _alerts_for(account) -> list:
+        from ventoryn.alerts import account_alerts
 
-        account, redirect = _need_account(request)
-        if redirect is not None:
-            return redirect
         owned = _owned_business_ids(account)
         pending = len([a for a in state["approvals"].pending()
                        if _approval_visible(account, a, owned)])
@@ -4254,8 +4249,64 @@ shows verified conversions only.</p>"""
         pending += sum(1 for s in _saas_store.list_sites(account["id"])
                        for d in _saas_store.list_social_drafts(s["id"])
                        if d.get("status") == "pending")
-        alerts = account_alerts(_saas_store, account, pending)
-        body = (f"<ul class='v-alerts'>{alert_rows_html(alerts)}</ul>" if alerts else
+        return account_alerts(_saas_store, account, pending)
+
+    @app.get("/alerts/open")
+    def alert_open(request: Request, key: str = ""):
+        """Open an alert: mark it read, go where it points. The target
+        is the alert's own link, looked up server-side — never a URL
+        taken from the request."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        match = next((a for a in _alerts_for(account) if a["key"] == key), None)
+        if match is None:
+            return RedirectResponse("/alerts", status_code=303)
+        _saas_store.mark_alert_read(account["id"], key)
+        return RedirectResponse(match["href"], status_code=303)
+
+    @app.post("/alerts/read")
+    def alert_read(request: Request, key: str = Form("")):
+        from ventoryn.alerts import unread
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        alerts = _alerts_for(account)
+        if any(a["key"] == key for a in alerts):
+            _saas_store.mark_alert_read(account["id"], key)
+            for a in alerts:
+                if a["key"] == key:
+                    a["read"] = True
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"unread": len(unread(alerts))})
+        return RedirectResponse("/alerts", status_code=303)
+
+    @app.post("/alerts/read-all")
+    def alert_read_all(request: Request):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        for a in _alerts_for(account):
+            _saas_store.mark_alert_read(account["id"], a["key"])
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"unread": 0})
+        return RedirectResponse("/alerts", status_code=303)
+
+    @app.get("/alerts", response_class=HTMLResponse)
+    def alerts_page(request: Request):
+        """Everything that needs the owner's attention, in one list —
+        unread first; read ones stay listed, dimmed."""
+        from ventoryn.alerts import ALERTS_CSS, MARK_ALL_FORM, alert_rows_html, unread
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        alerts = _alerts_for(account)
+        alerts = unread(alerts) + [a for a in alerts if a.get("read")]
+        head = (f"<div class='bell-head'><p class='muted'>{len(unread(alerts))} unread.</p>"
+                f"{MARK_ALL_FORM if unread(alerts) else ''}</div>")
+        body = (f"{head}<ul class='v-alerts'>{alert_rows_html(alerts)}</ul>" if alerts else
                 "<div class='card'><p>Nothing needs your attention right now.</p></div>")
         return _operator_page(
             "Alerts", f"<p class='muted'>What needs your attention, across your "

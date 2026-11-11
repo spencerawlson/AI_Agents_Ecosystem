@@ -545,6 +545,12 @@ CREATE TABLE IF NOT EXISTS saas_connection_oauth_states (
     code_verifier TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_alert_reads (
+    account_id TEXT NOT NULL,
+    alert_key TEXT NOT NULL,
+    read_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, alert_key)
+);
 CREATE TABLE IF NOT EXISTS saas_campaigns (
     id TEXT PRIMARY KEY,
     site_id TEXT NOT NULL,
@@ -1864,6 +1870,20 @@ class SaasStore:
                 " link_url, campaign_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (draft_id, site_id, kind, text, link_url, campaign_id, _iso(_now())))
         return self.get_social_draft(draft_id)
+
+    # -- alerts read state ---------------------------------------------------
+    def mark_alert_read(self, account_id: str, key: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO saas_alert_reads (account_id, alert_key, read_at)"
+                " VALUES (?, ?, ?)", (account_id, str(key)[:200], _iso(_now())))
+
+    def read_alert_keys(self, account_id: str) -> set[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT alert_key FROM saas_alert_reads WHERE account_id = ?",
+                (account_id,)).fetchall()
+        return {r[0] for r in rows}
 
     # -- campaigns ----------------------------------------------------------
     def create_campaign(self, site_id: str, account_id: str, *, days: int,

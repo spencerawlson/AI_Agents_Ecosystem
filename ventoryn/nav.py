@@ -223,6 +223,13 @@ SIDEBAR_CSS = """
   width: min(380px, 86vw); background: #fff; border: 1px solid var(--v-line, #e7e3f3);
   border-radius: 14px; box-shadow: 0 18px 48px rgba(11, 14, 30, .22); padding: 12px; }
 .bell-panel h4 { margin: 2px 4px 10px; font-size: 14px; }
+.bell-head { display: flex; align-items: baseline; justify-content: space-between; }
+.v-alert-actions { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.v-alert-read, .v-alert-all { margin: 0; display: inline; }
+.v-alert-mark { border: 0; background: none; padding: 0; min-height: 0; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; color: #6b6684; text-decoration: underline; }
+.v-alert-mark:hover { color: #6d28d9; }
+.v-alert.is-read { opacity: .55; border-left-color: #c9c4da; }
 .bell-panel .v-alerts { max-height: 360px; overflow: auto; }
 .bell-panel .v-alert { font-size: 13px; padding: 10px 12px; flex-direction: column;
   align-items: flex-start; gap: 6px; margin-bottom: 8px; }
@@ -421,6 +428,12 @@ def autopilot_switch_html(site_id: str, on: bool, label: str,
 BELL_JS = "<script>(function(){var b=document.getElementById('bell-btn'),p=document.getElementById('bell-panel');if(!b||!p)return;function close(){p.hidden=true;b.setAttribute('aria-expanded','false');}b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var open=p.hidden;p.hidden=!open;b.setAttribute('aria-expanded',String(open));});document.addEventListener('click',function(e){if(!p.hidden&&!p.contains(e.target)&&!b.contains(e.target))close();});document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});})();</script>"
 
 
+def _alerts_js() -> str:
+    from ventoryn.alerts import ALERTS_JS
+
+    return ALERTS_JS
+
+
 def _bell_html(alerts, badge_html: str) -> str:
     """The notification bell. With ``alerts`` (a list), it shows their
     count and opens a panel with the latest ones and a link to /alerts.
@@ -428,17 +441,19 @@ def _bell_html(alerts, badge_html: str) -> str:
     if alerts is None:
         return (f"<a class='notification' href='/approvals' aria-label='Approvals'>"
                 f"{icon('bell', 23)}{badge_html}</a>")
-    from ventoryn.alerts import alert_rows_html
+    from ventoryn.alerts import MARK_ALL_FORM, alert_rows_html, unread
 
-    n = len(alerts)
+    new = unread(alerts)
+    n = len(new)
     badge = f"<b class='header-badge'>{n}</b>" if n else ""
-    body = (f"<ul class='v-alerts'>{alert_rows_html(alerts, 6)}</ul>" if n else
-            "<p class='bell-empty'>Nothing needs your attention.</p>")
+    body = (f"<ul class='v-alerts'>{alert_rows_html(new, 6)}</ul>" if n else
+            "<p class='bell-empty'>You're all caught up.</p>")
     return (f"<div class='bell-menu'>"
             f"<a class='notification' id='bell-btn' href='/alerts' "
             f"aria-label='Alerts ({n})' aria-haspopup='true' aria-expanded='false' "
             f"aria-controls='bell-panel'>{icon('bell', 23)}{badge}</a>"
-            f"<div class='bell-panel' id='bell-panel' hidden><h4>Alerts</h4>{body}"
+            f"<div class='bell-panel' id='bell-panel' hidden>"
+            f"<div class='bell-head'><h4>Alerts</h4>{MARK_ALL_FORM if n else ''}</div>{body}"
             f"<a class='bell-all' href='/alerts'>See all alerts</a></div></div>")
 
 
@@ -483,4 +498,4 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"</div></div>"
         f"</div>"
         f"</header>" + REVENUE_TOGGLE_JS + SWITCH_JS
-        + (BELL_JS if alerts is not None else ""))
+        + (BELL_JS + _alerts_js() if alerts is not None else ""))
