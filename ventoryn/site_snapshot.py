@@ -798,16 +798,22 @@ SNAPSHOT_CSS = """
 .v-snap-list .v.v-snap-warn { color: var(--v-amber); }
 .v-snap-list .v.v-snap-na { color: var(--v-muted); font-weight: 500; }
 .v-snap-list .n { display: block; font-size: 12px; color: var(--v-muted); font-weight: 400; }
-/* "How to fix it" tip: a small "?" next to a flagged value. The tooltip
-  opens on hover (desktop) and on focus (keyboard, and tap on mobile — the
-  button takes focus when tapped). No JavaScript. The tooltip stays open
-  while the pointer or the focus is anywhere inside it, so the link and the
-  generated draft inside can be used. */
+/* "How to fix it" tip: a green info badge next to a flagged value — white
+  "i" on the same deep emerald as the Revenue card on Overview
+  (linear-gradient #064e3b -> #065f46). The tooltip opens on hover
+  (desktop) and on focus (keyboard, and tap on mobile — the button takes
+  focus when tapped). No JavaScript. The tooltip stays open while the
+  pointer or the focus is anywhere inside it, so the link and the
+  generated draft inside can be used.
+  NOTE: the platform's global `button` rule sets min-height: 44px — the
+  badge must override it (min-height/min-width: 0) or it renders as a
+  tall oval instead of a circle. */
 .v-snap-tipwrap { position: relative; display: inline-block; }
 .v-snap-tip { display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; margin-left: 6px; padding: 0; border: 1px solid currentColor;
-  border-radius: 50%; background: transparent; color: inherit; font-size: 11px;
-  font-weight: 700; line-height: 1; cursor: pointer; vertical-align: 1px; }
+  width: 18px; height: 18px; min-width: 0; min-height: 0; margin-left: 6px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: linear-gradient(135deg, #064e3b, #065f46); color: #fff;
+  font-size: 12px; font-weight: 800; line-height: 1; cursor: pointer; vertical-align: middle; }
 .v-snap-tipbox { display: none; position: absolute; right: 0; top: calc(100% + 6px);
   z-index: 5; width: min(300px, calc(100vw - 48px)); padding: 10px 12px;
   background: var(--v-card); border: 1px solid var(--v-line); border-radius: 10px;
@@ -852,7 +858,7 @@ def _list(items) -> str:
             value += (
                 f"<span class='v-snap-tipwrap'>"
                 f"<button type='button' class='v-snap-tip' aria-label='How to fix: "
-                f"{html.escape(i['label'])}' aria-describedby='{tid}'>?</button>"
+                f"{html.escape(i['label'])}' aria-describedby='{tid}'>i</button>"
                 f"<span class='v-snap-tipbox' role='tooltip' id='{tid}'>{tip_html}</span>"
                 f"</span>")
         note = (f"<span class='n'>{html.escape(i['note'])}</span>" if i.get("note") else "")
