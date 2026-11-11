@@ -91,6 +91,16 @@ _PATHS: dict[str, str] = {
     ),
     "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>',
     "close": '<path d="M6 6l12 12M18 6L6 18"/>',
+    # eye (revenue shown) / eye with a slash (revenue hidden)
+    "eye": (
+        '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/>'
+        '<circle cx="12" cy="12" r="3"/>'
+    ),
+    "eye_off": (
+        '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/>'
+        '<circle cx="12" cy="12" r="3"/>'
+        '<path d="M3 3l18 18"/>'
+    ),
     "bell": (
         '<path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/>'
         '<path d="M10 20a2.2 2.2 0 0 0 4 0"/>'
