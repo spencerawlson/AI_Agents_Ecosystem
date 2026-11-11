@@ -510,17 +510,20 @@ def _list(items) -> str:
 
 
 def render_card(site: dict, snap: dict | None) -> str:
+    from ventoryn.icons import icon
+
     sid = html.escape(site["id"])
+    back = f"<a class='v-back' href='/portfolio'>{icon('arrow_left', 15)} Websites</a>"
     refresh = (f"<form method='post' action='/websites/sites/{sid}/snapshot' style='margin:0'>"
                f"<button class='btn' type='submit'>Refresh snapshot</button></form>")
     if snap is None or (snap["status"] == "running" and not snap.get("data")):
-        return ("<div class='card' id='site-snapshot'><h2>Website snapshot</h2>"
+        return (f"{back}<div class='card' id='site-snapshot'><h2>Website snapshot</h2>"
                 "<p class='muted'>Looking at your site — preview, specs, traffic and where it "
                 "appears online. This takes a few seconds.</p>"
                 "<script>setTimeout(function(){location.reload()},6000)</script></div>")
     data = snap.get("data") or {}
     if snap["status"] == "failed" or "error" in data:
-        return (f"<div class='card' id='site-snapshot'><h2>Website snapshot</h2>"
+        return (f"{back}<div class='card' id='site-snapshot'><h2>Website snapshot</h2>"
                 f"<p class='muted'>The snapshot could not finish "
                 f"({html.escape(data.get('error', 'unknown error'))}).</p>{refresh}</div>")
     p = data["preview"]
@@ -537,7 +540,7 @@ def render_card(site: dict, snap: dict | None) -> str:
     preview = (f"<div class='card'><h2>Preview</h2>{shot}"
                f"<p><strong>{html.escape(p.get('title') or site['host'])}</strong></p>"
                f"<p class='muted'>{html.escape(p.get('description') or 'No description set.')}</p></div>")
-    return (f"<div id='site-snapshot'><div style='display:flex;justify-content:space-between;"
+    return (f"{back}<div id='site-snapshot'><div style='display:flex;justify-content:space-between;"
             f"align-items:center;gap:12px;flex-wrap:wrap'><h2 style='margin:0'>Website snapshot</h2>"
             f"<span class='muted'>Checked {when} UTC{running}</span>{refresh}</div>"
             f"<div class='v-snap-grid' style='margin-top:12px'>{preview}"
