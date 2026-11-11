@@ -26,8 +26,9 @@ def test_site_card_carries_the_funnel_and_link():
     html = client.get("/portfolio").text
     # One row per website: key numbers here, full funnel on its page.
     assert "Visitors (30 days)" in html and "Paying customers" in html
-    assert (f"href='https://shop.example.com' target='_blank' "
-            f"rel='noopener noreferrer'>Open</a>" in html)
+    # Open goes to the website's page in Ventoryn, never off-site.
+    assert f"<td><a href='/websites/sites/{site['id']}'>Open</a></td>" in html
+    assert "href='https://shop.example.com' target='_blank'" not in html
     assert (f"<a class='v-site-name' href='/websites/sites/{site['id']}'>"
             f"shop.example.com</a>" in html)
 
@@ -53,3 +54,12 @@ def test_my_account_no_longer_lists_websites_or_jobs():
     assert "Your websites" not in main and "Recent jobs" not in main
     assert "shop.example.com" not in main
     assert "Add a website" in html  # the plan card keeps the way in
+
+
+def test_website_page_highlights_websites_not_my_account():
+    client, store, account = _client()
+    site = store.create_site(account["id"], "https://shop.example.com")
+    nav = client.get(f"/websites/sites/{site['id']}").text.split("<main", 1)[0]
+    # Websites is highlighted and still links back to the list.
+    assert "<a class='nav-item active' aria-current='location' href='/portfolio'>" in nav
+    assert "aria-current='page'" not in nav  # My account is not the current page

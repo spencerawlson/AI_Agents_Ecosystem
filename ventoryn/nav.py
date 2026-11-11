@@ -328,6 +328,11 @@ def _nav_item_html(key: str, label: str, href: str,
     if key == current:
         return (f"<span class='nav-item active' aria-current='page'>"
                 f"{inner}</span>")
+    if current == f"{key}:sub":
+        # A page inside this section (a website's own page under
+        # Websites): highlighted, and still a link back to the section.
+        return (f"<a class='nav-item active' aria-current='location' "
+                f"href='{esc(href)}'>{inner}</a>")
     return f"<a class='nav-item' href='{esc(href)}'>{inner}</a>"
 
 

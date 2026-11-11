@@ -221,7 +221,8 @@ def _page(title: str, inner: str, account: dict | None = None,
     from ventoryn.nav import platform_head_html, sidebar_html
 
     platform_current = {"account": "my-account",
-                        "subscribe": "my-account"}.get(current)
+                        "subscribe": "my-account",
+                        "websites": "websites:sub"}.get(current)
     sb = sidebar_html(platform_current, is_operator,
                       verified=verified,
                       pending_approvals=pending_approvals,
@@ -719,7 +720,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         if not config.x_oauth_configured or not config.app_registered("x"):
             return HTMLResponse(
                 _signed_page(site["url"],
@@ -727,7 +728,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "registration for it is still needed. No account "
                       "was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         verifier, challenge = pkce_pair()
         state = store.create_connection_oauth_state(site_id, "x", verifier)
@@ -768,7 +769,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
                       f"<p><a href='/websites/sites/{esc(site['id'])}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         access_token = tokens.get("access_token", "")
         info = x_userinfo(access_token) if access_token else {}
@@ -817,7 +818,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         if not config.facebook_configured \
                 or not config.app_registered("facebook"):
             return HTMLResponse(
@@ -826,7 +827,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "Meta app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         state = store.create_connection_oauth_state(site_id, "facebook",
                                                     "")
@@ -865,7 +866,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
                       f"<p><a href='/websites/sites/{esc(site['id'])}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         user_token = long_lived.get("access_token") \
             or tokens.get("access_token") or ""
@@ -886,7 +887,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
                       f"<p><a href='/websites/sites/{esc(site['id'])}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         if not pages:
             return HTMLResponse(
@@ -896,7 +897,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     "create or manage a Page first, then connect "
                     "again.</p><p><a href='/websites/sites/"
                     f"{esc(site_id)}'>Back</a>.</p>",
-                    account, current="account"),
+                    account, current="websites"),
                 status_code=400)
         if len(pages) == 1:
             try:
@@ -907,7 +908,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     _signed_page(site["url"],
                           f"<p>{esc(str(exc))}</p>"
                           f"<p><a href='/websites/sites/{esc(site['id'])}'>"
-                          "Back</a>.</p>", account, current="account"),
+                          "Back</a>.</p>", account, current="websites"),
                     status_code=400)
         options = "".join(
             f"<option value='{esc(p['id'])}'>{esc(p['name'])}</option>"
@@ -922,7 +923,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "<p><button class='btn btn-primary' type='submit'>"
                  "Connect this Page</button></p></form></div>")
         return HTMLResponse(_signed_page(site["url"], inner, account,
-                                         current="account"))
+                                         current="websites"))
 
     @app.post("/account/auth/facebook/page")
     def facebook_page_pick(request: Request, site_id: str = Form(""),
@@ -966,7 +967,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         if not config.facebook_configured \
                 or not config.app_registered("instagram"):
             return HTMLResponse(
@@ -975,7 +976,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "Meta app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         state = store.create_connection_oauth_state(site_id, "instagram",
                                                     "")
@@ -1014,7 +1015,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
                       f"<p><a href='/websites/sites/{esc(site['id'])}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         user_token = long_lived.get("access_token") \
             or tokens.get("access_token") or ""
@@ -1025,7 +1026,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
                       f"<p><a href='/websites/sites/{esc(site['id'])}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         if not ig_user_id:
             return HTMLResponse(
@@ -1036,7 +1037,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     "Meta Business Suite first, then connect "
                     "again.</p><p><a href='/websites/sites/"
                     f"{esc(site_id)}'>Back</a>.</p>",
-                    account, current="account"),
+                    account, current="websites"),
                 status_code=400)
         ig_tokens = dict(tokens)
         ig_tokens["access_token"] = user_token
@@ -1104,7 +1105,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         if text.strip():
             store.create_social_draft(site_id, "x", text.strip(),
                                       link_url.strip())
@@ -1120,20 +1121,20 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"), status_code=400)
+                      account, current="websites"), status_code=400)
         posted, message = post_to_x(store, config, account, site_id, draft_id)
         inner = (f"<p>{esc(message)}</p>"
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(
-            _signed_page(site["url"], inner, account, current="account"),
+            _signed_page(site["url"], inner, account, current="websites"),
             status_code=200 if posted else 400)
 
     @app.post("/websites/sites/{site_id}/social/x/drafts/{draft_id}/reject")
@@ -1145,7 +1146,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         store.decide_social_draft(draft_id, "rejected")
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
@@ -1161,7 +1162,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         if text.strip():
             store.create_social_draft(site_id, "facebook", text.strip(),
                                       link_url.strip())
@@ -1177,14 +1178,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=400)
         posted, message = post_to_facebook(store, config, account, site_id,
                                            draft_id)
@@ -1192,7 +1193,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(
-            _signed_page(site["url"], inner, account, current="account"),
+            _signed_page(site["url"], inner, account, current="websites"),
             status_code=200 if posted else 400)
 
     @app.post("/websites/sites/{site_id}/social/facebook/drafts/{draft_id}/reject")
@@ -1204,7 +1205,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         store.decide_social_draft(draft_id, "rejected")
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
@@ -1220,7 +1221,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         if text.strip():
             store.create_social_draft(site_id, "instagram", text.strip(),
                                       link_url.strip())
@@ -1236,14 +1237,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=400)
         posted, message = post_to_instagram(store, config, account, site_id,
                                             draft_id)
@@ -1251,7 +1252,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(
-            _signed_page(site["url"], inner, account, current="account"),
+            _signed_page(site["url"], inner, account, current="websites"),
             status_code=200 if posted else 400)
 
     @app.post("/websites/sites/{site_id}/social/instagram/drafts/{draft_id}/reject")
@@ -1263,7 +1264,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(
                 _signed_page("Website", "<p>Website not found.</p>",
-                            account, current="account"), status_code=404)
+                            account, current="websites"), status_code=404)
         store.decide_social_draft(draft_id, "rejected")
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
@@ -1648,7 +1649,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "</select>"
                  "<p><button class='btn btn-primary' type='submit'>"
                  "Add website</button></p></form></div>")
-        return _signed_page("Add a website", inner, account, current="account")
+        return _signed_page("Add a website", inner, account, current="websites")
 
     @app.post("/websites/sites")
     def site_create(request: Request, url: str = Form(...),
@@ -1662,7 +1663,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page("Add a website",
                       f"<p>{esc(exc)}</p><p><a href='/websites/sites/new'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         # The admin's recent-activity feed: a real website was added.
         store.record_activity_event(account["id"], "site-added",
@@ -1682,7 +1683,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         # Backfill connection rows for kinds added after this site was
         # created (facebook / instagram) — older sites gain them here.
         store.ensure_connections(site_id)
@@ -2119,7 +2120,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <h2>Connections</h2>{conn_rows}
 {privacy_card}
 {signature_card}"""
-        return _signed_page(site["url"], inner, account, current="account")
+        return _signed_page(site["url"], inner, account, current="websites")
 
     @app.post("/websites/sites/{site_id}/connections/{kind}")
     def connection_update(request: Request, site_id: str, kind: str,
@@ -2133,7 +2134,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         if kind == "reddit":
             return HTMLResponse(
                 _signed_page(site["url"],
@@ -2141,7 +2142,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       "no longer offers the free access this would need. "
                       "No account was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=400)
         if kind in ("x", "facebook", "instagram"):
             # OAuth connections use the Connect button on this page,
@@ -2153,7 +2154,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"<p>Use the \"Connect with {label}\" link to "
                       "connect this account.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=400)
         if kind == "plausible":
             raw = (store.get_connection(site_id, "plausible") or {}
@@ -2189,7 +2190,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                     "to see real paying customers here.", detail)
         else:
             return HTMLResponse(
-                _signed_page(site["url"], "<p>Unknown connection.</p>", account, current="account"),
+                _signed_page(site["url"], "<p>Unknown connection.</p>", account, current="websites"),
                 status_code=400)
         return RedirectResponse(_integrations_return(return_to)
                                 or f"/websites/sites/{site_id}",
@@ -2208,13 +2209,13 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/websites/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         # A checkbox sends "on" when ticked and nothing at all when
         # unticked — the three settings are independent.
@@ -2235,13 +2236,13 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         ok, err = _fresh_totp_ok(account, totp_code)
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(err)}</p><p><a href='/websites/sites/{esc(site_id)}'>"
-                      "Back</a>.</p>", account, current="account"),
+                      "Back</a>.</p>", account, current="websites"),
                 status_code=400)
         conn = store.get_connection(site_id, kind) or {}
         raw = conn.get("_detail_raw") or {}
@@ -2258,7 +2259,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                  f"{esc(note)}</p>"
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
-        return HTMLResponse(_signed_page(site["url"], inner, account, current="account"))
+        return HTMLResponse(_signed_page(site["url"], inner, account, current="websites"))
 
     def _job_options() -> str:
         """Every job, with its credit cost; a job this server cannot run
@@ -2389,7 +2390,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         store.set_site_autopilot(site_id, on == "1")
         if "application/json" in request.headers.get("accept", ""):
             return JSONResponse({"on": on == "1"})
@@ -2409,11 +2410,11 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         cost = CREDIT_COSTS.get(job_type)
         if cost is None:
             return HTMLResponse(
-                _signed_page(site["url"], "<p>Unknown job type.</p>", account, current="account"),
+                _signed_page(site["url"], "<p>Unknown job type.</p>", account, current="websites"),
                 status_code=400)
         inputs = {"keywords": keywords[:300], "community": community[:300]}
         if export is not None and job_type == "social_report":
@@ -2428,7 +2429,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"],
                       f"<p>{esc(exc)}</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=code)
         is_op = config.is_operator(account["email"])
         balance = store.credit_balance(account["id"])
@@ -2439,7 +2440,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"{balance}. Nothing ran and nothing was charged. "
                       f"Top up by subscribing on the "
                       f"<a href='/account/subscribe'>Subscribe</a> page.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=402)
         # Charge first (atomic — the job row is created with the charge),
         # run second; a failed run is refunded, so nobody pays for work
@@ -2451,7 +2452,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(exc)}</p><p><a href='/websites/sites/"
-                      f"{esc(site_id)}'>Back</a>.</p>", account, current="account"),
+                      f"{esc(site_id)}'>Back</a>.</p>", account, current="websites"),
                 status_code=402)
         try:
             import asyncio
@@ -2488,7 +2489,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"],
                       detail +
                       f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=500)
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
@@ -2547,7 +2548,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         # Cooldown + one-at-a-time are enforced inside start().
         site_snapshot.start(store, site, REPORTS_DIR)
         return RedirectResponse(f"/websites/sites/{site_id}#site-snapshot",
@@ -2585,7 +2586,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         ok, message = await asyncio.to_thread(check_install, site)
         q = _up.quote(("ok:" if ok else "no:") + message, safe="")
         return RedirectResponse(
@@ -2601,7 +2602,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         site = store.get_site(site_id)
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
-                                      account, current="account"), status_code=404)
+                                      account, current="websites"), status_code=404)
         try:
             amount_cents = int(round(float(amount_usd) * 100))
             if amount_cents <= 0:
@@ -2611,7 +2612,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"],
                       "<p>Enter a sale amount in dollars, e.g. 19.00.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
-                      account, current="account"),
+                      account, current="websites"),
                 status_code=400)
         store.record_conversion(site_id, amount_cents, "usd", "manual")
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
