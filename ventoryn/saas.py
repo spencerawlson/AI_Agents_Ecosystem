@@ -198,6 +198,24 @@ class SaasConfig:
     #: only to size a conservative spend cap per site per calendar
     #: month. VENTORYN_X_MONTHLY_BUDGET_USD overrides.
     x_monthly_budget_usd: float = 5.0
+    #: Meta (Facebook/Instagram) OAuth app credentials
+    #: (VENTORYN_FACEBOOK_APP_ID / VENTORYN_FACEBOOK_APP_SECRET).
+    #: One Meta app covers Facebook + Instagram. Empty means "not
+    #: configured": the Facebook/Instagram adapters refuse honestly
+    #: instead of failing or faking a connection.
+    facebook_app_id: str = ""
+    facebook_app_secret: str = ""
+    #: Social publishing is DISABLED BY DEFAULT. The operator turns it
+    #: on (VENTORYN_SOCIAL_PUBLISHING_ENABLED=1) only when the
+    #: provider apps are registered, reviewed, and ready. The
+    #: Facebook/Instagram approve-and-post paths read this at publish
+    #: time, not import time.
+    social_publishing_enabled: bool = False
+    #: Social spend caps in USD (env-overridable). See
+    #: ventoryn/social_costs.py for what they bound.
+    social_daily_cap_usd: float = 10.00
+    social_account_monthly_cap_usd: float = 50.00
+    social_site_monthly_cap_usd: float = 25.00
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "SaasConfig":
@@ -231,6 +249,16 @@ class SaasConfig:
             x_client_secret=env.get("VENTORYN_X_CLIENT_SECRET", ""),
             x_monthly_budget_usd=_safe_float(
                 env.get("VENTORYN_X_MONTHLY_BUDGET_USD"), 5.0),
+            facebook_app_id=env.get("VENTORYN_FACEBOOK_APP_ID", ""),
+            facebook_app_secret=env.get("VENTORYN_FACEBOOK_APP_SECRET", ""),
+            social_publishing_enabled=env.get(
+                "VENTORYN_SOCIAL_PUBLISHING_ENABLED", "") == "1",
+            social_daily_cap_usd=_safe_float(
+                env.get("VENTORYN_SOCIAL_DAILY_CAP_USD"), 10.00),
+            social_account_monthly_cap_usd=_safe_float(
+                env.get("VENTORYN_SOCIAL_ACCOUNT_MONTHLY_CAP_USD"), 50.00),
+            social_site_monthly_cap_usd=_safe_float(
+                env.get("VENTORYN_SOCIAL_SITE_MONTHLY_CAP_USD"), 25.00),
         )
 
     def app_registered(self, kind: str) -> bool:
@@ -242,6 +270,12 @@ class SaasConfig:
             return self.reddit_app_registered
         if kind == "x":
             return self.x_app_registered
+        if kind in ("facebook", "instagram"):
+            # One Meta app covers Facebook + Instagram; "registered"
+            # here means the app id + secret are configured. Business
+            # Verification + App Review are the further Meta gates —
+            # see docs/implementation/META_APPROVAL_STEPS.md.
+            return self.facebook_configured
         return True
 
     @property
@@ -275,6 +309,12 @@ class SaasConfig:
     @property
     def x_oauth_configured(self) -> bool:
         return bool(self.x_client_id and self.x_client_secret)
+
+    @property
+    def facebook_configured(self) -> bool:
+        """True only when the Meta (Facebook/Instagram) app
+        credentials are set. Empty means "not configured"."""
+        return bool(self.facebook_app_id and self.facebook_app_secret)
 
 
 def default_saas_db_path() -> Path | None:
@@ -523,6 +563,15 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
     cost_usd_cents INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_social_spend (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    amount_usd REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 #: Columns added to tables that already exist on a deployed state
@@ -554,6 +603,8 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("saas_conversions", "attribution", "TEXT NOT NULL DEFAULT 'unattributed'"),
     ("saas_conversions", "signature_tag", "TEXT NOT NULL DEFAULT ''"),
     ("saas_conversions", "action_id", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_conversions", "stripe_customer_id", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_conversions", "customer_email", "TEXT NOT NULL DEFAULT ''"),
     # Test/live separation + refund/dispute reconciliation (the
     # pilot's customer-acquisition count must never be inflated by
     # Stripe test-mode noise, and must drop a sale that is later
@@ -593,6 +644,12 @@ DEFAULT_CONNECTIONS = (
     ("x", "not_connected",
      "Not connected — an X app registration is needed before "
      "Ventoryn can post or reply as you."),
+    ("facebook", "not_connected",
+     "Not connected — a Meta app registration is needed before "
+     "Ventoryn can post to your Page."),
+    ("instagram", "not_connected",
+     "Not connected — a Meta app registration is needed before "
+     "Ventoryn can post to your Business account."),
     ("plausible", "not_connected",
      "Not connected — add your Plausible site domain and API key to "
      "see real visitors here."),
@@ -616,6 +673,12 @@ CONNECTION_SCOPES: dict[str, str] = {
     # X OAuth 2.0: post + read. Never DMs (X has no DM scope in the
     # free tier and Ventoryn never asks for it).
     "x": "tweet.read tweet.write users.read offline.access",
+    # Facebook: list Pages, read engagement, publish to a Page.
+    # No comment/reply permission — the pilot posts only.
+    "facebook": "pages_show_list pages_read_engagement pages_manage_posts",
+    # Instagram: read the Business account, publish to it. No DM or
+    # messaging scope — Ventoryn never asks for it.
+    "instagram": "instagram_business_basic instagram_business_content_publish",
     # Plausible API key: read-only stats for the site.
     "plausible": "stats:read",
     # Stripe sales: the customer's own webhook — read payments only.
@@ -636,6 +699,20 @@ CONNECTION_CONSENT: dict[str, str] = {
           "anything else on X. Nothing is published without your "
           "approval first. X's API is paid and rate-limited, so "
           "posting on X is slower and may cost extra."),
+    "facebook": ("Ventoryn can publish posts to your Facebook Page "
+                 "as you. It cannot send direct messages, change your "
+                 "Page settings, or do anything else on Facebook. "
+                 "Nothing is published without your approval first. "
+                 "Posting to a customer's Page needs Meta's Business "
+                 "Verification + App Review first — until that clears, "
+                 "connecting works only for the operator's own Pages."),
+    "instagram": ("Ventoryn can publish posts to your Instagram "
+                  "Business account as you. It cannot send direct "
+                  "messages or do anything else on Instagram. Nothing "
+                  "is published without your approval first. Caption "
+                  "links are plain text, not clickable — the link in "
+                  "a post is not tappable. Posting needs Meta's "
+                  "Business Verification + App Review first."),
     "plausible": ("Ventoryn can read visitor counts for your site from "
                   "Plausible. It cannot change your Plausible account "
                   "or see any other site on it."),
@@ -648,7 +725,7 @@ CONNECTION_CONSENT: dict[str, str] = {
 #: Kinds whose connection needs the operator to register an OAuth
 #: app in the provider's developer console first (Spencer's step).
 #: Until then the connection honestly says so and cannot be used.
-APP_REGISTRATION_KINDS = frozenset({"reddit", "x"})
+APP_REGISTRATION_KINDS = frozenset({"reddit", "x", "facebook", "instagram"})
 
 #: What happens to the provider token on Disconnect, per kind.
 #: reddit/x are revoked by an HTTP call to the provider (see
@@ -658,6 +735,12 @@ APP_REGISTRATION_KINDS = frozenset({"reddit", "x"})
 CONNECTION_REVOKE_NOTE: dict[str, str] = {
     "reddit": "The Reddit token is revoked at Reddit when you disconnect.",
     "x": "The X token is revoked at X when you disconnect.",
+    "facebook": ("Meta has no API to revoke a Page token — remove "
+                 "Ventoryn in your Facebook Settings > Business "
+                 "integrations after disconnecting."),
+    "instagram": ("Meta has no API to revoke an Instagram token — "
+                  "remove Ventoryn in your Facebook Settings > Business "
+                  "integrations after disconnecting."),
     "plausible": ("Plausible has no API to delete a key — remove this "
                   "key in your Plausible dashboard after disconnecting."),
     "stripe_sales": ("Remove the webhook endpoint in your Stripe "
@@ -1256,6 +1339,25 @@ class SaasStore:
                     (_new_id(), site_id, kind, status, note, now))
         return self.get_site(site_id)
 
+    def ensure_connections(self, site_id: str) -> None:
+        """Backfill connection rows for kinds added after this site
+        was created (e.g. facebook / instagram, added in Phase 2).
+        New sites get every kind at creation; older sites gain the
+        missing ones here, still not_connected, on first view — so
+        the Connections list never silently omits a network."""
+        existing = {c["kind"] for c in self.get_connections(site_id)}
+        missing = [(k, s, n) for k, s, n in DEFAULT_CONNECTIONS
+                   if k not in existing]
+        if not missing:
+            return
+        now = _iso(_now())
+        with self._lock, self._conn:
+            for kind, status, note in missing:
+                self._conn.execute(
+                    "INSERT INTO saas_connections (id, site_id, kind, status,"
+                    " note, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (_new_id(), site_id, kind, status, note, now))
+
     def set_revenue_show(self, site_id: str, show: bool) -> None:
         """The customer's revenue-AMOUNT display choice ("Show my
         revenue on Ventoryn"). OFF hides every dollar figure for the
@@ -1399,6 +1501,8 @@ class SaasStore:
                           attribution: str = "unattributed",
                           signature_tag: str = "",
                           action_id: str = "",
+                          stripe_customer_id: str = "",
+                          customer_email: str = "",
                           livemode: bool = True,
                           payment_intent_id: str = "") -> dict | None:
         """Record one paying customer. Returns None when the same Stripe
@@ -1408,7 +1512,11 @@ class SaasStore:
         otherwise "unattributed" — never guessed. `livemode=False`
         (a Stripe TEST MODE event) is still recorded — never silently
         dropped — but is excluded from every real count and revenue
-        total (see list_conversions / paying_customer_count)."""
+        total (see list_conversions / paying_customer_count).
+        `stripe_customer_id` / `customer_email` are the identity a
+        real Stripe event carries; the owner-typed manual fallback
+        passes none of them, so it can never count as a verified
+        customer (see verified_customer_count)."""
         if stripe_event_id:
             with self._lock:
                 seen = self._conn.execute(
@@ -1421,11 +1529,13 @@ class SaasStore:
             self._conn.execute(
                 "INSERT INTO saas_conversions (id, site_id, amount_cents,"
                 " currency, source, stripe_event_id, attribution,"
-                " signature_tag, action_id, livemode, payment_intent_id,"
+                " signature_tag, action_id, stripe_customer_id,"
+                " customer_email, livemode, payment_intent_id,"
                 " created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (conv_id, site_id, amount_cents, currency, source,
                  stripe_event_id, attribution, signature_tag, action_id,
+                 stripe_customer_id, customer_email,
                  int(bool(livemode)), payment_intent_id, _iso(_now())))
         return {"id": conv_id, "site_id": site_id,
                 "amount_cents": amount_cents, "currency": currency,
@@ -1496,6 +1606,25 @@ class SaasStore:
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM saas_conversions WHERE site_id = ?"
                 " AND livemode != 0 AND refunded_at = '' AND disputed_at = ''",
+                (site_id,)).fetchone()
+        return int(row[0])
+
+    def verified_customer_count(self, site_id: str) -> int:
+        """Distinct VERIFIED paying customers for a site: one per
+        Stripe customer id (or email when no id was carried), counted
+        only from real-mode Stripe events (livemode = 1) with an
+        identity present, and never from the owner-typed manual
+        fallback (source "manual" — the owner's word, not a Stripe
+        payment). The same Stripe customer paying twice counts once.
+        This is the number the Founding Customer goal counts down from."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(DISTINCT COALESCE("
+                " NULLIF(stripe_customer_id, ''),"
+                " NULLIF(customer_email, '')))"
+                " FROM saas_conversions WHERE site_id = ?"
+                " AND source != 'manual' AND livemode = 1"
+                " AND (stripe_customer_id != '' OR customer_email != '')",
                 (site_id,)).fetchone()
         return int(row[0])
 
@@ -1766,6 +1895,60 @@ class SaasStore:
                 " WHERE site_id = ? AND created_at >= ?",
                 (site_id, _iso(month_start))).fetchone()
         return int(row[0]) / 100
+
+    def record_social_spend(self, account_id: str, site_id: str,
+                            provider: str, draft_id: str,
+                            amount_usd: float) -> dict:
+        """Record provider spend for one CONFIRMED published post.
+        Only the publish path calls this, and only after the provider
+        confirmed the post — a failed or ambiguous publish records
+        nothing."""
+        spend_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_social_spend (id, account_id, site_id,"
+                " provider, draft_id, amount_usd, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (spend_id, account_id, site_id, provider, draft_id,
+                 float(amount_usd), _iso(_now())))
+        return {"id": spend_id, "account_id": account_id,
+                "site_id": site_id, "provider": provider,
+                "draft_id": draft_id, "amount_usd": float(amount_usd)}
+
+    def social_spend_in_period(self, since_iso: str,
+                               account_id: str | None = None,
+                               site_id: str | None = None) -> float:
+        """Total recorded social spend since `since_iso` (ISO UTC),
+        optionally scoped to one account or one site. Unscoped it is
+        the platform-wide total — the global daily cap.
+
+        The total covers BOTH spend tables: saas_social_spend (the
+        Facebook/Instagram publish path) AND saas_x_post_log (X posts,
+        recorded in whole cents by post_to_x) — otherwise the caps
+        would be blind to real X spend. The X log carries no
+        account_id, so the per-account scope joins it to saas_sites.
+        """
+        social_q = ("SELECT COALESCE(SUM(amount_usd), 0)"
+                    " FROM saas_social_spend WHERE created_at >= ?")
+        x_q = ("SELECT COALESCE(SUM(cost_usd_cents), 0) / 100.0"
+               " FROM saas_x_post_log WHERE created_at >= ?")
+        params: list = [since_iso]
+        x_params: list = [since_iso]
+        if account_id is not None:
+            social_q += " AND account_id = ?"
+            params.append(account_id)
+            x_q += (" AND site_id IN (SELECT id FROM saas_sites"
+                    " WHERE account_id = ?)")
+            x_params.append(account_id)
+        if site_id is not None:
+            social_q += " AND site_id = ?"
+            params.append(site_id)
+            x_q += " AND site_id = ?"
+            x_params.append(site_id)
+        with self._lock:
+            social = self._conn.execute(social_q, params).fetchone()
+            x_spent = self._conn.execute(x_q, x_params).fetchone()
+        return float(social[0]) + float(x_spent[0])
 
     # -- Stripe webhook idempotency ------------------------------------------
     def record_stripe_event(self, event_id: str) -> bool:
@@ -2550,9 +2733,15 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
         if recorded is not None:
             attribution = "ventoryn"
             action_id = recorded["action_id"]
+    stripe_customer_id = str(obj.get("customer") or "")
+    customer_email = str(
+        obj.get("customer_email") or
+        (obj.get("customer_details") or {}).get("email") or "")
     recorded = store.record_conversion(
         site_id, amount, currency, "stripe", stripe_event_id=event_id,
         attribution=attribution, signature_tag=tag, action_id=action_id,
+        stripe_customer_id=stripe_customer_id,
+        customer_email=customer_email,
         livemode=bool(event.get("livemode", True)),
         payment_intent_id=payment_intent_id)
     return "ok" if recorded else "duplicate"

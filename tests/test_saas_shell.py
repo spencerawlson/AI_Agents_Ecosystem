@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 import ventoryn.saas as saas
 import ventoryn.saas_routes as saas_routes
-from ventoryn.saas import SaasConfig, SaasStore
+from ventoryn.saas import CONNECTION_CONSENT, SaasConfig, SaasStore
 from ventoryn.app import create_app
 
 
@@ -147,9 +147,18 @@ def test_site_defaults_to_honest_connections(store):
     account = _account(store)
     site = store.create_site(account["id"], "https://road2cissp.com")
     kinds = {c["kind"]: c for c in store.get_connections(site["id"])}
-    assert set(kinds) == {"reddit", "x", "plausible", "stripe_sales"}
+    assert set(kinds) == {"reddit", "x", "facebook", "instagram",
+                          "plausible", "stripe_sales"}
     assert all(c["status"] == "not_connected" for c in kinds.values())
     assert "app registration" in kinds["reddit"]["note"]
+    # Facebook and Instagram are honest about the Meta gates too —
+    # the notes say an app registration is needed, and the consent
+    # text (shown when connecting) names Business Verification +
+    # App Review and the Instagram plain-text-link constraint.
+    assert "Meta app registration" in kinds["facebook"]["note"]
+    assert "Meta app registration" in kinds["instagram"]["note"]
+    assert "Business Verification" in CONNECTION_CONSENT["facebook"]
+    assert "not clickable" in CONNECTION_CONSENT["instagram"]
 
 
 # ---------------------------------------------------------------------------

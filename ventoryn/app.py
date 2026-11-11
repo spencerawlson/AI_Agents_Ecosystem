@@ -64,6 +64,7 @@ from ventoryn.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
 from ventoryn.totp import provisioning_uri
 from ventoryn import ui
 from ventoryn.icons import icon
+from ventoryn.social_costs import estimate_cost, rate_note
 from ventoryn.ui import money
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
@@ -939,6 +940,12 @@ def create_app(
         owned = _owned_business_ids(account)
         pending = len([a for a in state["approvals"].pending()
                        if _approval_visible(account, a, owned)])
+        # Social drafts awaiting this account's approval count toward
+        # the same Approvals badge — one number, one page.
+        pending += sum(
+            1 for s in sites
+            for d in _saas_store.list_social_drafts(s["id"])
+            if d.get("status") == "pending")
         platform_current = _PLATFORM_CURRENT.get(current)
         sidebar = sidebar_html(
             platform_current, is_operator, verified=verified,
@@ -2189,6 +2196,18 @@ real — the sum of recorded paying customers per site.</p>{hidden_note}
                     f"{verb} — nothing ships without your say-so.</div>")
         return ""
 
+    def _draft_cost_text(draft) -> str:
+        """The cost line for a social draft, shown before Approve.
+        X shows the dollar estimate with its honesty note; Facebook
+        and Instagram show the note alone — the note itself says not
+        to quote $0, so no $0.00 figure is ever rendered for them."""
+        provider = draft.get("kind") or ""
+        note = rate_note(provider)
+        if provider == "x":
+            est = estimate_cost(provider, bool(draft.get("link_url")))
+            return f"${est:.2f} — {note}"
+        return note
+
     @app.get("/approvals", response_class=HTMLResponse)
     def approval_queue(request: Request, decided: str = ""):
         account, redirect = _need_account(request)
@@ -2207,6 +2226,58 @@ real — the sum of recorded paying customers per site.</p>{hidden_note}
             return _approval_visible(account, a, owned)
         pending = [a for a in gate.pending() if _sees(a)]
         decided_list = [a for a in gate.decided(20) if _sees(a)]
+        # Social drafts are the same approval story on a different
+        # machine: a post the account must approve before it can
+        # publish. Pending ones sit beside the internal approvals;
+        # decided ones beside the decided list. Only this account's
+        # own sites' drafts — the site lookup enforces ownership.
+        # The decide forms post to the draft approve/reject
+        # endpoints (same ownership check as the site page) and
+        # carry the two-factor field when 2FA is enabled.
+        totp_field = ""
+        if account.get("totp_enabled"):
+            totp_field = (
+                "<label>Two-factor code (fresh — required to confirm "
+                "this change)</label><input type='text' "
+                "name='totp_code' inputmode='numeric' "
+                "autocomplete='one-time-code' maxlength='8'>")
+        draft_pend_rows = ""
+        draft_dec_rows = ""
+        draft_pending_count = 0
+        for _site in _saas_store.list_sites(account["id"]):
+            for _draft in _saas_store.list_social_drafts(_site["id"]):
+                _provider = (_draft.get("kind") or "").capitalize()
+                _base = (f"/account/sites/{esc(_site['id'])}/social/"
+                         f"{esc(_draft.get('kind') or '')}/drafts/"
+                         f"{esc(_draft['id'])}")
+                if _draft.get("status") == "pending":
+                    draft_pending_count += 1
+                    draft_pend_rows += (
+                        f"<tr><td><strong>{esc(_provider)} post</strong> — "
+                        f"{esc(_draft.get('text') or '')}<br>"
+                        f"<span class='muted'>Cost if published: "
+                        f"<strong>{esc(_draft_cost_text(_draft))}</strong>"
+                        f"</span></td>"
+                        f"<td><form method='post' action='{_base}/approve'>"
+                        f"{totp_field}<p>"
+                        "<button class='btn btn-primary' type='submit'>"
+                        "Approve &amp; post</button> "
+                        "<button class='btn' type='submit' "
+                        f"formaction='{_base}/reject'>Reject</button>"
+                        "</p></form></td></tr>")
+                elif _draft.get("status") in ("posted", "rejected"):
+                    _when = (str(_draft.get("decided_at") or "")
+                             .replace("T", " ")[:19] or "—")
+                    _post = _draft.get("tweet_id") or ""
+                    draft_dec_rows += (
+                        f"<tr><td><strong>{esc(_provider)} post</strong> — "
+                        f"{esc(_draft.get('text') or '')}"
+                        + (f"<br><span class='muted'>Posted as "
+                           f"{esc(_post)}</span>" if _post else "")
+                        + "</td>"
+                        f"<td>{esc(_draft['status'].capitalize())}</td>"
+                        f"<td>{esc(_when)}</td>"
+                        "<td>—</td></tr>")
         # Pending rows are expandable: the human-readable summary is
         # always visible, and the full proposed action (raw payload)
         # is one click away — visible before Approve. The decide
@@ -2221,7 +2292,9 @@ real — the sum of recorded paying customers per site.</p>{hidden_note}
             f"<button name='approved' value='true'>Approve</button>"
             f"<button name='approved' value='false'>Reject</button></form></td></tr>"
             for a in pending
-        ) or "<tr><td colspan='2'>Nothing awaiting approval.</td></tr>"
+        )
+        pend_rows = (pend_rows + draft_pend_rows) or \
+            "<tr><td colspan='2'>Nothing awaiting approval.</td></tr>"
 
         def _decided_when(a) -> str:
             if getattr(a, "decided_at", None):
@@ -2233,14 +2306,16 @@ real — the sum of recorded paying customers per site.</p>{hidden_note}
             f"<td>{_decided_when(a)}</td>"
             f"<td>{esc(a.decided_by or '—')}</td></tr>"
             for a in decided_list
-        ) or "<tr><td colspan='4'>No decisions yet.</td></tr>"
+        )
+        dec_rows = (dec_rows + draft_dec_rows) or \
+            "<tr><td colspan='4'>No decisions yet.</td></tr>"
         # Confirmation after a decide: the POST redirects back with
         # ?decided=<id>, and the decided item is already out of
         # pending and in the Decided section below. Nothing may still
         # look pending after it was decided.
         banner = _decide_banner_html(gate, decided)
         inner = f"""<div class="v-approvals">{banner}<div class="card"><p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p></div>
-<div class="card"><h2>Pending ({len(pending)})</h2>
+<div class="card"><h2>Pending ({len(pending) + draft_pending_count})</h2>
 <table>
 <tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
 <div class="card"><h2>Decided</h2>
@@ -2474,6 +2549,37 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
                 f"Reject</button></form>"
                 f"{more}</div>")
 
+    def _draft_strip_html(draft, account) -> str:
+        """The "Needs your decision" strip for a social draft: the
+        post text, the cost if published (shown before Approve), and
+        Approve/Reject posting to the draft approve/reject endpoints
+        (same ownership check as the site page, two-factor field
+        when 2FA is enabled)."""
+        provider = draft.get("kind") or ""
+        base = (f"/account/sites/{esc(draft.get('site_id') or '')}"
+                f"/social/{esc(provider)}/drafts/"
+                f"{esc(draft.get('id') or '')}")
+        totp_field = ""
+        if account.get("totp_enabled"):
+            totp_field = (
+                "<label>Two-factor code (fresh — required to confirm "
+                "this change)</label><input type='text' "
+                "name='totp_code' inputmode='numeric' "
+                "autocomplete='one-time-code' maxlength='8'>")
+        return (f"<div class='card'><h2>Needs your decision</h2>"
+                f"<p><strong>{esc(provider.capitalize())} post</strong> — "
+                f"{esc(draft.get('text') or '')}</p>"
+                f"<p class='muted'>Cost if published: "
+                f"<strong>{esc(_draft_cost_text(draft))}</strong></p>"
+                f"<form method='post' action='{base}/approve'>"
+                f"{totp_field}<p>"
+                "<button class='btn btn-primary' type='submit'>"
+                "Approve &amp; post</button> "
+                "<button class='btn' type='submit' "
+                f"formaction='{base}/reject'>Reject</button>"
+                "</p></form>"
+                "<p><a href='/approvals'>View on Approvals</a></p></div>")
+
     def _agent_costs_card_html(account) -> str:
         """What the agents' work is costing — 24 h / 7 days / 30 days.
         The owner sees the real AI spend (USD + tokens, from the audit
@@ -2598,13 +2704,27 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         show_prompt = bool(prefill) and not is_op and \
             account["subscription_status"] != "active"
         # The decision strip: the top pending approval the viewer
-        # may decide (same visibility rule as /approvals).
+        # may decide (same visibility rule as /approvals). When no
+        # internal approval is pending, the top pending social draft
+        # takes the strip instead — same Approve/Reject, same cost
+        # shown before the decision.
         gate = state["approvals"]
         owned = _owned_business_ids(account)
         pending_here = [a for a in gate.pending()
                         if _approval_visible(account, a, owned)]
-        decision_html = _decision_strip_html(pending_here,
-                                             state["registry"])
+        if pending_here:
+            decision_html = _decision_strip_html(pending_here,
+                                                 state["registry"])
+        else:
+            draft_pending = []
+            for s in _saas_store.list_sites(account["id"]):
+                draft_pending.extend(
+                    [d for d in _saas_store.list_social_drafts(s["id"])
+                     if d.get("status") == "pending"])
+            decision_html = (
+                _draft_strip_html(draft_pending[0], account)
+                if draft_pending
+                else _decision_strip_html([], state["registry"]))
         banner = _decide_banner_html(gate, decided)
         # Data & privacy controls are a single quiet link here,
         # opening the site page — the full controls live there.
@@ -4135,6 +4255,13 @@ Signups read unavailable because no signup tracking is connected yet.</p>
         ("x", "X", "Post approved updates to each website's own X "
          "account. Nothing is posted until you approve it. X's API is "
          "paid and rate-limited.", "#0b0e1e"),
+        ("facebook", "Facebook", "Post approved updates to each "
+         "website's Facebook Page. Nothing is posted until you "
+         "approve it.", "#1877f2"),
+        ("instagram", "Instagram", "Post approved updates to each "
+         "website's Instagram Business account. Nothing is posted "
+         "until you approve it. Caption links are plain text, not "
+         "clickable.", "#e1306c"),
         ("stripe_sales", "Stripe sales", "Count real paying customers "
          "from each website's own Stripe account.", "#635bff"),
         ("plausible", "Plausible", "Optional: bring visitor numbers from "
@@ -4203,7 +4330,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
         parts = []
         if conn.get("note"):
             parts.append(f"<p>{esc(conn['note'])}</p>")
-        if kind in ("reddit", "x"):
+        if kind in ("reddit", "x", "facebook", "instagram"):
             _ok, gate_reason = check_posting_allowed(
                 _saas_store, account, s["id"], kind, _saas_config)
             parts.append(f"<p class='muted'>Posting: {esc(gate_reason)}</p>")
@@ -4260,6 +4387,51 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                 parts.append(
                     "<p class='muted'>The operator has not set up Ventoryn's X app "
                     "yet, so this website cannot connect. Nothing is faked.</p>")
+        elif kind == "facebook":
+            if connected:
+                page_name = ((_saas_store.get_connection(
+                    s["id"], "facebook") or {}).get("_detail_raw") or {}
+                    ).get("page_name", "")
+                identity = (f"Page: {page_name}" if page_name
+                            else "Connected — Facebook Page.")
+                parts.append(f"<p class='muted'>{esc(identity)}</p>")
+                parts.append(
+                    f"<p><a class='btn' href='/account/sites/{sid}#connections'>"
+                    f"Drafts and posting for this website</a></p>")
+            elif _saas_config.facebook_configured and \
+                    _saas_config.app_registered("facebook"):
+                parts.append(
+                    f"<p class='muted'>You will sign in to Facebook and "
+                    f"approve Ventoryn's access for this website's Page, "
+                    f"then come back here.</p>"
+                    f"<p><a class='btn btn-primary' href='/account/sites/{sid}"
+                    f"/connections/facebook/start'>Connect with Facebook</a></p>")
+            else:
+                parts.append(
+                    "<p class='muted'>The operator has not set up Ventoryn's "
+                    "Meta app yet, so this website cannot connect. Nothing "
+                    "is faked.</p>")
+        elif kind == "instagram":
+            if connected:
+                parts.append(
+                    "<p class='muted'>Connected — Instagram Business "
+                    "account.</p>")
+                parts.append(
+                    f"<p><a class='btn' href='/account/sites/{sid}#connections'>"
+                    f"Drafts and posting for this website</a></p>")
+            elif _saas_config.facebook_configured and \
+                    _saas_config.app_registered("instagram"):
+                parts.append(
+                    f"<p class='muted'>You will sign in to Facebook and "
+                    f"approve Ventoryn's access for this website's "
+                    f"Instagram Business account, then come back here.</p>"
+                    f"<p><a class='btn btn-primary' href='/account/sites/{sid}"
+                    f"/connections/instagram/start'>Connect with Instagram</a></p>")
+            else:
+                parts.append(
+                    "<p class='muted'>The operator has not set up Ventoryn's "
+                    "Meta app yet, so this website cannot connect. Nothing "
+                    "is faked.</p>")
         else:
             parts.append("<p class='muted'>Reddit no longer offers the free API "
                          "access this would need, so this connection is not "
@@ -4600,6 +4772,12 @@ a real Stripe payment, no signature.</p>"""
             owned = _owned_business_ids(operator)
             pending = len([a for a in state["approvals"].pending()
                            if _approval_visible(operator, a, owned)])
+            # Social drafts awaiting the operator's approval count
+            # toward the same Approvals badge — one number, one page.
+            pending += sum(
+                1 for s in sites
+                for d in _saas_store.list_social_drafts(s["id"])
+                if d.get("status") == "pending")
         sidebar = sidebar_html(
             current, True, verified=verified, pending_approvals=pending,
             account_email=(operator or {}).get("email", ""))

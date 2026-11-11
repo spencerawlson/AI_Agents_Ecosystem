@@ -43,6 +43,23 @@ Pages:
   POST /account/sites/{site_id}/social/x/drafts/{draft_id}/approve
                                          the ONLY path that posts to X
   POST /account/sites/{site_id}/social/x/drafts/{draft_id}/reject
+  GET  /account/sites/{site_id}/connections/facebook/start
+                                         Meta OAuth authorize redirect
+  GET  /account/auth/facebook/callback  code -> tokens -> Page picker
+  POST /account/auth/facebook/page      pick a Page -> Page token stored
+  GET  /account/sites/{site_id}/connections/instagram/start
+                                         Meta OAuth authorize redirect
+  GET  /account/auth/instagram/callback code -> tokens -> Business account
+  POST /account/sites/{site_id}/social/facebook/drafts
+                                         compose a draft (never posts it)
+  POST /account/sites/{site_id}/social/facebook/drafts/{draft_id}/approve
+                                         the ONLY path that posts to Facebook
+  POST /account/sites/{site_id}/social/facebook/drafts/{draft_id}/reject
+  POST /account/sites/{site_id}/social/instagram/drafts
+                                         compose a draft (never posts it)
+  POST /account/sites/{site_id}/social/instagram/drafts/{draft_id}/approve
+                                         the ONLY path that posts to Instagram
+  POST /account/sites/{site_id}/social/instagram/drafts/{draft_id}/reject
 
 Sign-in flow (the ShipItAyiti flow): the landing page carries the
 sign-in and the URL box; after Google sign-in EVERYONE goes straight
@@ -52,9 +69,10 @@ subscribe / add-site step for it. /admin is a separate URL for the
 operator only (see ventoryn.app).
 
 A job that costs more credits than the balance is refused with the
-balance shown. The only route that ever publishes anything external
-is the X draft-approve route above — composing a draft never posts
-it, and nothing else here posts or publishes anywhere.
+balance shown. The only routes that ever publish anything external
+are the X / Facebook / Instagram draft-approve routes above —
+composing a draft never posts it, and nothing else here posts or
+publishes anywhere.
 """
 
 from __future__ import annotations
@@ -62,7 +80,7 @@ from __future__ import annotations
 import html
 import json
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import File, Form, Request, UploadFile
@@ -77,6 +95,24 @@ from ventoryn.campaign_cost import (
     X_RATE_PLAIN_POST_USD, X_RATE_SOURCE, estimate_x_campaign,
     x_post_cost_usd)
 from ventoryn.campaign_cost import describe as describe_estimate
+from ventoryn.first100 import first100_summary
+from ventoryn.signature import sign_agent_link
+from ventoryn.social_costs import caps_allow, estimate_cost, rate_note
+from ventoryn.social_oauth import (
+    build_authorize_url,
+    exchange_code,
+    exchange_for_page_token,
+    exchange_long_lived_token,
+    find_instagram_account,
+    list_facebook_pages,
+    refresh_access_token_if_needed,
+)
+from ventoryn.social_providers import (
+    FacebookClient,
+    InstagramClient,
+    ProviderAmbiguousError,
+    ProviderError,
+)
 from ventoryn.saas import (
     job_cost_label,
     APP_REGISTRATION_KINDS,
@@ -282,6 +318,149 @@ def _integrations_return(value: str | None) -> str | None:
 
 
 X_RETURN_COOKIE = "ventoryn_x_return"
+
+
+def _save_social_tokens(store: SaasStore, site_id: str, kind: str,
+                        tokens: dict, note: str = "") -> None:
+    """Persist OAuth tokens on a connection (the slice's
+    save_connection_tokens, inlined here because routes use
+    store.update_connection directly, like main's X callback).
+    access_token / refresh_token are ENCRYPTED at rest by
+    update_connection. `expires_at` is stored alongside (now +
+    expires_in) so the publish path can refresh a token before it
+    lapses; `page_id` / `ig_user_id` ride through when the tokens
+    carry them."""
+    expires_at = ""
+    try:
+        seconds = int(tokens.get("expires_in") or 0)
+    except (TypeError, ValueError):
+        seconds = 0
+    if seconds > 0:
+        expires_at = (datetime.now(timezone.utc)
+                      + timedelta(seconds=seconds)).isoformat()
+    detail = {
+        "access_token": tokens.get("access_token") or "",
+        "refresh_token": tokens.get("refresh_token") or "",
+        "provider_user_id": tokens.get("provider_user_id") or "",
+        "scope": tokens.get("scope") or "",
+        "expires_in": tokens.get("expires_in"),
+        "expires_at": expires_at,
+        "page_id": tokens.get("page_id") or "",
+        "page_name": tokens.get("page_name") or "",
+        "ig_user_id": tokens.get("ig_user_id") or "",
+    }
+    store.update_connection(
+        site_id, kind, "connected",
+        note or f"Connected — {kind} account linked.", detail=detail)
+
+
+def _social_client_for(store: SaasStore, config: SaasConfig,
+                       site_id: str, provider: str, client=None):
+    """A live provider client for a connected site, refreshing a
+    stale token first. Facebook/Instagram only — X stays on main's
+    inline x_post path. `client` is the injected httpx-like client
+    for tests; None builds a real one. Module-level (not a closure)
+    so tests can monkeypatch this name — the routes never build a
+    real client in a test run."""
+    detail = (store.get_connection(site_id, provider) or {}
+              ).get("_detail_raw") or {}
+    token = refresh_access_token_if_needed(
+        store, config, site_id, provider, client=client)
+    if provider == "facebook":
+        page_id = detail.get("page_id") or ""
+        if not page_id:
+            raise SaasError(
+                "No Facebook Page is saved for this site — "
+                "connect Facebook and pick a Page first.")
+        return FacebookClient(page_id, token, client=client)
+    if provider == "instagram":
+        ig_user_id = detail.get("ig_user_id") or ""
+        if not ig_user_id:
+            raise SaasError(
+                "No Instagram Business account is saved for this "
+                "site — connect Instagram again.")
+        return InstagramClient(ig_user_id, token, client=client)
+    raise SaasError(f"Unknown social provider: {provider}")
+
+
+def _post_to_meta(store: SaasStore, config: SaasConfig, account: dict,
+                  site_id: str, draft_id: str, provider: str,
+                  client=None) -> tuple[bool, str]:
+    """Approve-and-post one pending Facebook/Instagram draft. The
+    ONLY path that ever calls the real provider post API for that
+    provider — creating a draft never posts it, and a draft that is
+    not explicitly approved here is never published. Mirrors
+    post_to_x: the publishing flag, the posting gate, and the spend
+    caps are enforced before anything is sent. Returns
+    (posted, message)."""
+    if not config.social_publishing_enabled:
+        return False, ("Social publishing is off — the operator has not "
+                       "enabled it yet, so this draft cannot publish.")
+    allowed, reason = check_posting_allowed(store, account, site_id,
+                                            provider, config)
+    if not allowed:
+        return False, reason
+    draft = store.get_social_draft(draft_id)
+    if draft is None or draft["site_id"] != site_id \
+            or draft["kind"] != provider:
+        return False, "Draft not found."
+    if draft["status"] != "pending":
+        return False, f"This draft was already {draft['status']}."
+    has_link = bool(draft["link_url"])
+    amount = estimate_cost(provider, has_link)
+    ok, cap_reason = caps_allow(store, account["id"], site_id, amount,
+                                config)
+    if not ok:
+        return False, cap_reason
+    text = draft["text"]
+    tag = ""
+    link = ""
+    if draft["link_url"]:
+        site = store.get_site(site_id)
+        signed, tag = sign_agent_link(
+            draft["link_url"], site_id, site["host"], provider, draft_id,
+            store)
+        # Instagram appends the link to the caption itself (plain
+        # text, not clickable) — pass it as `link`, never pre-append
+        # it to the text, or the caption would carry it twice.
+        link = signed
+    try:
+        provider_client = _social_client_for(
+            store, config, site_id, provider, client=client)
+        result = provider_client.publish_post(text, link)
+    except ProviderAmbiguousError as exc:
+        # No provider response — the post may or may not have landed.
+        # The draft stays pending: never auto-retried, never decided
+        # posted. The operator checks the provider before retrying.
+        return False, (f"{exc} The draft is still pending — check "
+                       f"{provider.capitalize()} before retrying.")
+    except (ProviderError, SaasError) as exc:
+        return False, str(exc)
+    post_id = result.get("provider_post_id") or ""
+    store.decide_social_draft(draft_id, "posted", signature_tag=tag,
+                              tweet_id=post_id)
+    store.record_social_spend(account["id"], site_id, provider, draft_id,
+                              amount)
+    label = "Facebook" if provider == "facebook" else "Instagram"
+    return True, f"Posted to {label} (id {post_id})."
+
+
+def post_to_facebook(store: SaasStore, config: SaasConfig, account: dict,
+                     site_id: str, draft_id: str, client=None
+                     ) -> tuple[bool, str]:
+    """Approve-and-post one pending Facebook draft. See
+    _post_to_meta."""
+    return _post_to_meta(store, config, account, site_id, draft_id,
+                         "facebook", client=client)
+
+
+def post_to_instagram(store: SaasStore, config: SaasConfig, account: dict,
+                      site_id: str, draft_id: str, client=None
+                      ) -> tuple[bool, str]:
+    """Approve-and-post one pending Instagram draft. See
+    _post_to_meta. Caption URLs are plain text, not clickable."""
+    return _post_to_meta(store, config, account, site_id, draft_id,
+                         "instagram", client=client)
 
 
 def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
@@ -603,6 +782,269 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         response.delete_cookie(X_RETURN_COOKIE, path='/')
         return response
 
+    def _finish_facebook_page(site_id: str, user_token: str,
+                              page_id: str):
+        """Exchange a user token for one Page's token and save it.
+        Returns the site redirect; raises SaasError when the Page
+        cannot be reached."""
+        page = exchange_for_page_token(user_token, config,
+                                       page_id=page_id or None)
+        tokens = {
+            "access_token": page.get("access_token") or "",
+            "provider_user_id": page.get("page_id") or "",
+            "page_id": page.get("page_id") or "",
+            "page_name": page.get("page_name") or "",
+            "ig_user_id": (page.get("instagram_business_account_id")
+                           or ""),
+        }
+        _save_social_tokens(
+            store, site_id, "facebook", tokens,
+            f"Connected — Facebook Page {page.get('page_name') or ''} "
+            "linked.")
+        return RedirectResponse(f"/account/sites/{site_id}",
+                                status_code=303)
+
+    @app.get("/account/sites/{site_id}/connections/facebook/start")
+    def facebook_connect_start(request: Request, site_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        if not config.facebook_configured \
+                or not config.app_registered("facebook"):
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>Facebook is not available yet — Ventoryn's own "
+                      "Meta app registration for it is still needed. No "
+                      "account was connected and nothing was stored.</p>"
+                      f"<p><a href='/account/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        state = store.create_connection_oauth_state(site_id, "facebook",
+                                                    "")
+        url, _ = build_authorize_url(
+            "facebook", config,
+            f"{config.base_url}/account/auth/facebook/callback", state)
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/account/auth/facebook/callback", response_class=HTMLResponse)
+    def facebook_connect_callback(request: Request, code: str = "",
+                                  state: str = "", error: str = ""):
+        account = _account(request)
+        pending = store.consume_connection_oauth_state(state)
+        if error or not code or pending is None \
+                or pending["kind"] != "facebook":
+            return HTMLResponse(
+                _page("Connect Facebook",
+                      "<p>Connecting Facebook did not complete. "
+                      "<a href='/account/login'>Back</a>.</p>"),
+                status_code=400)
+        site = store.get_site(pending["site_id"])
+        site_id = pending["site_id"]
+        if (site is None or account is None
+                or site["account_id"] != account["id"]):
+            return HTMLResponse(
+                _page("Connect Facebook",
+                      "<p>This connection link is not valid.</p>"),
+                status_code=400)
+        redirect_uri = f"{config.base_url}/account/auth/facebook/callback"
+        try:
+            tokens = exchange_code("facebook", config, code, redirect_uri)
+            long_lived = exchange_long_lived_token(
+                tokens.get("access_token") or "", config)
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        user_token = long_lived.get("access_token") \
+            or tokens.get("access_token") or ""
+        # Facebook: stash the long-lived user token (still
+        # not_connected) so the Page picker can exchange it for a
+        # Page token. The token is encrypted at rest like any
+        # other stored token.
+        store.update_connection(
+            site_id, "facebook", "not_connected",
+            "Pick a Page to finish connecting.",
+            {"access_token": user_token,
+             "provider_user_id": tokens.get("provider_user_id") or "",
+             "scope": tokens.get("scope") or ""})
+        try:
+            pages = list_facebook_pages(user_token, config)
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        if not pages:
+            return HTMLResponse(
+                _signed_page(
+                    site["url"],
+                    "<p>No Facebook Page was found for this account — "
+                    "create or manage a Page first, then connect "
+                    "again.</p><p><a href='/account/sites/"
+                    f"{esc(site_id)}'>Back</a>.</p>",
+                    account, current="account"),
+                status_code=400)
+        if len(pages) == 1:
+            try:
+                return _finish_facebook_page(site_id, user_token,
+                                             pages[0]["id"])
+            except SaasError as exc:
+                return HTMLResponse(
+                    _signed_page(site["url"],
+                          f"<p>{esc(str(exc))}</p>"
+                          f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                          "Back</a>.</p>", account, current="account"),
+                    status_code=400)
+        options = "".join(
+            f"<option value='{esc(p['id'])}'>{esc(p['name'])}</option>"
+            for p in pages)
+        inner = (f"<div class='card'><h2>Pick your Facebook Page</h2>"
+                 "<p class='muted'>Ventoryn will publish to the Page "
+                 "you pick, only after you approve each post.</p>"
+                 "<form method='post' action='/account/auth/facebook/page'>"
+                 f"<input type='hidden' name='site_id' value='{esc(site_id)}'>"
+                 "<label for='fb_page'>Page</label>"
+                 f"<select id='fb_page' name='page_id'>{options}</select>"
+                 "<p><button class='btn btn-primary' type='submit'>"
+                 "Connect this Page</button></p></form></div>")
+        return HTMLResponse(_signed_page(site["url"], inner, account,
+                                         current="account"))
+
+    @app.post("/account/auth/facebook/page")
+    def facebook_page_pick(request: Request, site_id: str = Form(""),
+                           page_id: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id) if site_id else None
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Connect", "<p>Website not found.</p>",
+                             account, current="account"), status_code=404)
+        conn = store.get_connection(site_id, "facebook") or {}
+        user_token = (conn.get("_detail_raw") or {}
+                      ).get("access_token") or ""
+        if not user_token:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>The Facebook connection expired — start the "
+                      "connection again.</p><p><a href='/account/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="account"),
+                status_code=400)
+        try:
+            return _finish_facebook_page(site_id, user_token,
+                                         page_id.strip())
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+
+    @app.get("/account/sites/{site_id}/connections/instagram/start")
+    def instagram_connect_start(request: Request, site_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        if not config.facebook_configured \
+                or not config.app_registered("instagram"):
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>Instagram is not available yet — Ventoryn's own "
+                      "Meta app registration for it is still needed. No "
+                      "account was connected and nothing was stored.</p>"
+                      f"<p><a href='/account/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        state = store.create_connection_oauth_state(site_id, "instagram",
+                                                    "")
+        url, _ = build_authorize_url(
+            "instagram", config,
+            f"{config.base_url}/account/auth/instagram/callback", state)
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/account/auth/instagram/callback", response_class=HTMLResponse)
+    def instagram_connect_callback(request: Request, code: str = "",
+                                   state: str = "", error: str = ""):
+        account = _account(request)
+        pending = store.consume_connection_oauth_state(state)
+        if error or not code or pending is None \
+                or pending["kind"] != "instagram":
+            return HTMLResponse(
+                _page("Connect Instagram",
+                      "<p>Connecting Instagram did not complete. "
+                      "<a href='/account/login'>Back</a>.</p>"),
+                status_code=400)
+        site = store.get_site(pending["site_id"])
+        site_id = pending["site_id"]
+        if (site is None or account is None
+                or site["account_id"] != account["id"]):
+            return HTMLResponse(
+                _page("Connect Instagram",
+                      "<p>This connection link is not valid.</p>"),
+                status_code=400)
+        redirect_uri = f"{config.base_url}/account/auth/instagram/callback"
+        try:
+            tokens = exchange_code("instagram", config, code, redirect_uri)
+            long_lived = exchange_long_lived_token(
+                tokens.get("access_token") or "", config)
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        user_token = long_lived.get("access_token") \
+            or tokens.get("access_token") or ""
+        try:
+            ig_user_id = find_instagram_account(user_token, config)
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      "Back</a>.</p>", account, current="account"),
+                status_code=400)
+        if not ig_user_id:
+            return HTMLResponse(
+                _signed_page(
+                    site["url"],
+                    "<p>No Instagram Business account is linked to "
+                    "a Facebook Page you manage — link one in the "
+                    "Meta Business Suite first, then connect "
+                    "again.</p><p><a href='/account/sites/"
+                    f"{esc(site_id)}'>Back</a>.</p>",
+                    account, current="account"),
+                status_code=400)
+        ig_tokens = dict(tokens)
+        ig_tokens["access_token"] = user_token
+        ig_tokens["ig_user_id"] = ig_user_id
+        if long_lived.get("expires_in"):
+            ig_tokens["expires_in"] = long_lived["expires_in"]
+        _save_social_tokens(
+            store, site_id, "instagram", ig_tokens,
+            "Connected — Instagram Business account linked.")
+        return RedirectResponse(f"/account/sites/{site_id}",
+                                status_code=303)
+
     def _x_estimate_card(site_id: str, spent: float) -> str:
         """What an X campaign would cost, shown before anything is
         posted: 1 linked post a day for 30 days by default, recalculated
@@ -692,6 +1134,124 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 
     @app.post("/account/sites/{site_id}/social/x/drafts/{draft_id}/reject")
     def x_draft_reject(request: Request, site_id: str, draft_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        store.decide_social_draft(draft_id, "rejected")
+        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    # -- Facebook social drafts: compose -> approve-and-post, never automatic
+    @app.post("/account/sites/{site_id}/social/facebook/drafts")
+    def facebook_draft_create(request: Request, site_id: str,
+                              text: str = Form(...),
+                              link_url: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        if text.strip():
+            store.create_social_draft(site_id, "facebook", text.strip(),
+                                      link_url.strip())
+        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    @app.post("/account/sites/{site_id}/social/facebook/drafts/{draft_id}/approve")
+    def facebook_draft_approve(request: Request, site_id: str, draft_id: str,
+                               totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(err)}</p><p><a href='/account/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="account"),
+                status_code=400)
+        posted, message = post_to_facebook(store, config, account, site_id,
+                                           draft_id)
+        inner = (f"<p>{esc(message)}</p>"
+                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"{esc(site['url'])}</a>.</p>")
+        return HTMLResponse(
+            _signed_page(site["url"], inner, account, current="account"),
+            status_code=200 if posted else 400)
+
+    @app.post("/account/sites/{site_id}/social/facebook/drafts/{draft_id}/reject")
+    def facebook_draft_reject(request: Request, site_id: str, draft_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        store.decide_social_draft(draft_id, "rejected")
+        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    # -- Instagram social drafts: compose -> approve-and-post, never automatic
+    @app.post("/account/sites/{site_id}/social/instagram/drafts")
+    def instagram_draft_create(request: Request, site_id: str,
+                               text: str = Form(...),
+                               link_url: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        if text.strip():
+            store.create_social_draft(site_id, "instagram", text.strip(),
+                                      link_url.strip())
+        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+
+    @app.post("/account/sites/{site_id}/social/instagram/drafts/{draft_id}/approve")
+    def instagram_draft_approve(request: Request, site_id: str, draft_id: str,
+                                totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="account"), status_code=404)
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(err)}</p><p><a href='/account/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="account"),
+                status_code=400)
+        posted, message = post_to_instagram(store, config, account, site_id,
+                                            draft_id)
+        inner = (f"<p>{esc(message)}</p>"
+                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"{esc(site['url'])}</a>.</p>")
+        return HTMLResponse(
+            _signed_page(site["url"], inner, account, current="account"),
+            status_code=200 if posted else 400)
+
+    @app.post("/account/sites/{site_id}/social/instagram/drafts/{draft_id}/reject")
+    def instagram_draft_reject(request: Request, site_id: str, draft_id: str):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1119,11 +1679,18 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account, current="account"), status_code=404)
+        # Backfill connection rows for kinds added after this site was
+        # created (facebook / instagram) — older sites gain them here.
+        store.ensure_connections(site_id)
         connections = store.get_connections(site_id)
         plausible_raw = (store.get_connection(site_id, "plausible") or {}
                          ).get("_detail_raw") or {}
         x_conn = store.get_connection(site_id, "x")
         x_raw = (x_conn or {}).get("_detail_raw") or {}
+        fb_raw = (store.get_connection(site_id, "facebook") or {}
+                  ).get("_detail_raw") or {}
+        ig_raw = (store.get_connection(site_id, "instagram") or {}
+                  ).get("_detail_raw") or {}
         x_access_token = x_raw.get("access_token", "")
         plausible_key = plausible_raw.get("api_key") if \
             (store.get_connection(site_id, "plausible") or {}
@@ -1138,7 +1705,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             consent = CONNECTION_CONSENT.get(kind, "")
             scopes = CONNECTION_SCOPES.get(kind, "")
             gate_html = ""
-            if kind in ("reddit", "x"):
+            if kind in ("reddit", "x", "facebook", "instagram"):
                 _gate_ok, gate_reason = check_posting_allowed(
                     store, account, site_id, kind, config)
                 gate_html = f"<p>Posting: {esc(gate_reason)}</p>"
@@ -1187,7 +1754,8 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         f"{summary['posts']} posts.</p>" if summary else
                         "<p class='muted'>Audience numbers unavailable "
                         "right now.</p>")
-                    drafts = store.list_social_drafts(site_id)
+                    drafts = [d for d in store.list_social_drafts(site_id)
+                              if d["kind"] == "x"]
                     x_spent = store.x_spend_this_month_usd(site_id)
                     draft_rows = "".join(
                         f"<div class='card'><p>{esc(d['text'])}</p>"
@@ -1240,6 +1808,125 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                             "<p class='muted'>To connect, the operator "
                             "first registers Ventoryn's app in X's "
                             "developer console and sets the app "
+                            "credentials — that step is not built here "
+                            "and nothing is faked.</p>")
+            elif kind == "facebook":
+                if conn["status"] == "connected":
+                    page_name = fb_raw.get("page_name") or ""
+                    identity = (
+                        f"<p class='muted'>Connected — Facebook Page "
+                        f"{esc(page_name)}.</p>" if page_name else
+                        "<p class='muted'>Connected — Facebook Page.</p>")
+                    drafts = [d for d in store.list_social_drafts(site_id)
+                              if d["kind"] == "facebook"]
+                    draft_rows = "".join(
+                        f"<div class='card'><p>{esc(d['text'])}</p>"
+                        + (f"<p class='muted'>Link: {esc(d['link_url'])}"
+                           "</p>" if d["link_url"] else "")
+                        + (f"<p class='v-cost-line'>Cost if posted: "
+                           f"{esc(rate_note('facebook'))}</p>"
+                           if d["status"] == "pending" else "")
+                        + f"<p>Status: <strong>{esc(d['status'])}</strong>"
+                        + (f" (post {esc(d['tweet_id'])})"
+                           if d["tweet_id"] else "") + "</p>"
+                        + (f"<form method='post' action='/account/sites/"
+                           f"{esc(site_id)}/social/facebook/drafts/{esc(d['id'])}"
+                           f"/approve'>{_totp_field(account)}<p>"
+                           "<button class='btn btn-primary' type='submit'>"
+                           "Approve &amp; post</button> "
+                           "<button class='btn' type='submit' "
+                           f"formaction='/account/sites/{esc(site_id)}"
+                           f"/social/facebook/drafts/{esc(d['id'])}/reject'>"
+                           "Reject</button></p></form>"
+                           if d["status"] == "pending" else "")
+                        + "</div>"
+                        for d in drafts) or (
+                        "<p class='muted'>No drafts yet.</p>")
+                    form = (identity +
+                            "<form method='post' action='/account/sites/"
+                            f"{esc(site_id)}/social/facebook/drafts'>"
+                            "<label for='facebook_text'>Draft a post</label>"
+                            "<textarea id='facebook_text' name='text' maxlength="
+                            "'2000' required></textarea>"
+                            "<label for='facebook_link'>Link to sign (optional — "
+                            "a URL on your own site)</label>"
+                            "<input type='text' id='facebook_link' name='link_url' "
+                            "placeholder='https://yoursite.com/...'>"
+                            "<p><button class='btn' type='submit'>Save "
+                            "draft</button></p></form>"
+                            "<p class='muted'>Nothing is posted until you "
+                            "click Approve &amp; post on a draft.</p>"
+                            f"<h4>Drafts</h4>{draft_rows}")
+                elif config.facebook_configured \
+                        and config.app_registered("facebook"):
+                    form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                            f"<p><a class='btn btn-primary' href='/account/"
+                            f"sites/{esc(site_id)}/connections/facebook/start'>"
+                            "Connect with Facebook</a></p>")
+                else:
+                    form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                            "<p class='muted'>To connect, the operator "
+                            "first registers Ventoryn's Meta app in the "
+                            "provider's developer console and sets the app "
+                            "credentials — that step is not built here "
+                            "and nothing is faked.</p>")
+            elif kind == "instagram":
+                if conn["status"] == "connected":
+                    identity = ("<p class='muted'>Connected — Instagram "
+                                "Business account.</p>")
+                    drafts = [d for d in store.list_social_drafts(site_id)
+                              if d["kind"] == "instagram"]
+                    draft_rows = "".join(
+                        f"<div class='card'><p>{esc(d['text'])}</p>"
+                        + (f"<p class='muted'>Link: {esc(d['link_url'])}"
+                           "</p>" if d["link_url"] else "")
+                        + (f"<p class='v-cost-line'>Cost if posted: "
+                           f"{esc(rate_note('instagram'))}</p>"
+                           if d["status"] == "pending" else "")
+                        + f"<p>Status: <strong>{esc(d['status'])}</strong>"
+                        + (f" (post {esc(d['tweet_id'])})"
+                           if d["tweet_id"] else "") + "</p>"
+                        + (f"<form method='post' action='/account/sites/"
+                           f"{esc(site_id)}/social/instagram/drafts/{esc(d['id'])}"
+                           f"/approve'>{_totp_field(account)}<p>"
+                           "<button class='btn btn-primary' type='submit'>"
+                           "Approve &amp; post</button> "
+                           "<button class='btn' type='submit' "
+                           f"formaction='/account/sites/{esc(site_id)}"
+                           f"/social/instagram/drafts/{esc(d['id'])}/reject'>"
+                           "Reject</button></p></form>"
+                           if d["status"] == "pending" else "")
+                        + "</div>"
+                        for d in drafts) or (
+                        "<p class='muted'>No drafts yet.</p>")
+                    form = (identity +
+                            "<form method='post' action='/account/sites/"
+                            f"{esc(site_id)}/social/instagram/drafts'>"
+                            "<label for='instagram_text'>Draft a post</label>"
+                            "<textarea id='instagram_text' name='text' maxlength="
+                            "'2000' required></textarea>"
+                            "<label for='instagram_link'>Link to sign (optional — "
+                            "a URL on your own site)</label>"
+                            "<input type='text' id='instagram_link' name='link_url' "
+                            "placeholder='https://yoursite.com/...'>"
+                            "<p><button class='btn' type='submit'>Save "
+                            "draft</button></p></form>"
+                            "<p class='muted'>Caption links are plain text, "
+                            "not clickable — the link in a post is not "
+                            "tappable. Nothing is posted until you "
+                            "click Approve &amp; post on a draft.</p>"
+                            f"<h4>Drafts</h4>{draft_rows}")
+                elif config.facebook_configured \
+                        and config.app_registered("instagram"):
+                    form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                            f"<p><a class='btn btn-primary' href='/account/"
+                            f"sites/{esc(site_id)}/connections/instagram/start'>"
+                            "Connect with Instagram</a></p>")
+                else:
+                    form = (f"<p class='muted'>{esc(conn['note'])}</p>"
+                            "<p class='muted'>To connect, the operator "
+                            "first registers Ventoryn's Meta app in the "
+                            "provider's developer console and sets the app "
                             "credentials — that step is not built here "
                             "and nothing is faked.</p>")
             else:
@@ -1351,10 +2038,30 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             snap = _snap.snapshot_store_for(store).get(site["id"])
         snapshot_html = (f"<style>{_snap.SNAPSHOT_CSS}</style>"
                          + _snap.render_card(site, snap))
+        # Founding Customer Program: verified customers are distinct,
+        # real Stripe payments (manual sales never count as verified).
+        f100 = first100_summary(store, site_id)
+        if site.get("count_show", 1):
+            founding_card = (f"<div class='card'><h2>Founding Customer "
+                "Program</h2>"
+                f"<p><strong>{f100['verified']} / 100</strong> verified "
+                f"customers — {f100['remaining']} to go.</p>"
+                f"<p class='muted'>{f100['paying']} paying customers "
+                f"recorded · {f100['attributed']} Ventoryn-attributed · "
+                f"{f100['unattributed']} unattributed.</p>"
+                "<p class='muted'>Verified means a distinct customer "
+                "with a real Stripe payment. Owner-recorded manual "
+                "sales do not count as verified.</p></div>")
+        else:
+            founding_card = ("<div class='card'><h2>Founding Customer "
+                "Program</h2><p class='muted'>Your customer count is "
+                "hidden — turn it on in Data &amp; privacy controls "
+                "below.</p></div>")
         inner = snapshot_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
+{founding_card}
 <h2>Run agent work</h2>
 {_autopilot_card(site)}
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
@@ -1432,13 +2139,15 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
-        if kind == "x":
-            # X connects via OAuth redirect (see x_connect_start), never
-            # this form-post route.
+        if kind in ("x", "facebook", "instagram"):
+            # OAuth connections use the Connect button on this page,
+            # not this form.
+            label = {"x": "X", "facebook": "Facebook",
+                     "instagram": "Instagram"}[kind]
             return HTMLResponse(
                 _signed_page(site["url"],
-                      "<p>Use the \"Connect with X\" link to connect this "
-                      "account.</p>"
+                      f"<p>Use the \"Connect with {label}\" link to "
+                      "connect this account.</p>"
                       f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
