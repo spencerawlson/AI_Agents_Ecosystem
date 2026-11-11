@@ -513,8 +513,8 @@ def render_card(site: dict, snap: dict | None) -> str:
     from ventoryn.icons import icon
 
     sid = html.escape(site["id"])
-    back = (f"<div style='margin-bottom:14px'><a class='v-back' href='/portfolio'>"
-            f"{icon('arrow_left', 15)} Websites</a></div>")
+    back = (f"<div style='margin-bottom:14px'><a class='v-back' href='/portfolio' "
+            f"style='margin-top:0'>{icon('arrow_left', 15)} Websites</a></div>")
     refresh = (f"<form method='post' action='/websites/sites/{sid}/snapshot' style='margin:0'>"
                f"<button class='btn' type='submit'>Refresh snapshot</button></form>")
     if snap is None or (snap["status"] == "running" and not snap.get("data")):
