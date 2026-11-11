@@ -579,6 +579,19 @@ def create_app(
 .v-biz-grid { display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px; margin: 18px 0; }
+/* Websites page: the site list scrolls, so 20+ sites never swamp it. */
+.v-site-list { max-height: min(72vh, 860px); overflow-y: auto;
+  overscroll-behavior: contain; padding: 2px 6px 2px 2px; margin: 12px 0 18px;
+  border-radius: var(--v-radius); scrollbar-width: thin;
+  scrollbar-color: var(--v-line) transparent; }
+.v-site-list:focus-visible { outline: 2px solid var(--v-violet); outline-offset: 2px; }
+.v-site-list .v-biz-grid { margin: 0; }
+.v-site-tools .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; }
+.v-site-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.v-site-tools input { flex: 1 1 220px; max-width: 360px; padding: 9px 12px;
+  border: 1px solid var(--v-line); border-radius: 10px; font: inherit;
+  background: var(--v-card); color: inherit; }
 .v-biz { border-radius: var(--v-radius); padding: 18px 20px;
   background: var(--v-card); border: 1px solid var(--v-line);
   border-top: 4px solid var(--v-violet-deep); box-shadow: var(--v-shadow); }
@@ -1872,6 +1885,29 @@ if (demoToggle && demoValue) {{
                 "<a href='/account/sites/new'>Add your first website</a> — "
                 "Ventoryn works to bring it new paying "
                 "customers.</p></div>")
+        def _site_list(rows) -> str:
+            # Scrollable, with a filter once the list is long enough to
+            # need one — 20 websites must not turn the page into a wall.
+            if not rows:
+                return _cards(rows)
+            tools = ""
+            if len(rows) > 6:
+                tools = (f"<div class='v-site-tools'><label class='sr-only' "
+                         f"for='site-filter'>Filter websites</label>"
+                         f"<input id='site-filter' type='search' "
+                         f"placeholder='Filter {len(rows)} websites' "
+                         f"autocomplete='off'><span class='muted' id='site-count'>"
+                         f"{len(rows)} websites</span></div>"
+                         "<script>(function(){var f=document.getElementById('site-filter');"
+                         "var c=document.getElementById('site-count');"
+                         "f.addEventListener('input',function(){var q=f.value.trim().toLowerCase(),n=0;"
+                         "document.querySelectorAll('#site-list .v-biz').forEach(function(el){"
+                         "var hit=!q||el.textContent.toLowerCase().indexOf(q)>=0;el.hidden=!hit;if(hit)n++;});"
+                         "c.textContent=n+(n===1?' website':' websites');});})();</script>")
+            return (f"{tools}<div class='v-site-list' id='site-list' tabindex='0' "
+                    f"role='region' aria-label='Your websites'>"
+                    f"<div class='v-biz-grid'>{_cards(rows)}</div></div>")
+
         hidden_note = ("<p class='muted'>Revenue from a site whose "
                        "revenue display is off is not included in these "
                        "totals — the site shows &quot;hidden&quot; instead.</p>"
@@ -1911,7 +1947,7 @@ are its credits, and credits are not dollars. Revenue is real — the
 sum of recorded paying customers per site.</p>{hidden_note}
 <p><a class='btn' href='/account/sites/new'>Add a website</a></p>
 <h2>Your websites</h2>
-<div class='v-biz-grid'>{_cards(site_rows)}</div>
+{_site_list(site_rows)}
 <h2>Recent jobs</h2>
 <div class='table-wrap'><table>
 <tr><th>Website</th><th>Job</th><th>Status</th><th>Cost</th><th>Result</th></tr>

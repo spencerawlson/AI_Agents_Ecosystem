@@ -85,8 +85,23 @@ def fetch_inventory(site_url: str, fetcher=http_fetch,
     each page's <title>. Raises ValueError when the site exposes no usable
     sitemap — the engine refuses to guess a site's structure."""
     base = site_url.rstrip("/")
-    status, body = fetcher(f"{base}/sitemap.xml", timeout=timeout)
-    if status != 200 or "<loc>" not in body:
+    # A site saved with a path (https://farelune.com/en) usually keeps
+    # its sitemap at the root: try the path, then robots.txt's Sitemap:
+    # lines, then the root — first usable one wins.
+    parsed = urlparse(base)
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else base
+    tries = [f"{base}/sitemap.xml"]
+    r_status, r_body = fetcher(f"{origin}/robots.txt", timeout=timeout)
+    if r_status == 200 and r_body:
+        tries += [m.strip() for m in re.findall(
+            r"(?im)^\s*sitemap:\s*(\S+)", r_body)]
+    tries.append(f"{origin}/sitemap.xml")
+    status, body = 0, ""
+    for url in dict.fromkeys(tries):
+        status, body = fetcher(url, timeout=timeout)
+        if status == 200 and "<loc>" in body:
+            break
+    else:
         raise ValueError(f"no usable sitemap at {base}/sitemap.xml "
                          f"(HTTP {status})")
     urls = _locs(body)
@@ -165,6 +180,15 @@ def word_count(markdown: str) -> int:
     return len([w for w in text.split() if any(c.isalnum() for c in w)])
 
 
+def _bare_host(url: str) -> str:
+    host = urlparse(url).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _norm_words(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(text).lower()))
+
+
 def validate_article_package(pkg: dict, inventory: SiteInventory,
                              min_words: int = 900,
                              max_words: int = 3500) -> dict:
@@ -208,8 +232,9 @@ def validate_article_package(pkg: dict, inventory: SiteInventory,
         warnings.append(f"body is {wc} words (soft cap {max_words})")
 
     body_links = _LINK_RE.findall(body)
-    internal = [u for u in body_links
-                if urlparse(u).netloc == urlparse(inventory.site_url).netloc]
+    # www.example.com and example.com are the same site.
+    site_host = _bare_host(inventory.site_url)
+    internal = [u for u in body_links if _bare_host(u) == site_host]
     declared = [str(u) for u in pkg.get("internal_links", [])]
     if len(set(internal)) < 3:
         errors.append(f"only {len(set(internal))} internal links in body "
@@ -222,12 +247,15 @@ def validate_article_package(pkg: dict, inventory: SiteInventory,
             warnings.append(f"external link is not https: {url}")
 
     lowered = body.lower()
-    hits = lowered.count(keyword)
+    # Match the keyword on words, not punctuation: "ship-to-haiti" and
+    # "Ship to Haiti," both count for "ship to haiti".
+    norm_kw = _norm_words(keyword)
+    hits = f" {_norm_words(body)} ".count(f" {norm_kw} ") if norm_kw else 0
     if hits == 0:
         errors.append("target keyword never appears in the body")
     elif wc and (hits * len(keyword.split())) / wc > 0.03:
         errors.append(f"keyword density too high ({hits} mentions) — stuffing")
-    if keyword not in title.lower():
+    if norm_kw not in _norm_words(title):
         warnings.append("target keyword not in the title")
 
     faq = pkg.get("faq") or []

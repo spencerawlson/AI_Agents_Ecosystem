@@ -283,3 +283,35 @@ def test_seo_article_action_runs_gate():
     assert out["package"]["slug"] == "proof-of-delivery-guide"
     assert out["quality"]["errors"] == []
     assert out["asset_id"]
+
+
+# -- Fixes found by the autopilot (farelune.com/en, www.shipitayiti.com) --
+
+def test_inventory_falls_back_to_root_or_robots_sitemap():
+    from core.seo_content import fetch_inventory
+
+    pages = {
+        "https://farelune.com/robots.txt": (200, "User-agent: *\nSitemap: https://farelune.com/sitemap.xml\n"),
+        "https://farelune.com/sitemap.xml": (200, "<urlset><url><loc>https://farelune.com/en</loc></url></urlset>"),
+        "https://farelune.com/en": (200, "<title>Farelune</title>"),
+    }
+    inv = fetch_inventory("https://farelune.com/en",
+                          fetcher=lambda u, timeout=15: pages.get(u, (404, "")))
+    assert [p.url for p in inv.pages] == ["https://farelune.com/en"]
+
+
+def test_gate_treats_www_as_the_same_site_and_matches_keyword_on_words():
+    from core.seo_content import SiteInventory, SitePage, validate_article_package
+
+    urls = [f"https://www.shipitayiti.com/en/{p}" for p in ("pricing", "track", "help")]
+    inv = SiteInventory(site_url="https://shipitayiti.com",
+                        pages=[SitePage(url=u) for u in urls])
+    body = ("Shipping to Haiti, explained. " + " ".join(["word"] * 950)
+            + " " + " ".join(f"[link]({u})" for u in urls))
+    pkg = {"title": "Shipping to Haiti", "meta_description": "x" * 130,
+           "slug": "shipping-to-haiti", "target_keyword": "shipping-to-haiti",
+           "body_markdown": body, "internal_links": urls,
+           "faq": [{"q": "a", "a": "b"}] * 3}
+    errors = validate_article_package(pkg, inv)["errors"]
+    assert not any("internal links" in e for e in errors), errors
+    assert "target keyword never appears in the body" not in errors
