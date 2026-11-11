@@ -28,7 +28,7 @@ def test_site_card_carries_the_funnel_and_link():
     assert "Visitors (30 days)" in html and "Paying customers" in html
     assert (f"href='https://shop.example.com' target='_blank' "
             f"rel='noopener noreferrer'>Open</a>" in html)
-    assert (f"<a class='v-site-name' href='/account/sites/{site['id']}'>"
+    assert (f"<a class='v-site-name' href='/websites/sites/{site['id']}'>"
             f"shop.example.com</a>" in html)
 
 

@@ -37,7 +37,7 @@ def env(tmp_path, monkeypatch):
 
 
 def _post(client, site, files=None, **data):
-    return client.post(f"/account/sites/{site['id']}/jobs", data=data,
+    return client.post(f"/websites/sites/{site['id']}/jobs", data=data,
                        files=files, follow_redirects=False)
 
 
@@ -45,7 +45,7 @@ def test_every_priced_job_is_runnable_and_offered(env):
     client, _store, _account, site, _ = env
     assert RUNNABLE_JOB_TYPES == frozenset(CREDIT_COSTS)
     assert set(site_jobs.JOB_LABELS) == set(CREDIT_COSTS)
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     for job in CREDIT_COSTS:
         assert f"value='{job}'" in html, job
     assert "coming soon" not in html.lower()

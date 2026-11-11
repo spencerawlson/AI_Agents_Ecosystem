@@ -86,7 +86,7 @@ def _make_draft(client, store, site_id, provider="facebook",
                 text="Hello from Ventoryn",
                 target_url="https://ada.example.com/welcome"):
     r = client.post(
-        f"/account/sites/{site_id}/social/{provider}/drafts",
+        f"/websites/sites/{site_id}/social/{provider}/drafts",
         data={"text": text, "link_url": target_url},
         follow_redirects=False)
     assert r.status_code == 303, r.text
@@ -100,7 +100,7 @@ def _approve_draft(client, store, account, site_id, provider, draft_id):
     # Approving is a sensitive action: the account has TOTP enabled
     # (sign_in forces it), so a fresh code travels with the post.
     return client.post(
-        f"/account/sites/{site_id}/social/{provider}/drafts/{draft_id}"
+        f"/websites/sites/{site_id}/social/{provider}/drafts/{draft_id}"
         "/approve",
         data={"totp_code": fresh_totp_code(store, account["id"])},
         follow_redirects=False)
@@ -108,7 +108,7 @@ def _approve_draft(client, store, account, site_id, provider, draft_id):
 
 def _reject_draft(client, site_id, provider, draft_id):
     r = client.post(
-        f"/account/sites/{site_id}/social/{provider}/drafts/{draft_id}"
+        f"/websites/sites/{site_id}/social/{provider}/drafts/{draft_id}"
         "/reject", data={}, follow_redirects=False)
     assert r.status_code == 303, r.text
     return r
@@ -146,7 +146,7 @@ def test_oauth_start_redirects_to_provider_authorize(monkeypatch):
     monkeypatch.setattr(saas_routes, "build_authorize_url",
                         fake_build_authorize_url)
     r = client.get(
-        f"/account/sites/{site['id']}/connections/facebook/start",
+        f"/websites/sites/{site['id']}/connections/facebook/start",
         follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"].startswith(
@@ -164,7 +164,7 @@ def test_oauth_start_refuses_when_app_unconfigured():
     client, account = _customer_client(app, store)
     site = _seed_site(store, account)
     r = client.get(
-        f"/account/sites/{site['id']}/connections/facebook/start",
+        f"/websites/sites/{site['id']}/connections/facebook/start",
         follow_redirects=False)
     assert r.status_code == 400
     assert "Meta app registration" in r.text
@@ -176,7 +176,7 @@ def test_oauth_start_refuses_another_accounts_site():
     _client_b, account_b = _customer_client(app, store, CUSTOMER_B)
     site_b = _seed_site(store, account_b, "https://ben.example.com")
     r = client.get(
-        f"/account/sites/{site_b['id']}/connections/facebook/start",
+        f"/websites/sites/{site_b['id']}/connections/facebook/start",
         follow_redirects=False)
     assert r.status_code == 404
 
@@ -214,7 +214,7 @@ def test_oauth_callback_facebook_single_page_finishes(monkeypatch):
         f"/account/auth/facebook/callback?code=authcode&state={state}",
         follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == f"/account/sites/{site['id']}"
+    assert r.headers["location"] == f"/websites/sites/{site['id']}"
     conn = store.get_connection(site["id"], "facebook")
     assert conn["status"] == "connected"
     assert conn["_detail_raw"]["page_id"] == "page-1"
@@ -269,7 +269,7 @@ def test_oauth_callback_instagram_finds_business_account(monkeypatch):
         f"/account/auth/instagram/callback?code=authcode&state={state}",
         follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == f"/account/sites/{site['id']}"
+    assert r.headers["location"] == f"/websites/sites/{site['id']}"
     conn = store.get_connection(site["id"], "instagram")
     assert conn["status"] == "connected"
     assert conn["_detail_raw"]["ig_user_id"] == "ig-99"
@@ -283,7 +283,7 @@ def test_site_page_shows_founding_customer_zero_and_social_sections():
     app, store, _config = _app_with()
     client, account = _customer_client(app, store)
     site = _seed_site(store, account)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     assert "0 / 100" in r.text
     assert "Founding Customer Program" in r.text
@@ -305,15 +305,15 @@ def test_site_page_shows_connect_buttons_when_app_configured():
     app, store, _config = _app_with(x=True, facebook=True)
     client, account = _customer_client(app, store)
     site = _seed_site(store, account)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     assert "Connect with X" in r.text
-    assert f"/account/sites/{site['id']}/connections/x/start" in r.text
+    assert f"/websites/sites/{site['id']}/connections/x/start" in r.text
     assert "Connect with Facebook" in r.text
-    assert (f"/account/sites/{site['id']}/connections/facebook/start"
+    assert (f"/websites/sites/{site['id']}/connections/facebook/start"
             in r.text)
     assert "Connect with Instagram" in r.text
-    assert (f"/account/sites/{site['id']}/connections/instagram/start"
+    assert (f"/websites/sites/{site['id']}/connections/instagram/start"
             in r.text)
 
 
@@ -328,7 +328,7 @@ def test_backfill_adds_facebook_instagram_to_old_site():
             "AND kind IN ('facebook', 'instagram')", (site["id"],))
     kinds = {c["kind"] for c in store.get_connections(site["id"])}
     assert "facebook" not in kinds
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     kinds = {c["kind"]: c for c in store.get_connections(site["id"])}
     assert kinds["facebook"]["status"] == "not_connected"
@@ -350,7 +350,7 @@ def test_first100_counts_verified_only():
                             livemode=1)
     store.record_conversion(site["id"], 1900, "usd", "manual",
                             attribution="unattributed", livemode=0)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     assert "1 / 100" in r.text
     # Main's paying count is live-mode only (paying_customer_count
@@ -409,7 +409,7 @@ def test_cross_account_decide_is_blocked():
     # B's approve hits the ownership check first (404), before any
     # TOTP check — no code needed to prove the block.
     r = client_b.post(
-        f"/account/sites/{site['id']}/social/facebook/drafts/"
+        f"/websites/sites/{site['id']}/social/facebook/drafts/"
         f"{draft['id']}/approve", data={}, follow_redirects=False)
     assert r.status_code == 404
     assert store.get_social_draft(
@@ -487,7 +487,7 @@ def test_connection_update_form_rejects_oauth_kinds():
     for kind, label in (("facebook", "Facebook"),
                         ("instagram", "Instagram")):
         r = client.post(
-            f"/account/sites/{site['id']}/connections/{kind}",
+            f"/websites/sites/{site['id']}/connections/{kind}",
             data={"api_key": "whatever"}, follow_redirects=False)
         assert r.status_code == 400
         assert f"Connect with {label}" in r.text
@@ -503,7 +503,7 @@ def test_disconnect_facebook_marks_not_connected():
     # Disconnect is a sensitive action: it needs a fresh TOTP code,
     # like any other disconnect on this page.
     r = client.post(
-        f"/account/sites/{site['id']}/connections/facebook/disconnect",
+        f"/websites/sites/{site['id']}/connections/facebook/disconnect",
         data={"totp_code": fresh_totp_code(store, account["id"])},
         follow_redirects=False)
     assert r.status_code == 200, r.text

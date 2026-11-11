@@ -356,7 +356,7 @@ def funnel_cells(saas_store, site: dict, plausible_visitors_fn=None) -> tuple[st
                     "not answer</span>")
     else:
         visitors = (f"<span class='unavailable'>unavailable — install "
-                    f"<a href='/account/sites/{_html.escape(site['id'])}"
+                    f"<a href='/websites/sites/{_html.escape(site['id'])}"
                     f"#ventoryn-analytics'>Ventoryn Analytics</a></span>")
     return visitors, signups
 

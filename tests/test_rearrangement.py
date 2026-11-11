@@ -303,7 +303,7 @@ def test_website_page_section_order():
     app, store = _app_with()
     client, account = _customer_client(app, store)
     site = _seed_customer(store, account)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     text = r.text
     markers = ("<h2>Funnel — visitors to paying customers</h2>",

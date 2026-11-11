@@ -160,7 +160,7 @@ def test_webhook_bad_signature_rejected_and_replay_counts_once():
     site = store.create_site(account["id"], "https://ada.example.com")
     # Connect Stripe sales (the webhook secret is the shared secret).
     r = client.post(
-        f"/account/sites/{site['id']}/connections/stripe_sales",
+        f"/websites/sites/{site['id']}/connections/stripe_sales",
         data={"webhook_secret": "whsec_test"}, follow_redirects=False)
     assert r.status_code == 303
     event = _sale_event("evt_webhook_1")
@@ -233,7 +233,7 @@ def test_revenue_toggle_off_hides_everywhere_but_count_increments():
                       sub="google-sub-ada", name="Ada")
     site = store.create_site(account["id"], "https://ada.example.com")
     r = client.post(
-        f"/account/sites/{site['id']}/connections/stripe_sales",
+        f"/websites/sites/{site['id']}/connections/stripe_sales",
         data={"webhook_secret": "whsec_test"}, follow_redirects=False)
     assert r.status_code == 303
     store.record_conversion(site["id"], 1900, "usd", "manual")

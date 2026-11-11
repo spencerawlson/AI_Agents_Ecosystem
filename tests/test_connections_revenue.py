@@ -64,7 +64,7 @@ def _site_with_sale(app, store, client, account, amount=1900):
 
 def _connect_stripe(client, site_id):
     r = client.post(
-        f"/account/sites/{site_id}/connections/stripe_sales",
+        f"/websites/sites/{site_id}/connections/stripe_sales",
         data={"webhook_secret": "whsec_test"}, follow_redirects=False)
     assert r.status_code == 303, r.text
 
@@ -72,7 +72,7 @@ def _connect_stripe(client, site_id):
 def _set_privacy(client, store, account, site_id, revenue=True,
                  count=True, details=True):
     r = client.post(
-        f"/account/sites/{site_id}/privacy",
+        f"/websites/sites/{site_id}/privacy",
         data={"revenue_show": "on" if revenue else "",
               "count_show": "on" if count else "",
               "details_show": "on" if details else "",
@@ -87,7 +87,7 @@ def test_connections_list_honest_not_connected_states():
     account = sign_in(client, store, email=CUSTOMER_A[0],
                       sub="google-sub-ada", name="Ada")
     site = store.create_site(account["id"], "https://ada.example.com")
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     for kind in ("Reddit", "X", "Plausible", "Stripe"):
         assert kind in r.text, kind
@@ -119,7 +119,7 @@ def test_unconnected_account_cannot_post_gate_enforced():
         assert "Not connected" in reason, reason
     # The Connect action for Reddit refuses honestly (no free API
     # access exists — nothing is stored, nothing is faked).
-    r = client.post(f"/account/sites/{site['id']}/connections/reddit",
+    r = client.post(f"/websites/sites/{site['id']}/connections/reddit",
                     data={})
     assert r.status_code == 400
     assert "not available" in r.text
@@ -154,7 +154,7 @@ def test_revenue_toggle_off_hides_on_shows():
     r = client.get("/report")
     assert r.status_code == 200
     assert "$19.00" in r.text
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "$19.00" in r.text
     # Off again: hidden everywhere, again.
     _set_privacy(client, store, account, site["id"], revenue=False)
@@ -173,13 +173,13 @@ def test_count_toggle_hides_count_but_count_still_increments():
     # Count on (default): the paying-customer count shows in the funnel.
     _set_privacy(client, store, account, site["id"],
                  revenue=True, count=True)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "<td>1</td>" in r.text  # one paying customer in the funnel
     assert store.paying_customer_count(site["id"]) == 1
     # Count off: the report hides the count…
     _set_privacy(client, store, account, site["id"],
                  revenue=True, count=False)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "hidden — the customer count is not shown" in r.text
     # …but the count itself still increments — the sale still counts
     # as a verified customer.
@@ -197,11 +197,11 @@ def test_details_toggle_hides_per_sale_rows():
     _connect_stripe(client, site["id"])
     _set_privacy(client, store, account, site["id"],
                  revenue=True, details=True)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "$19.00" in r.text
     _set_privacy(client, store, account, site["id"],
                  revenue=True, details=False)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "Conversion details are hidden" in r.text
 
 
@@ -243,7 +243,7 @@ def test_attributed_conversion_appears_in_report_with_signature():
     assert "Verified" in r.text
     assert "Unattributed" in r.text
     # The site page shows the per-sale rows with their signatures.
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "$19.00" in r.text
     assert "$25.00" in r.text
     assert tag in r.text
@@ -255,7 +255,7 @@ def test_funnel_unavailable_until_revenue_source_connected():
     account = sign_in(client, store, email=CUSTOMER_A[0],
                       sub="google-sub-ada", name="Ada")
     site = store.create_site(account["id"], "https://ada.example.com")
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     # No Stripe sales connection: revenue reads "unavailable", and
     # no dollar figure is invented for it.

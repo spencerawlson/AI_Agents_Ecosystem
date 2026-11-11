@@ -17,13 +17,13 @@ Pages:
   GET  /account/subscribe               the $20/month plan
   POST /account/subscribe               create a Stripe checkout session
   POST /account/billing/webhook         Stripe webhook (signature-verified)
-  GET  /account/sites/new               add a website
-  POST /account/sites                   create the site
-  GET  /account/sites/{site_id}         site detail: funnel, connections, jobs
-  POST /account/sites/{site_id}/connections/{kind}
+  GET  /websites/sites/new               add a website
+  POST /websites/sites                   create the site
+  GET  /websites/sites/{site_id}         site detail: funnel, connections, jobs
+  POST /websites/sites/{site_id}/connections/{kind}
                                          connect Plausible / Stripe sales
-  POST /account/sites/{site_id}/jobs    run a job (analyze today)
-  POST /account/sites/{site_id}/conversions
+  POST /websites/sites/{site_id}/jobs    run a job (analyze today)
+  POST /websites/sites/{site_id}/conversions
                                          owner-recorded sale (fallback)
   GET  /account/two-factor/setup        forced TOTP setup (QR + code)
   POST /account/two-factor/setup        confirm setup, backup codes shown
@@ -32,34 +32,34 @@ Pages:
   GET  /account/security                2FA status, pause posting, delete
   POST /account/security/pause          pause / resume all posting
   POST /account/delete                  revoke tokens, delete everything
-  POST /account/sites/{site_id}/privacy revenue/count/details toggles
-  POST /account/sites/{site_id}/connections/{kind}/disconnect
+  POST /websites/sites/{site_id}/privacy revenue/count/details toggles
+  POST /websites/sites/{site_id}/connections/{kind}/disconnect
                                          revoke at provider, then delete
-  GET  /account/sites/{site_id}/connections/x/start
+  GET  /websites/sites/{site_id}/connections/x/start
                                          X OAuth 2.0 + PKCE authorize redirect
   GET  /account/auth/x/callback         code -> tokens -> connection stored
-  POST /account/sites/{site_id}/social/x/drafts
+  POST /websites/sites/{site_id}/social/x/drafts
                                          compose a draft (never posts it)
-  POST /account/sites/{site_id}/social/x/drafts/{draft_id}/approve
+  POST /websites/sites/{site_id}/social/x/drafts/{draft_id}/approve
                                          the ONLY path that posts to X
-  POST /account/sites/{site_id}/social/x/drafts/{draft_id}/reject
-  GET  /account/sites/{site_id}/connections/facebook/start
+  POST /websites/sites/{site_id}/social/x/drafts/{draft_id}/reject
+  GET  /websites/sites/{site_id}/connections/facebook/start
                                          Meta OAuth authorize redirect
   GET  /account/auth/facebook/callback  code -> tokens -> Page picker
   POST /account/auth/facebook/page      pick a Page -> Page token stored
-  GET  /account/sites/{site_id}/connections/instagram/start
+  GET  /websites/sites/{site_id}/connections/instagram/start
                                          Meta OAuth authorize redirect
   GET  /account/auth/instagram/callback code -> tokens -> Business account
-  POST /account/sites/{site_id}/social/facebook/drafts
+  POST /websites/sites/{site_id}/social/facebook/drafts
                                          compose a draft (never posts it)
-  POST /account/sites/{site_id}/social/facebook/drafts/{draft_id}/approve
+  POST /websites/sites/{site_id}/social/facebook/drafts/{draft_id}/approve
                                          the ONLY path that posts to Facebook
-  POST /account/sites/{site_id}/social/facebook/drafts/{draft_id}/reject
-  POST /account/sites/{site_id}/social/instagram/drafts
+  POST /websites/sites/{site_id}/social/facebook/drafts/{draft_id}/reject
+  POST /websites/sites/{site_id}/social/instagram/drafts
                                          compose a draft (never posts it)
-  POST /account/sites/{site_id}/social/instagram/drafts/{draft_id}/approve
+  POST /websites/sites/{site_id}/social/instagram/drafts/{draft_id}/approve
                                          the ONLY path that posts to Instagram
-  POST /account/sites/{site_id}/social/instagram/drafts/{draft_id}/reject
+  POST /websites/sites/{site_id}/social/instagram/drafts/{draft_id}/reject
 
 Sign-in flow (the ShipItAyiti flow): the landing page carries the
 sign-in and the URL box; after Google sign-in EVERYONE goes straight
@@ -706,7 +706,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
     # -- X (Twitter) connection: OAuth 2.0 with PKCE, per site ---------------
     # Connecting an account never posts anything — see post_to_x / the
     # social draft routes below for the only path that does.
-    @app.get("/account/sites/{site_id}/connections/x/start")
+    @app.get("/websites/sites/{site_id}/connections/x/start")
     def x_connect_start(request: Request, site_id: str, return_to: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -722,7 +722,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "<p>X is not available yet — Ventoryn's own app "
                       "registration for it is still needed. No account "
                       "was connected and nothing was stored.</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         verifier, challenge = pkce_pair()
@@ -763,7 +763,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
-                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         access_token = tokens.get("access_token", "")
@@ -777,7 +777,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
              "username": username})
         back = _integrations_return(urllib.parse.unquote(
             request.cookies.get(X_RETURN_COOKIE, "").strip('"')))
-        response = RedirectResponse(back or f"/account/sites/{site['id']}",
+        response = RedirectResponse(back or f"/websites/sites/{site['id']}",
                                     status_code=303)
         response.delete_cookie(X_RETURN_COOKIE, path='/')
         return response
@@ -801,10 +801,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             store, site_id, "facebook", tokens,
             f"Connected — Facebook Page {page.get('page_name') or ''} "
             "linked.")
-        return RedirectResponse(f"/account/sites/{site_id}",
+        return RedirectResponse(f"/websites/sites/{site_id}",
                                 status_code=303)
 
-    @app.get("/account/sites/{site_id}/connections/facebook/start")
+    @app.get("/websites/sites/{site_id}/connections/facebook/start")
     def facebook_connect_start(request: Request, site_id: str):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -821,7 +821,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "<p>Facebook is not available yet — Ventoryn's own "
                       "Meta app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         state = store.create_connection_oauth_state(site_id, "facebook",
@@ -860,7 +860,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
-                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         user_token = long_lived.get("access_token") \
@@ -881,7 +881,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
-                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         if not pages:
@@ -890,7 +890,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     site["url"],
                     "<p>No Facebook Page was found for this account — "
                     "create or manage a Page first, then connect "
-                    "again.</p><p><a href='/account/sites/"
+                    "again.</p><p><a href='/websites/sites/"
                     f"{esc(site_id)}'>Back</a>.</p>",
                     account, current="account"),
                 status_code=400)
@@ -902,7 +902,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 return HTMLResponse(
                     _signed_page(site["url"],
                           f"<p>{esc(str(exc))}</p>"
-                          f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                          f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                           "Back</a>.</p>", account, current="account"),
                     status_code=400)
         options = "".join(
@@ -938,7 +938,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       "<p>The Facebook connection expired — start the "
-                      "connection again.</p><p><a href='/account/sites/"
+                      "connection again.</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
@@ -949,11 +949,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
-                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
 
-    @app.get("/account/sites/{site_id}/connections/instagram/start")
+    @app.get("/websites/sites/{site_id}/connections/instagram/start")
     def instagram_connect_start(request: Request, site_id: str):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -970,7 +970,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "<p>Instagram is not available yet — Ventoryn's own "
                       "Meta app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         state = store.create_connection_oauth_state(site_id, "instagram",
@@ -1009,7 +1009,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
-                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         user_token = long_lived.get("access_token") \
@@ -1020,7 +1020,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(str(exc))}</p>"
-                      f"<p><a href='/account/sites/{esc(site['id'])}'>"
+                      f"<p><a href='/websites/sites/{esc(site['id'])}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         if not ig_user_id:
@@ -1030,7 +1030,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     "<p>No Instagram Business account is linked to "
                     "a Facebook Page you manage — link one in the "
                     "Meta Business Suite first, then connect "
-                    "again.</p><p><a href='/account/sites/"
+                    "again.</p><p><a href='/websites/sites/"
                     f"{esc(site_id)}'>Back</a>.</p>",
                     account, current="account"),
                 status_code=400)
@@ -1042,7 +1042,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         _save_social_tokens(
             store, site_id, "instagram", ig_tokens,
             "Connected — Instagram Business account linked.")
-        return RedirectResponse(f"/account/sites/{site_id}",
+        return RedirectResponse(f"/websites/sites/{site_id}",
                                 status_code=303)
 
     def _x_estimate_card(site_id: str, spent: float) -> str:
@@ -1090,7 +1090,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             "})();</script></div>")
 
     # -- X social drafts: compose -> approve-and-post, never automatic ------
-    @app.post("/account/sites/{site_id}/social/x/drafts")
+    @app.post("/websites/sites/{site_id}/social/x/drafts")
     def x_draft_create(request: Request, site_id: str,
                        text: str = Form(...), link_url: str = Form("")):
         account, redirect = _need_account(request)
@@ -1104,9 +1104,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if text.strip():
             store.create_social_draft(site_id, "x", text.strip(),
                                       link_url.strip())
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
-    @app.post("/account/sites/{site_id}/social/x/drafts/{draft_id}/approve")
+    @app.post("/websites/sites/{site_id}/social/x/drafts/{draft_id}/approve")
     def x_draft_approve(request: Request, site_id: str, draft_id: str,
                         totp_code: str = Form("")):
         account, redirect = _need_account(request)
@@ -1121,18 +1121,18 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(err)}</p><p><a href='/account/sites/"
+                      f"<p>{esc(err)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"), status_code=400)
         posted, message = post_to_x(store, config, account, site_id, draft_id)
         inner = (f"<p>{esc(message)}</p>"
-                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(
             _signed_page(site["url"], inner, account, current="account"),
             status_code=200 if posted else 400)
 
-    @app.post("/account/sites/{site_id}/social/x/drafts/{draft_id}/reject")
+    @app.post("/websites/sites/{site_id}/social/x/drafts/{draft_id}/reject")
     def x_draft_reject(request: Request, site_id: str, draft_id: str):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -1143,10 +1143,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page("Website", "<p>Website not found.</p>",
                             account, current="account"), status_code=404)
         store.decide_social_draft(draft_id, "rejected")
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     # -- Facebook social drafts: compose -> approve-and-post, never automatic
-    @app.post("/account/sites/{site_id}/social/facebook/drafts")
+    @app.post("/websites/sites/{site_id}/social/facebook/drafts")
     def facebook_draft_create(request: Request, site_id: str,
                               text: str = Form(...),
                               link_url: str = Form("")):
@@ -1161,9 +1161,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if text.strip():
             store.create_social_draft(site_id, "facebook", text.strip(),
                                       link_url.strip())
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
-    @app.post("/account/sites/{site_id}/social/facebook/drafts/{draft_id}/approve")
+    @app.post("/websites/sites/{site_id}/social/facebook/drafts/{draft_id}/approve")
     def facebook_draft_approve(request: Request, site_id: str, draft_id: str,
                                totp_code: str = Form("")):
         account, redirect = _need_account(request)
@@ -1178,20 +1178,20 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(err)}</p><p><a href='/account/sites/"
+                      f"<p>{esc(err)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
         posted, message = post_to_facebook(store, config, account, site_id,
                                            draft_id)
         inner = (f"<p>{esc(message)}</p>"
-                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(
             _signed_page(site["url"], inner, account, current="account"),
             status_code=200 if posted else 400)
 
-    @app.post("/account/sites/{site_id}/social/facebook/drafts/{draft_id}/reject")
+    @app.post("/websites/sites/{site_id}/social/facebook/drafts/{draft_id}/reject")
     def facebook_draft_reject(request: Request, site_id: str, draft_id: str):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -1202,10 +1202,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page("Website", "<p>Website not found.</p>",
                             account, current="account"), status_code=404)
         store.decide_social_draft(draft_id, "rejected")
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     # -- Instagram social drafts: compose -> approve-and-post, never automatic
-    @app.post("/account/sites/{site_id}/social/instagram/drafts")
+    @app.post("/websites/sites/{site_id}/social/instagram/drafts")
     def instagram_draft_create(request: Request, site_id: str,
                                text: str = Form(...),
                                link_url: str = Form("")):
@@ -1220,9 +1220,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if text.strip():
             store.create_social_draft(site_id, "instagram", text.strip(),
                                       link_url.strip())
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
-    @app.post("/account/sites/{site_id}/social/instagram/drafts/{draft_id}/approve")
+    @app.post("/websites/sites/{site_id}/social/instagram/drafts/{draft_id}/approve")
     def instagram_draft_approve(request: Request, site_id: str, draft_id: str,
                                 totp_code: str = Form("")):
         account, redirect = _need_account(request)
@@ -1237,20 +1237,20 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(err)}</p><p><a href='/account/sites/"
+                      f"<p>{esc(err)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
         posted, message = post_to_instagram(store, config, account, site_id,
                                             draft_id)
         inner = (f"<p>{esc(message)}</p>"
-                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(
             _signed_page(site["url"], inner, account, current="account"),
             status_code=200 if posted else 400)
 
-    @app.post("/account/sites/{site_id}/social/instagram/drafts/{draft_id}/reject")
+    @app.post("/websites/sites/{site_id}/social/instagram/drafts/{draft_id}/reject")
     def instagram_draft_reject(request: Request, site_id: str, draft_id: str):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -1261,7 +1261,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page("Website", "<p>Website not found.</p>",
                             account, current="account"), status_code=404)
         store.decide_social_draft(draft_id, "rejected")
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     @app.get("/account/logout")
     def logout(request: Request):
@@ -1443,9 +1443,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             pending_url = validate_site_url(site_url) if site_url else ""
         except ValueError:
             pending_url = ""
-        add_site_href = ("/account/sites/new?url=" +
+        add_site_href = ("/websites/sites/new?url=" +
                          urllib.parse.quote(pending_url, safe="") if
-                         pending_url else "/account/sites/new")
+                         pending_url else "/websites/sites/new")
         notice = ""
         if subscribed:
             notice = ("<div class='card'><p><strong>Subscription started "
@@ -1555,7 +1555,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      "billing cycle.</p></div>")
             if pending_url:
                 inner += (f"<div class='card'>{pending_note}<p><a class='btn "
-                          f"btn-primary' href='/account/sites/new?url="
+                          f"btn-primary' href='/websites/sites/new?url="
                           f"{esc(urllib.parse.quote(pending_url, safe=''))}'>"
                           f"Add {esc(pending_url)}</a></p></div>")
             return _signed_page("Subscribe", inner, account,
@@ -1620,7 +1620,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         return RedirectResponse(session["url"], status_code=303)
 
     # -- sites ---------------------------------------------------------------
-    @app.get("/account/sites/new", response_class=HTMLResponse)
+    @app.get("/websites/sites/new", response_class=HTMLResponse)
     def site_new_page(request: Request):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -1628,7 +1628,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         inner = ("<div class='card'><p>Add the website Ventoryn will "
                  "work on — it works to bring this site new paying "
                  "customers.</p>"
-                 "<form method='post' action='/account/sites'>"
+                 "<form method='post' action='/websites/sites'>"
                  "<label for='url'>Website URL</label>"
                  "<input type='text' id='url' name='url' required "
                  "placeholder='yourwebsite.com'>"
@@ -1646,7 +1646,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "Add website</button></p></form></div>")
         return _signed_page("Add a website", inner, account, current="account")
 
-    @app.post("/account/sites")
+    @app.post("/websites/sites")
     def site_create(request: Request, url: str = Form(...),
                     country: str = Form("ca"), language: str = Form("en")):
         account, redirect = _need_account(request)
@@ -1657,7 +1657,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         except ValueError as exc:
             return HTMLResponse(
                 _signed_page("Add a website",
-                      f"<p>{esc(exc)}</p><p><a href='/account/sites/new'>"
+                      f"<p>{esc(exc)}</p><p><a href='/websites/sites/new'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         # The admin's recent-activity feed: a real website was added.
@@ -1667,10 +1667,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # right away in the background; the site page fills in.
         from ventoryn import site_snapshot
         site_snapshot.start(store, site, REPORTS_DIR)
-        return RedirectResponse(f"/account/sites/{site['id']}",
+        return RedirectResponse(f"/websites/sites/{site['id']}",
                                 status_code=303)
 
-    @app.get("/account/sites/{site_id}", response_class=HTMLResponse)
+    @app.get("/websites/sites/{site_id}", response_class=HTMLResponse)
     def site_detail(request: Request, site_id: str, va_check: str = ""):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -1712,14 +1712,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             disconnect_html = ""
             if conn["status"] == "connected":
                 disconnect_html = (
-                    f"<form method='post' action='/account/sites/{esc(site_id)}"
+                    f"<form method='post' action='/websites/sites/{esc(site_id)}"
                     f"/connections/{kind}/disconnect'>"
                     f"{_totp_field(account)}"
                     "<p><button class='btn' type='submit'>Disconnect</button>"
                     "</p></form>")
             if kind == "plausible":
                 form = ("<form method='post' "
-                        f"action='/account/sites/{esc(site_id)}/connections/plausible'>"
+                        f"action='/websites/sites/{esc(site_id)}/connections/plausible'>"
                         "<label for='plausible_domain'>Plausible site domain</label>"
                         "<input type='text' id='plausible_domain' "
                         "name='site_domain' "
@@ -1736,7 +1736,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         f"<code>ventoryn_site_id</code> = "
                         f"<code>{esc(site_id)}</code> to your checkout "
                         f"metadata, so sales are counted for this site.</p>"
-                        f"<form method='post' action='/account/sites/{esc(site_id)}"
+                        f"<form method='post' action='/websites/sites/{esc(site_id)}"
                         f"/connections/stripe_sales'>"
                         "<label for='stripe_secret'>Stripe webhook signing "
                         "secret</label><input type='password' id='stripe_secret' "
@@ -1770,13 +1770,13 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         + f"<p>Status: <strong>{esc(d['status'])}</strong>"
                         + (f" (tweet {esc(d['tweet_id'])})"
                            if d["tweet_id"] else "") + "</p>"
-                        + (f"<form method='post' action='/account/sites/"
+                        + (f"<form method='post' action='/websites/sites/"
                            f"{esc(site_id)}/social/x/drafts/{esc(d['id'])}"
                            f"/approve'>{_totp_field(account)}<p>"
                            "<button class='btn btn-primary' type='submit'>"
                            "Approve &amp; post</button> "
                            "<button class='btn' type='submit' "
-                           f"formaction='/account/sites/{esc(site_id)}"
+                           f"formaction='/websites/sites/{esc(site_id)}"
                            f"/social/x/drafts/{esc(d['id'])}/reject'>"
                            "Reject</button></p></form>"
                            if d["status"] == "pending" else "")
@@ -1784,7 +1784,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         for d in drafts) or (
                         "<p class='muted'>No drafts yet.</p>")
                     form = (audience + _x_estimate_card(site_id, x_spent) +
-                            "<form method='post' action='/account/sites/"
+                            "<form method='post' action='/websites/sites/"
                             f"{esc(site_id)}/social/x/drafts'>"
                             "<label for='x_text'>Draft a post</label>"
                             "<textarea id='x_text' name='text' maxlength="
@@ -1800,7 +1800,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                             f"<h4>Drafts</h4>{draft_rows}")
                 elif config.x_oauth_configured and config.app_registered("x"):
                     form = (f"<p class='muted'>{esc(conn['note'])}</p>"
-                            f"<p><a class='btn btn-primary' href='/account/"
+                            f"<p><a class='btn btn-primary' href='/websites/"
                             f"sites/{esc(site_id)}/connections/x/start'>"
                             "Connect with X</a></p>")
                 else:
@@ -1829,13 +1829,13 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         + f"<p>Status: <strong>{esc(d['status'])}</strong>"
                         + (f" (post {esc(d['tweet_id'])})"
                            if d["tweet_id"] else "") + "</p>"
-                        + (f"<form method='post' action='/account/sites/"
+                        + (f"<form method='post' action='/websites/sites/"
                            f"{esc(site_id)}/social/facebook/drafts/{esc(d['id'])}"
                            f"/approve'>{_totp_field(account)}<p>"
                            "<button class='btn btn-primary' type='submit'>"
                            "Approve &amp; post</button> "
                            "<button class='btn' type='submit' "
-                           f"formaction='/account/sites/{esc(site_id)}"
+                           f"formaction='/websites/sites/{esc(site_id)}"
                            f"/social/facebook/drafts/{esc(d['id'])}/reject'>"
                            "Reject</button></p></form>"
                            if d["status"] == "pending" else "")
@@ -1843,7 +1843,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         for d in drafts) or (
                         "<p class='muted'>No drafts yet.</p>")
                     form = (identity +
-                            "<form method='post' action='/account/sites/"
+                            "<form method='post' action='/websites/sites/"
                             f"{esc(site_id)}/social/facebook/drafts'>"
                             "<label for='facebook_text'>Draft a post</label>"
                             "<textarea id='facebook_text' name='text' maxlength="
@@ -1860,7 +1860,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 elif config.facebook_configured \
                         and config.app_registered("facebook"):
                     form = (f"<p class='muted'>{esc(conn['note'])}</p>"
-                            f"<p><a class='btn btn-primary' href='/account/"
+                            f"<p><a class='btn btn-primary' href='/websites/"
                             f"sites/{esc(site_id)}/connections/facebook/start'>"
                             "Connect with Facebook</a></p>")
                 else:
@@ -1886,13 +1886,13 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         + f"<p>Status: <strong>{esc(d['status'])}</strong>"
                         + (f" (post {esc(d['tweet_id'])})"
                            if d["tweet_id"] else "") + "</p>"
-                        + (f"<form method='post' action='/account/sites/"
+                        + (f"<form method='post' action='/websites/sites/"
                            f"{esc(site_id)}/social/instagram/drafts/{esc(d['id'])}"
                            f"/approve'>{_totp_field(account)}<p>"
                            "<button class='btn btn-primary' type='submit'>"
                            "Approve &amp; post</button> "
                            "<button class='btn' type='submit' "
-                           f"formaction='/account/sites/{esc(site_id)}"
+                           f"formaction='/websites/sites/{esc(site_id)}"
                            f"/social/instagram/drafts/{esc(d['id'])}/reject'>"
                            "Reject</button></p></form>"
                            if d["status"] == "pending" else "")
@@ -1900,7 +1900,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         for d in drafts) or (
                         "<p class='muted'>No drafts yet.</p>")
                     form = (identity +
-                            "<form method='post' action='/account/sites/"
+                            "<form method='post' action='/websites/sites/"
                             f"{esc(site_id)}/social/instagram/drafts'>"
                             "<label for='instagram_text'>Draft a post</label>"
                             "<textarea id='instagram_text' name='text' maxlength="
@@ -1919,7 +1919,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 elif config.facebook_configured \
                         and config.app_registered("instagram"):
                     form = (f"<p class='muted'>{esc(conn['note'])}</p>"
-                            f"<p><a class='btn btn-primary' href='/account/"
+                            f"<p><a class='btn btn-primary' href='/websites/"
                             f"sites/{esc(site_id)}/connections/instagram/start'>"
                             "Connect with Instagram</a></p>")
                 else:
@@ -1996,9 +1996,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         "<p class='muted'>Three separate choices. Revenue "
                         "amounts are private by default; the count and the "
                         "per-sale details are separate settings.</p>"
-                        f"<form method='post' action='/account/sites/{esc(site_id)}/privacy'>"
+                        f"<form method='post' action='/websites/sites/{esc(site_id)}/privacy'>"
                         f"<input type='hidden' name='return_to' value="
-                        f"'/account/sites/{esc(site_id)}'>"
+                        f"'/websites/sites/{esc(site_id)}'>"
                         f"<label><input type='checkbox' name='revenue_show' "
                         f"{_chk(site.get('revenue_show'))}> Show my revenue "
                         f"on Ventoryn</label>"
@@ -2065,7 +2065,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 <h2>Run agent work</h2>
 {_autopilot_card(site)}
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
-<form method='post' action='/account/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
+<form method='post' action='/websites/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
 <label for='job_type'>Job</label>
 <select id='job_type' name='job_type'>{_job_options()}</select>
 <div class='v-job-field' data-jobs='community_listening seo_article'>
@@ -2108,7 +2108,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 <div class='card'><h3>Record a sale manually</h3>
 <p class='muted'>If a customer paid outside Stripe, record it here so the
 funnel counts it. This is the owner-recorded fallback.</p>
-<form method='post' action='/account/sites/{esc(site_id)}/conversions'>
+<form method='post' action='/websites/sites/{esc(site_id)}/conversions'>
 <label for='amount'>Amount (USD)</label>
 <input type='text' id='amount' name='amount_usd' placeholder='19.00'>
 <p><button class='btn' type='submit'>Record sale</button></p></form></div>
@@ -2117,7 +2117,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
 {signature_card}"""
         return _signed_page(site["url"], inner, account, current="account")
 
-    @app.post("/account/sites/{site_id}/connections/{kind}")
+    @app.post("/websites/sites/{site_id}/connections/{kind}")
     def connection_update(request: Request, site_id: str, kind: str,
                           site_domain: str = Form(""),
                           api_key: str = Form(""),
@@ -2136,7 +2136,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       "<p>This connection is not available — Reddit's API "
                       "no longer offers the free access this would need. "
                       "No account was connected and nothing was stored.</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
         if kind in ("x", "facebook", "instagram"):
@@ -2148,7 +2148,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"],
                       f"<p>Use the \"Connect with {label}\" link to "
                       "connect this account.</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
         if kind == "plausible":
@@ -2188,10 +2188,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"], "<p>Unknown connection.</p>", account, current="account"),
                 status_code=400)
         return RedirectResponse(_integrations_return(return_to)
-                                or f"/account/sites/{site_id}",
+                                or f"/websites/sites/{site_id}",
                                 status_code=303)
 
-    @app.post("/account/sites/{site_id}/privacy")
+    @app.post("/websites/sites/{site_id}/privacy")
     def site_privacy(request: Request, site_id: str,
                      return_to: str = Form(""),
                      revenue_show: str = Form(""),
@@ -2209,7 +2209,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(err)}</p><p><a href='/account/sites/{esc(site_id)}'>"
+                      f"<p>{esc(err)}</p><p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         # A checkbox sends "on" when ticked and nothing at all when
@@ -2218,10 +2218,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
         store.set_count_show(site_id, count_show == "on")
         store.set_details_show(site_id, details_show == "on")
         dest = (return_to if return_to.startswith("/account/")
-                else f"/account/sites/{site_id}")
+                else f"/websites/sites/{site_id}")
         return RedirectResponse(dest, status_code=303)
 
-    @app.post("/account/sites/{site_id}/connections/{kind}/disconnect")
+    @app.post("/websites/sites/{site_id}/connections/{kind}/disconnect")
     def connection_disconnect(request: Request, site_id: str, kind: str,
                               totp_code: str = Form(""),
                               return_to: str = Form("")):
@@ -2236,7 +2236,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if not ok:
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(err)}</p><p><a href='/account/sites/{esc(site_id)}'>"
+                      f"<p>{esc(err)}</p><p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
         conn = store.get_connection(site_id, kind) or {}
@@ -2252,7 +2252,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return RedirectResponse(back, status_code=303)
         inner = (f"<p>{esc(kind.replace('_', ' '))} is disconnected. "
                  f"{esc(note)}</p>"
-                 f"<p><a href='/account/sites/{esc(site_id)}'>Back to "
+                 f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
         return HTMLResponse(_signed_page(site["url"], inner, account, current="account"))
 
@@ -2288,7 +2288,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 "justify-content:space-between;gap:12px}"
                 ".v-autopilot-head h3{margin:0}</style></div>")
 
-    @app.post("/account/sites/{site_id}/autopilot")
+    @app.post("/websites/sites/{site_id}/autopilot")
     def site_autopilot(request: Request, site_id: str, on: str = Form("1"),
                        return_to: str = Form("")):
         account, redirect = _need_account(request)
@@ -2303,10 +2303,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return JSONResponse({"on": on == "1"})
         # Only back to the Websites list or this site's page — never
         # anywhere a crafted form names.
-        back = "/portfolio" if return_to == "/portfolio" else f"/account/sites/{site_id}#autopilot"
+        back = "/portfolio" if return_to == "/portfolio" else f"/websites/sites/{site_id}#autopilot"
         return RedirectResponse(back, status_code=303)
 
-    @app.post("/account/sites/{site_id}/jobs")
+    @app.post("/websites/sites/{site_id}/jobs")
     async def run_job(request: Request, site_id: str,
                       job_type: str = Form(...),
                       keywords: str = Form(""), community: str = Form(""),
@@ -2335,7 +2335,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(exc)}</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=code)
         is_op = config.is_operator(account["email"])
@@ -2358,7 +2358,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         except InsufficientCredits as exc:
             return HTMLResponse(
                 _signed_page(site["url"],
-                      f"<p>{esc(exc)}</p><p><a href='/account/sites/"
+                      f"<p>{esc(exc)}</p><p><a href='/websites/sites/"
                       f"{esc(site_id)}'>Back</a>.</p>", account, current="account"),
                 status_code=402)
         try:
@@ -2395,10 +2395,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"],
                       detail +
-                      f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=500)
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     def _va_card(site: dict, check: str) -> str:
         """Ventoryn Analytics: the snippet, live status, install check."""
@@ -2441,11 +2441,11 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"Content-Security-Policy, allow "
                 f"<code>{esc(config.base_url)}</code> in "
                 f"<code>script-src</code> and <code>connect-src</code>.</p>"
-                f"<form method='post' action='/account/sites/{esc(site['id'])}"
+                f"<form method='post' action='/websites/sites/{esc(site['id'])}"
                 f"/analytics/check'><button class='btn' type='submit'>"
                 f"Check my installation</button></form></div>")
 
-    @app.post("/account/sites/{site_id}/snapshot")
+    @app.post("/websites/sites/{site_id}/snapshot")
     def snapshot_refresh(request: Request, site_id: str):
         from ventoryn import site_snapshot
 
@@ -2458,10 +2458,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
                                       account, current="account"), status_code=404)
         # Cooldown + one-at-a-time are enforced inside start().
         site_snapshot.start(store, site, REPORTS_DIR)
-        return RedirectResponse(f"/account/sites/{site_id}#site-snapshot",
+        return RedirectResponse(f"/websites/sites/{site_id}#site-snapshot",
                                 status_code=303)
 
-    @app.get("/account/sites/{site_id}/snapshot-image")
+    @app.get("/websites/sites/{site_id}/snapshot-image")
     def snapshot_image(request: Request, site_id: str):
         """The owner's own site screenshot — owner only, never public."""
         from fastapi.responses import FileResponse, Response
@@ -2480,7 +2480,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         return FileResponse(str(path), media_type="image/png",
                             headers={"Cache-Control": "private, max-age=300"})
 
-    @app.post("/account/sites/{site_id}/analytics/check")
+    @app.post("/websites/sites/{site_id}/analytics/check")
     async def va_check_install(request: Request, site_id: str):
         import asyncio
         import urllib.parse as _up
@@ -2497,10 +2497,10 @@ funnel counts it. This is the owner-recorded fallback.</p>
         ok, message = await asyncio.to_thread(check_install, site)
         q = _up.quote(("ok:" if ok else "no:") + message, safe="")
         return RedirectResponse(
-            f"/account/sites/{site_id}?va_check={q}#ventoryn-analytics",
+            f"/websites/sites/{site_id}?va_check={q}#ventoryn-analytics",
             status_code=303)
 
-    @app.post("/account/sites/{site_id}/conversions")
+    @app.post("/websites/sites/{site_id}/conversions")
     def record_sale(request: Request, site_id: str,
                     amount_usd: str = Form(...)):
         account, redirect = _need_account(request)
@@ -2518,11 +2518,11 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(
                 _signed_page(site["url"],
                       "<p>Enter a sale amount in dollars, e.g. 19.00.</p>"
-                      f"<p><a href='/account/sites/{esc(site_id)}'>Back</a>.</p>",
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="account"),
                 status_code=400)
         store.record_conversion(site_id, amount_cents, "usd", "manual")
-        return RedirectResponse(f"/account/sites/{site_id}", status_code=303)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     def _count_own_sale(event: dict) -> None:
         """A Ventoryn subscription is also a paying customer of

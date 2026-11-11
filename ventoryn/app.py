@@ -415,7 +415,7 @@ def create_app(
         Overview — that is how an open page stays live."""
         if path in ("/ops", "/game", "/api/snapshot"):
             return "Overview"
-        if path.startswith("/portfolio"):
+        if path.startswith("/portfolio") or path.startswith("/websites"):
             return "Websites"
         if path.startswith("/campaigns"):
             return "Campaigns"
@@ -1720,7 +1720,7 @@ function ctaFor(url) {{
   const box = $("landing-cta");
   const enc = encodeURIComponent(url);
   if (window.VENTORYN.subscribed) {{
-    box.innerHTML = "<p><a class='btn btn-primary' href='/account/sites/new?url=" + enc + "'>Add this website to your account</a></p>";
+    box.innerHTML = "<p><a class='btn btn-primary' href='/websites/sites/new?url=" + enc + "'>Add this website to your account</a></p>";
   }} else if (window.VENTORYN.signedIn) {{
     box.innerHTML = "<p><a class='btn btn-primary' href='/account/subscribe?site_url=" + enc + "'>Subscribe — $20/month to add " + esc(url) + "</a></p>";
   }} else {{
@@ -1939,13 +1939,12 @@ if (demoToggle && demoValue) {{
                    if conn.get("status") == "connected" else None)
             return (f"<div class='table-wrap v-biz-funnel'><table>"
                     f"{_funnel_rows(_saas_store, site, key)}</table></div>"
-                    f"<p class='v-biz-open'><a href='{esc(site['url'])}' "
-                    f"target='_blank' rel='noopener noreferrer'>"
-                    f"Open website</a></p>")
+                    f"<p class='v-biz-open'><a href='/websites/sites/"
+                    f"{esc(site['id'])}'>Open website</a></p>")
 
         def _title(r) -> str:
             if str(r["id"]).startswith("site:"):
-                return (f"<h3><a href='/account/sites/{esc(str(r['id'])[5:])}'>"
+                return (f"<h3><a href='/websites/sites/{esc(str(r['id'])[5:])}'>"
                         f"{esc(r['name'])}</a></h3>")
             return f"<h3>{esc(r['name'])}</h3>"
 
@@ -1965,7 +1964,7 @@ if (demoToggle && demoValue) {{
                 f"</article>"
                 for i, r in enumerate(rows)) or (
                 "<div class='card'><p>No websites yet. "
-                "<a href='/account/sites/new'>Add your first website</a> — "
+                "<a href='/websites/sites/new'>Add your first website</a> — "
                 "Ventoryn works to bring it new paying "
                 "customers.</p></div>")
         def _site_list(rows) -> str:
@@ -1986,7 +1985,7 @@ if (demoToggle && demoValue) {{
                 sid = esc(site["id"])
                 summary = va.summary(site["id"])
                 visitors = (f"{summary['visitors']:,}" if summary["installed"]
-                            else f"<a class='muted' href='/account/sites/{sid}#ventoryn-analytics'>Set up</a>")
+                            else f"<a class='muted' href='/websites/sites/{sid}#ventoryn-analytics'>Set up</a>")
                 rev = _saas_store.revenue_for_site(site["id"])
                 stripe_on = (_saas_store.get_connection(site["id"], "stripe_sales")
                              or {}).get("status") == "connected"
@@ -2007,7 +2006,7 @@ if (demoToggle && demoValue) {{
                 auto = autopilot_switch_html(
                     site["id"], bool(int(site.get("autopilot", 1) or 0)),
                     r["name"], return_to="/portfolio")
-                body += (f"<tr><td><a class='v-site-name' href='/account/sites/{sid}'>"
+                body += (f"<tr><td><a class='v-site-name' href='/websites/sites/{sid}'>"
                          f"{esc(r['name'])}</a></td>"
                          f"<td class='num'>{visitors}</td><td class='num'>{paying}</td>"
                          f"<td class='num'>{revenue}</td><td>{auto}</td>"
@@ -2067,7 +2066,7 @@ if (demoToggle && demoValue) {{
 <p class='muted'>Costs are the credits each website's agent work used,
 valued at the plan rate ({money(_credit_usd(), 2)} a credit). Revenue is
 real — the sum of recorded paying customers per site.</p>{hidden_note}
-<p><a class='btn' href='/account/sites/new'>Add a website</a></p>
+<p><a class='btn' href='/websites/sites/new'>Add a website</a></p>
 <h2>Your websites</h2>
 {_site_list(site_rows)}
 <h2>Recent jobs</h2>
@@ -2247,7 +2246,7 @@ real — the sum of recorded paying customers per site.</p>{hidden_note}
         for _site in _saas_store.list_sites(account["id"]):
             for _draft in _saas_store.list_social_drafts(_site["id"]):
                 _provider = (_draft.get("kind") or "").capitalize()
-                _base = (f"/account/sites/{esc(_site['id'])}/social/"
+                _base = (f"/websites/sites/{esc(_site['id'])}/social/"
                          f"{esc(_draft.get('kind') or '')}/drafts/"
                          f"{esc(_draft['id'])}")
                 if _draft.get("status") == "pending":
@@ -2556,7 +2555,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         (same ownership check as the site page, two-factor field
         when 2FA is enabled)."""
         provider = draft.get("kind") or ""
-        base = (f"/account/sites/{esc(draft.get('site_id') or '')}"
+        base = (f"/websites/sites/{esc(draft.get('site_id') or '')}"
                 f"/social/{esc(provider)}/drafts/"
                 f"{esc(draft.get('id') or '')}")
         totp_field = ""
@@ -2670,7 +2669,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
                 else:
                     line = "Verified customers hidden"
                 return (f"<p class='v-biz-extra'>{esc(line)} — "
-                        f"<a href='/account/sites/{esc(site_id)}'>"
+                        f"<a href='/websites/sites/{esc(site_id)}'>"
                         f"View</a></p>")
             return (f"<p class='v-biz-extra'><a href='/businesses/"
                     f"{esc(b['id'])}'>View</a></p>")
@@ -2690,7 +2689,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             f"</article>"
             for i, b in enumerate(snap["businesses"])) or (
             "<div class='card'><p>No websites yet. "
-            "<a href='/account/sites/new'>Add your first website</a> — "
+            "<a href='/websites/sites/new'>Add your first website</a> — "
             "Ventoryn works to bring it new paying "
             "customers.</p></div>")
         # The landing funnel: a visitor who typed a URL on the
@@ -2730,7 +2729,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
         # opening the site page — the full controls live there.
         footer = ""
         if data["sites"]:
-            footer = (f"<p class='muted'><a href='/account/sites/"
+            footer = (f"<p class='muted'><a href='/websites/sites/"
                       f"{esc(data['sites'][0]['id'])}'>Data &amp; privacy "
                       f"controls</a></p>")
         if snap["businesses"]:
@@ -3408,7 +3407,7 @@ id="analyze-submit">Analyze</button>
         for s in sites:
             privacy_forms += (
                 f"<div class='card'><h3>{esc(s['url'])}</h3>"
-                f"<form method='post' action='/account/sites/{esc(s['id'])}/privacy'>"
+                f"<form method='post' action='/websites/sites/{esc(s['id'])}/privacy'>"
                 f"<input type='hidden' name='return_to' value='{esc(return_to)}'>"
                 f"<label><input type='checkbox' name='revenue_show' "
                 f"{_chk(s.get('revenue_show'))}> Show my revenue on "
@@ -3694,7 +3693,7 @@ id="analyze-submit">Analyze</button>
     # summary (site score, GEO score, top findings). This endpoint
     # NEVER writes or serves the full report file: that comes only
     # from the paid Analyze job on a website page (5 credits, POST
-    # /account/sites/{site_id}/jobs). Anonymous previews are
+    # /websites/sites/{site_id}/jobs). Anonymous previews are
     # rate-limited per client IP (see
     # ventoryn.analyze_jobs.PREVIEW_PER_IP_PER_HOUR); signed-in
     # users are not limited here — their usage is attributed to an
@@ -4338,7 +4337,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
             raw = (_saas_store.get_connection(s["id"], "plausible") or {}
                    ).get("_detail_raw") or {}
             parts.append(
-                f"<form method='post' action='/account/sites/{sid}/connections/plausible'>{rt}"
+                f"<form method='post' action='/websites/sites/{sid}/connections/plausible'>{rt}"
                 f"<label for='pl-dom-{sid}'>Plausible site domain</label>"
                 f"<input type='text' id='pl-dom-{sid}' name='site_domain' "
                 f"value='{esc(raw.get('site_domain', s['host']))}'>"
@@ -4355,7 +4354,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                 f"<li>Add <code>ventoryn_site_id</code> = <code>{sid}</code> to the "
                 f"checkout metadata, so sales are counted for this website.</li>"
                 f"<li>Paste the endpoint's signing secret below.</li></ol>"
-                f"<form method='post' action='/account/sites/{sid}/connections/stripe_sales'>{rt}"
+                f"<form method='post' action='/websites/sites/{sid}/connections/stripe_sales'>{rt}"
                 f"<label for='st-sec-{sid}'>Stripe webhook signing secret</label>"
                 f"<input type='password' id='st-sec-{sid}' name='webhook_secret' "
                 f"autocomplete='off' spellcheck='false' "
@@ -4374,13 +4373,13 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     if summary else
                     "<p class='muted'>Audience numbers unavailable right now.</p>")
                 parts.append(
-                    f"<p><a class='btn' href='/account/sites/{sid}#connections'>"
+                    f"<p><a class='btn' href='/websites/sites/{sid}#connections'>"
                     f"Drafts and posting for this website</a></p>")
             elif _saas_config.x_oauth_configured and _saas_config.app_registered("x"):
                 parts.append(
                     f"<p class='muted'>You will sign in to X and approve Ventoryn's "
                     f"access for this website's account, then come back here.</p>"
-                    f"<p><a class='btn btn-primary' href='/account/sites/{sid}"
+                    f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
                     f"/connections/x/start?return_to="
                     f"{esc(urllib.parse.quote(return_to, safe=''))}'>Connect with X</a></p>")
             else:
@@ -4396,7 +4395,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                             else "Connected — Facebook Page.")
                 parts.append(f"<p class='muted'>{esc(identity)}</p>")
                 parts.append(
-                    f"<p><a class='btn' href='/account/sites/{sid}#connections'>"
+                    f"<p><a class='btn' href='/websites/sites/{sid}#connections'>"
                     f"Drafts and posting for this website</a></p>")
             elif _saas_config.facebook_configured and \
                     _saas_config.app_registered("facebook"):
@@ -4404,7 +4403,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     f"<p class='muted'>You will sign in to Facebook and "
                     f"approve Ventoryn's access for this website's Page, "
                     f"then come back here.</p>"
-                    f"<p><a class='btn btn-primary' href='/account/sites/{sid}"
+                    f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
                     f"/connections/facebook/start'>Connect with Facebook</a></p>")
             else:
                 parts.append(
@@ -4417,7 +4416,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     "<p class='muted'>Connected — Instagram Business "
                     "account.</p>")
                 parts.append(
-                    f"<p><a class='btn' href='/account/sites/{sid}#connections'>"
+                    f"<p><a class='btn' href='/websites/sites/{sid}#connections'>"
                     f"Drafts and posting for this website</a></p>")
             elif _saas_config.facebook_configured and \
                     _saas_config.app_registered("instagram"):
@@ -4425,7 +4424,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     f"<p class='muted'>You will sign in to Facebook and "
                     f"approve Ventoryn's access for this website's "
                     f"Instagram Business account, then come back here.</p>"
-                    f"<p><a class='btn btn-primary' href='/account/sites/{sid}"
+                    f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
                     f"/connections/instagram/start'>Connect with Instagram</a></p>")
             else:
                 parts.append(
@@ -4444,7 +4443,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
             parts.append(f"<p class='muted'>Access requested: <code>{esc(scopes)}</code></p>")
         if connected:
             parts.append(
-                f"<form method='post' action='/account/sites/{sid}/connections/"
+                f"<form method='post' action='/websites/sites/{sid}/connections/"
                 f"{esc(kind)}/disconnect'>{rt}{totp_field}<p><button class='btn' "
                 f"type='submit'>Disconnect</button></p></form>")
         return "".join(parts)
@@ -4521,7 +4520,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                         f"<div class='v-dialog-body'>{body}</div></dialog>")
         if not sites:
             rows = ("<li class='v-site-row'><span>No websites yet.</span>"
-                    "<a class='btn btn-primary' href='/account/sites/new'>"
+                    "<a class='btn btn-primary' href='/websites/sites/new'>"
                     "Add a website</a></li>")
         open_id = f"dlg-{site}" if any(s["id"] == site for s in sites) else ""
         script = ("<script>(function(){"

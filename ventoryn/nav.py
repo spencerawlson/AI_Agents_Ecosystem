@@ -384,7 +384,7 @@ def autopilot_switch_html(site_id: str, on: bool, label: str,
     sid = _h.escape(site_id, quote=True)
     back = (f"<input type='hidden' name='return_to' value='{_h.escape(return_to, quote=True)}'>"
             if return_to else "")
-    return (f"<form class='v-switch-form' method='post' action='/account/sites/{sid}/autopilot'>"
+    return (f"<form class='v-switch-form' method='post' action='/websites/sites/{sid}/autopilot'>"
             f"<input type='hidden' name='on' value='{0 if on else 1}'>{back}"
             f"<button type='submit' class='v-switch' role='switch' "
             f"aria-checked='{'true' if on else 'false'}' "

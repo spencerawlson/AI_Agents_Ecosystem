@@ -14,6 +14,7 @@ PRIVATE_PREFIXES = (
     "/account/", "/api/", "/admin", "/portfolio", "/businesses",
     "/experiments", "/approvals", "/reports", "/report", "/ops", "/game",
     "/campaigns", "/agents", "/analytics", "/integrations", "/customers",
+    "/websites/",
 )
 
 LLMS_TXT = """\

@@ -154,7 +154,7 @@ def test_x_connect_flow(client, store, config, monkeypatch):
     account = _login(client, store)
     site = store.create_site(account["id"], "https://example.com")
 
-    r = client.get(f"/account/sites/{site['id']}/connections/x/start",
+    r = client.get(f"/websites/sites/{site['id']}/connections/x/start",
                    follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"].startswith(saas.X_AUTH_URL)
@@ -166,7 +166,7 @@ def test_x_connect_flow(client, store, config, monkeypatch):
                    params={"code": "auth-code", "state": state},
                    follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == f"/account/sites/{site['id']}"
+    assert r.headers["location"] == f"/websites/sites/{site['id']}"
 
     conn = store.get_connection(site["id"], "x")
     assert conn["status"] == "connected"
@@ -195,7 +195,7 @@ def test_x_connect_start_400_when_not_configured(store):
     c = TestClient(app)
     account = _login(c, store)
     site = store.create_site(account["id"], "https://example.com")
-    r = c.get(f"/account/sites/{site['id']}/connections/x/start",
+    r = c.get(f"/websites/sites/{site['id']}/connections/x/start",
               follow_redirects=False)
     assert r.status_code == 400
     assert "not available yet" in r.text
@@ -207,7 +207,7 @@ def test_x_connect_callback_surfaces_exchange_failure(client, store, config,
                         _fake_x_urlopen_token_fails)
     account = _login(client, store)
     site = store.create_site(account["id"], "https://example.com")
-    r = client.get(f"/account/sites/{site['id']}/connections/x/start",
+    r = client.get(f"/websites/sites/{site['id']}/connections/x/start",
                    follow_redirects=False)
     state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
     r = client.get("/account/auth/x/callback",
@@ -255,7 +255,7 @@ def test_draft_create_never_posts(client, store, config):
     account = _login(client, store)
     site = store.create_site(account["id"], "https://example.com")
     _connect_x(store, site["id"])
-    r = client.post(f"/account/sites/{site['id']}/social/x/drafts",
+    r = client.post(f"/websites/sites/{site['id']}/social/x/drafts",
                     data={"text": "Check out our new feature!",
                           "link_url": ""}, follow_redirects=False)
     assert r.status_code == 303
@@ -393,7 +393,7 @@ def test_x_connect_from_integrations_returns_to_that_window(client, store, confi
     account = _login(client, store)
     site = store.create_site(account["id"], "https://example.com")
     back = f"/integrations/x?site={site['id']}"
-    r = client.get(f"/account/sites/{site['id']}/connections/x/start",
+    r = client.get(f"/websites/sites/{site['id']}/connections/x/start",
                    params={"return_to": back}, follow_redirects=False)
     state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
     r = client.get("/account/auth/x/callback",
@@ -417,7 +417,7 @@ def test_site_page_shows_campaign_estimate_and_cost_before_posting(client, store
     site = store.create_site(account["id"], "https://example.com")
     _connect_x(store, site["id"])
     store.create_social_draft(site["id"], "x", "Launch day", "https://example.com/a")
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     assert "Campaign cost estimate" in html
     assert "30 X posts with a link over 30 days at $0.200 each: about $6.00." in html
     assert "more than the $5.00 left" in html and "covers 25 of those posts" in html

@@ -511,7 +511,7 @@ def _list(items) -> str:
 
 def render_card(site: dict, snap: dict | None) -> str:
     sid = html.escape(site["id"])
-    refresh = (f"<form method='post' action='/account/sites/{sid}/snapshot' style='margin:0'>"
+    refresh = (f"<form method='post' action='/websites/sites/{sid}/snapshot' style='margin:0'>"
                f"<button class='btn' type='submit'>Refresh snapshot</button></form>")
     if snap is None or (snap["status"] == "running" and not snap.get("data")):
         return ("<div class='card' id='site-snapshot'><h2>Website snapshot</h2>"
@@ -528,7 +528,7 @@ def render_card(site: dict, snap: dict | None) -> str:
     if p.get("screenshot"):
         # The ONE bitmap Ventoryn shows: the owner's own site, on their own
         # site page (see tests/test_vector_only.py).
-        shot = (f"<img class='v-snap-shot' src='/account/sites/{sid}/snapshot-image' "
+        shot = (f"<img class='v-snap-shot' src='/websites/sites/{sid}/snapshot-image' "
                 f"alt='Screenshot of {html.escape(site['host'])}' width='1280' height='800'>")
     elif p.get("screenshot_note"):
         shot = f"<p class='muted'>Screenshot: {html.escape(p['screenshot_note'])}</p>"

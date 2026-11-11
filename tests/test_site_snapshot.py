@@ -179,13 +179,13 @@ def _wait_done(store, site_id, timeout=5):
 
 def test_adding_a_site_starts_the_snapshot_and_page_shows_it(env):
     client, store, account, _ = env
-    r = client.post("/account/sites", data={"url": "https://shop.example.com",
+    r = client.post("/websites/sites", data={"url": "https://shop.example.com",
                                             "country": "ca", "language": "en"},
                     follow_redirects=False)
     assert r.status_code == 303
     site = store.list_sites(account["id"])[0]
     assert _wait_done(store, site["id"])["status"] == "done"
-    html = client.get(f"/account/sites/{site['id']}").text
+    html = client.get(f"/websites/sites/{site['id']}").text
     assert "Website snapshot" in html and "Shopify" in html
     assert "Where it appears online" in html
     assert "Refresh snapshot" in html
@@ -204,14 +204,14 @@ def test_screenshot_is_owner_only(env):
     site = store.create_site(account["id"], "https://shop.example.com")
     (reports / "snapshots").mkdir()
     (reports / "snapshots" / f"{site['id']}.png").write_bytes(b"\x89PNG fake")
-    r = client.get(f"/account/sites/{site['id']}/snapshot-image")
+    r = client.get(f"/websites/sites/{site['id']}/snapshot-image")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
     assert "private" in r.headers["cache-control"]
     other = TestClient(client.app)
     sign_in(other, store, email="bob@example.com", sub="sub-bob", name="Bob")
-    assert other.get(f"/account/sites/{site['id']}/snapshot-image").status_code == 404
+    assert other.get(f"/websites/sites/{site['id']}/snapshot-image").status_code == 404
     assert TestClient(client.app).get(
-        f"/account/sites/{site['id']}/snapshot-image", follow_redirects=False).status_code in (303, 307)
+        f"/websites/sites/{site['id']}/snapshot-image", follow_redirects=False).status_code in (303, 307)
 
 
 def test_old_site_without_snapshot_gets_one_when_opened(env):
@@ -220,5 +220,5 @@ def test_old_site_without_snapshot_gets_one_when_opened(env):
     client, store, account, _ = env
     site = store.create_site(account["id"], "https://old.example.com")  # no start()
     assert site_snapshot.snapshot_store_for(store).get(site["id"]) is None
-    client.get(f"/account/sites/{site['id']}")
+    client.get(f"/websites/sites/{site['id']}")
     assert _wait_done(store, site["id"])["status"] == "done"

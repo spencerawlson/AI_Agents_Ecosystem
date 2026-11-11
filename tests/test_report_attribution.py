@@ -98,7 +98,7 @@ def _site_with_evidence(app, store, client, account, gate):
 def _set_privacy(client, store, account, site_id, revenue=True,
                  count=True, details=True):
     r = client.post(
-        f"/account/sites/{site_id}/privacy",
+        f"/websites/sites/{site_id}/privacy",
         data={"revenue_show": "on" if revenue else "",
               "count_show": "on" if count else "",
               "details_show": "on" if details else "",
@@ -234,7 +234,7 @@ def test_report_respects_the_three_toggles():
     # Details off: the per-sale rows hide.
     _set_privacy(client, store, account, site["id"],
                  revenue=True, count=True, details=False)
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "Conversion details are hidden" in r.text
 
 

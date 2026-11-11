@@ -77,14 +77,14 @@ def test_owner_can_turn_it_off_and_on(client, store, config):
     acct = _login(client, store)
     store.grant_credits(acct["id"], 100, "test")
     site = store.create_site(acct["id"], "https://shop.example.com")
-    page = client.get(f"/account/sites/{site['id']}").text
+    page = client.get(f"/websites/sites/{site['id']}").text
     assert "Agents on autopilot" in page
     assert "class='v-switch' role='switch' aria-checked='true'" in page
-    r = client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "0"},
+    r = client.post(f"/websites/sites/{site['id']}/autopilot", data={"on": "0"},
                     follow_redirects=False)
     assert r.status_code == 303
     assert _run(store, config, max_jobs=10) == []
-    client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "1"})
+    client.post(f"/websites/sites/{site['id']}/autopilot", data={"on": "1"})
     assert len(_run(store, config, max_jobs=10)) == 2
 
 
@@ -92,7 +92,7 @@ def test_cannot_toggle_someone_elses_site(client, store):
     _login(client, store)
     other = _account(store, sub="s2", email="bo@example.com")
     site = store.create_site(other["id"], "https://blog.example.org")
-    r = client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "0"})
+    r = client.post(f"/websites/sites/{site['id']}/autopilot", data={"on": "0"})
     assert r.status_code == 404
     assert store.get_site(site["id"])["autopilot"] == 1
 
@@ -108,18 +108,18 @@ def test_switch_flips_in_place_and_list_redirects_back(client, store, config):
     acct = _login(client, store)
     site = store.create_site(acct["id"], "https://shop.example.com")
     listing = client.get("/portfolio").text
-    assert f"action='/account/sites/{site['id']}/autopilot'" in listing
+    assert f"action='/websites/sites/{site['id']}/autopilot'" in listing
     assert "name='return_to' value='/portfolio'" in listing
-    r = client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "0"},
+    r = client.post(f"/websites/sites/{site['id']}/autopilot", data={"on": "0"},
                     headers={"Accept": "application/json"})
     assert r.status_code == 200 and r.json() == {"on": False}
     assert store.get_site(site["id"])["autopilot"] == 0
-    r = client.post(f"/account/sites/{site['id']}/autopilot",
+    r = client.post(f"/websites/sites/{site['id']}/autopilot",
                     data={"on": "1", "return_to": "/portfolio"}, follow_redirects=False)
     assert r.headers["location"] == "/portfolio"
-    r = client.post(f"/account/sites/{site['id']}/autopilot",
+    r = client.post(f"/websites/sites/{site['id']}/autopilot",
                     data={"on": "1", "return_to": "https://evil.example"}, follow_redirects=False)
-    assert r.headers["location"] == f"/account/sites/{site['id']}#autopilot"
+    assert r.headers["location"] == f"/websites/sites/{site['id']}#autopilot"
 
 
 def test_job_orphaned_by_a_restart_is_refunded_and_retried(store, config):

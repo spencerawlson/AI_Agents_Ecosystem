@@ -45,7 +45,7 @@ def test_app_page_lists_websites_each_with_a_window():
     for s in (a, b):
         assert f"data-open='dlg-{s['id']}'" in html
         assert f"<dialog class='v-dialog' id='dlg-{s['id']}'" in html
-        assert f"action='/account/sites/{s['id']}/connections/plausible'" in html
+        assert f"action='/websites/sites/{s['id']}/connections/plausible'" in html
     assert "name='return_to' value='/integrations/plausible?site=" in html
     assert "type='password'" in html  # keys are never echoed while typing
 
@@ -69,7 +69,7 @@ def test_saving_in_a_window_returns_to_the_app():
     client, store, account = _client()
     a = store.create_site(account["id"], "https://shop.example.com")
     back = f"/integrations/stripe_sales?site={a['id']}"
-    r = client.post(f"/account/sites/{a['id']}/connections/stripe_sales",
+    r = client.post(f"/websites/sites/{a['id']}/connections/stripe_sales",
                     data={"webhook_secret": "whsec_abc", "return_to": back},
                     follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == back
@@ -82,10 +82,10 @@ def test_saving_in_a_window_returns_to_the_app():
 def test_return_to_cannot_redirect_elsewhere(evil):
     client, store, account = _client()
     a = store.create_site(account["id"], "https://shop.example.com")
-    r = client.post(f"/account/sites/{a['id']}/connections/stripe_sales",
+    r = client.post(f"/websites/sites/{a['id']}/connections/stripe_sales",
                     data={"webhook_secret": "whsec_abc", "return_to": evil},
                     follow_redirects=False)
-    assert r.headers["location"] == f"/account/sites/{a['id']}"
+    assert r.headers["location"] == f"/websites/sites/{a['id']}"
     assert _integrations_return(evil) is None
 
 
@@ -96,7 +96,7 @@ def test_disconnect_in_a_window_returns_to_the_app():
                             {"api_key": "k", "site_domain": "shop.example.com"})
     back = f"/integrations/plausible?site={a['id']}"
     from _signin import fresh_totp_code
-    r = client.post(f"/account/sites/{a['id']}/connections/plausible/disconnect",
+    r = client.post(f"/websites/sites/{a['id']}/connections/plausible/disconnect",
                     data={"return_to": back,
                           "totp_code": fresh_totp_code(store, account["id"])},
                     follow_redirects=False)
@@ -109,12 +109,12 @@ def test_x_connect_remembers_the_window_across_the_round_trip():
                                      x_app_registered=True)
     a = store.create_site(account["id"], "https://shop.example.com")
     back = f"/integrations/x?site={a['id']}"
-    r = client.get(f"/account/sites/{a['id']}/connections/x/start",
+    r = client.get(f"/websites/sites/{a['id']}/connections/x/start",
                    params={"return_to": back}, follow_redirects=False)
     assert r.status_code == 303 and "twitter.com" in r.headers["location"]
     from urllib.parse import unquote
     assert unquote(r.cookies.get(X_RETURN_COOKIE).strip('"')) == back
-    evil = client.get(f"/account/sites/{a['id']}/connections/x/start",
+    evil = client.get(f"/websites/sites/{a['id']}/connections/x/start",
                       params={"return_to": "https://evil.example"},
                       follow_redirects=False)
     assert X_RETURN_COOKIE not in evil.cookies

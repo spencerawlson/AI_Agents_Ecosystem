@@ -308,7 +308,7 @@ def test_dashboard_honest_unavailable_states(client, store):
 
 def test_site_create_rejects_bad_url(client, store):
     _login(client, store)
-    r = client.post("/account/sites",
+    r = client.post("/websites/sites",
                     data={"url": "https://localhost:8000", "country": "ca",
                           "language": "en"})
     assert r.status_code == 400
@@ -582,7 +582,7 @@ def test_job_analyze_charges_and_reports(client, store, tmp_path, monkeypatch):
 
     monkeypatch.setattr("ecosystem.analyze.run_analysis", _fake_analysis)
     monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
-    r = client.post(f"/account/sites/{site['id']}/jobs",
+    r = client.post(f"/websites/sites/{site['id']}/jobs",
                     data={"job_type": "analyze"}, follow_redirects=False)
     assert r.status_code == 303
     assert store.credit_balance(account["id"]) == 95
@@ -598,7 +598,7 @@ def test_job_analyze_charges_and_reports(client, store, tmp_path, monkeypatch):
 def test_job_insufficient_credits_refused(client, store):
     account = _login(client, store)
     site = store.create_site(account["id"], "https://road2cissp.com")
-    r = client.post(f"/account/sites/{site['id']}/jobs",
+    r = client.post(f"/websites/sites/{site['id']}/jobs",
                     data={"job_type": "analyze"})
     assert r.status_code == 402
     assert "balance is 0" in r.text
@@ -639,7 +639,7 @@ def test_operator_job_runs_with_zero_balance(store, config, tmp_path,
     site = store.create_site(account["id"], "https://road2cissp.com")
     monkeypatch.setattr("ecosystem.analyze.run_analysis", _fake_analysis_ok)
     monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
-    r = client.post(f"/account/sites/{site['id']}/jobs",
+    r = client.post(f"/websites/sites/{site['id']}/jobs",
                     data={"job_type": "analyze"}, follow_redirects=False)
     assert r.status_code == 303
     assert store.credit_balance(account["id"]) == 0
@@ -662,7 +662,7 @@ def test_operator_failed_job_refunds_nothing(store, config, tmp_path,
 
     monkeypatch.setattr("ecosystem.analyze.run_analysis", _boom)
     monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
-    r = client.post(f"/account/sites/{site['id']}/jobs",
+    r = client.post(f"/websites/sites/{site['id']}/jobs",
                     data={"job_type": "analyze"}, follow_redirects=False)
     assert r.status_code == 500
     assert "Nothing was charged" in r.text
@@ -688,7 +688,7 @@ def test_customer_failed_job_refunds_exactly(client, store, tmp_path,
 
     monkeypatch.setattr("ecosystem.analyze.run_analysis", _boom)
     monkeypatch.setattr(saas_routes, "REPORTS_DIR", tmp_path)
-    r = client.post(f"/account/sites/{site['id']}/jobs",
+    r = client.post(f"/websites/sites/{site['id']}/jobs",
                     data={"job_type": "analyze"}, follow_redirects=False)
     assert r.status_code == 500
     assert "and the 5 credits were refunded" in r.text
@@ -712,7 +712,7 @@ def test_operator_site_page_shows_unlimited(store, config):
     client = _operator_client(store, config)
     account = _operator_account(client, store)
     site = store.create_site(account["id"], "https://road2cissp.com")
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     assert "Credit balance: <strong>Unlimited</strong>" in r.text
 
@@ -725,7 +725,7 @@ def test_job_server_cannot_run_is_not_charged(client, store, monkeypatch):
     account = _login(client, store)
     store.grant_credits(account["id"], 100, "test grant")
     site = store.create_site(account["id"], "https://road2cissp.com")
-    r = client.post(f"/account/sites/{site['id']}/jobs",
+    r = client.post(f"/websites/sites/{site['id']}/jobs",
                     data={"job_type": "seo_article"})
     assert r.status_code == 503
     assert "needs an AI key" in r.text
@@ -738,21 +738,21 @@ def test_connections_are_honest_and_secrets_never_rendered(client, store):
     account = _login(client, store)
     site = store.create_site(account["id"], "https://road2cissp.com")
     r = client.post(
-        f"/account/sites/{site['id']}/connections/reddit", data={})
+        f"/websites/sites/{site['id']}/connections/reddit", data={})
     assert r.status_code == 400
     assert "not available" in r.text
 
     r = client.post(
-        f"/account/sites/{site['id']}/connections/plausible",
+        f"/websites/sites/{site['id']}/connections/plausible",
         data={"site_domain": "road2cissp.com",
               "api_key": "plausible-secret-key"}, follow_redirects=False)
     assert r.status_code == 303
     r = client.post(
-        f"/account/sites/{site['id']}/connections/stripe_sales",
+        f"/websites/sites/{site['id']}/connections/stripe_sales",
         data={"webhook_secret": "whsec-site-secret"},
         follow_redirects=False)
     assert r.status_code == 303
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
     assert "plausible-secret-key" not in r.text
     assert "whsec-site-secret" not in r.text
@@ -762,13 +762,13 @@ def test_connections_are_honest_and_secrets_never_rendered(client, store):
 def test_manual_sale_is_the_owner_recorded_fallback(client, store):
     account = _login(client, store)
     site = store.create_site(account["id"], "https://road2cissp.com")
-    r = client.post(f"/account/sites/{site['id']}/conversions",
+    r = client.post(f"/websites/sites/{site['id']}/conversions",
                     data={"amount_usd": "19.00"}, follow_redirects=False)
     assert r.status_code == 303
     assert store.paying_customer_count(site["id"]) == 1
     # Revenue is private by default: the sale counts toward the 100
     # goal, but no dollar figure is shown.
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "$19.00" not in r.text
     assert "hidden" in r.text
     assert "Pending" in r.text  # owner-recorded, no Stripe event yet
@@ -776,12 +776,12 @@ def test_manual_sale_is_the_owner_recorded_fallback(client, store):
     # toggle is a sensitive action: with 2FA enabled it needs a fresh
     # code.
     from _signin import fresh_totp_code
-    r = client.post(f"/account/sites/{site['id']}/privacy",
+    r = client.post(f"/websites/sites/{site['id']}/privacy",
                     data={"revenue_show": "on", "count_show": "on",
                           "details_show": "on",
                           "totp_code": fresh_totp_code(store, account["id"]),
-                          "return_to": f"/account/sites/{site['id']}"},
+                          "return_to": f"/websites/sites/{site['id']}"},
                     follow_redirects=False)
     assert r.status_code == 303
-    r = client.get(f"/account/sites/{site['id']}")
+    r = client.get(f"/websites/sites/{site['id']}")
     assert "$19.00" in r.text
