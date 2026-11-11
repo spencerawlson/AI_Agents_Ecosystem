@@ -181,6 +181,15 @@ SIDEBAR_CSS = """
   background: linear-gradient(135deg, #7ef0b8 0%, #5fb8c9 50%, #5b8def 100%); }
 .rev-toggle[aria-checked='true'] .rev-knob { transform: translateX(20px); }
 .rev-toggle:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; }
+.v-switch-form { margin: 0; display: inline-block; }
+.v-switch { display: inline-flex; align-items: center; gap: 8px; border: 0;
+  background: none; padding: 2px 0; cursor: pointer; font: inherit;
+  font-size: 13px; font-weight: 700; color: #4b4566; }
+.v-switch[aria-checked='true'] .rev-track {
+  background: linear-gradient(135deg, #7ef0b8 0%, #5fb8c9 50%, #5b8def 100%); }
+.v-switch[aria-checked='true'] .rev-knob { transform: translateX(20px); }
+.v-switch:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; border-radius: 999px; }
+.v-switch:disabled { opacity: .6; cursor: progress; }
 @media (prefers-reduced-motion: reduce) { .rev-track, .rev-knob { transition: none; } }
 @media (max-width: 560px) { .rev-toggle .rev-label { display: none; } }
 .header-badge { position: absolute; top: 2px; right: 0; min-width: 18px;
@@ -360,6 +369,30 @@ def sidebar_html(current: str | None, is_operator: bool, *,
 REVENUE_TOGGLE_JS = "<script>document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('rev-toggle');if(!b)return;var cells=document.querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site],[data-rev-site-profit]');if(!cells.length)return;b.hidden=false;var KEY='ventoryn.revealRevenue',shown=false;cells.forEach(function(el){el.setAttribute('data-masked',el.textContent);});function mark(on){shown=on;b.setAttribute('aria-checked',on?'true':'false');var t=on?'Hide revenue':'Show revenue';b.setAttribute('aria-label',t);b.title=t;try{on?sessionStorage.setItem(KEY,'1'):sessionStorage.removeItem(KEY);}catch(e){}}function hide(){cells.forEach(function(el){el.textContent=el.getAttribute('data-masked');});mark(false);}function show(){fetch('/api/websites/revenue',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(!r.ok)throw r;return r.json();}).then(function(d){document.querySelectorAll('[data-rev-total]').forEach(function(el){el.textContent=d.total;});document.querySelectorAll('[data-rev-profit]').forEach(function(el){el.textContent=d.net_profit;});document.querySelectorAll('[data-rev-site]').forEach(function(el){var v=d.sites[el.getAttribute('data-rev-site')];if(v)el.textContent=v;});document.querySelectorAll('[data-rev-site-profit]').forEach(function(el){var v=(d.site_profit||{})[el.getAttribute('data-rev-site-profit')];if(v)el.textContent=v;});mark(true);}).catch(function(){});}b.addEventListener('click',function(){shown?hide():show();});var keep=false;try{keep=sessionStorage.getItem(KEY)==='1';}catch(e){}if(keep)show();});</script>"
 
 
+#: Any on/off switch form (class v-switch-form) posts in place: the
+#: switch flips without leaving the page. Without JS the form still
+#: posts and the server redirects back.
+SWITCH_JS = "<script>document.addEventListener('submit',function(e){var f=e.target;if(!f.matches||!f.matches('form.v-switch-form'))return;e.preventDefault();var b=f.querySelector('.v-switch');if(b)b.disabled=true;fetch(f.action,{method:'POST',body:new FormData(f),credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(r){if(!r.ok)throw r;return r.json();}).then(function(d){var on=!!d.on;b.setAttribute('aria-checked',on?'true':'false');f.querySelector('input[name=on]').value=on?'0':'1';var t=f.querySelector('.v-switch-text');if(t)t.textContent=on?'On':'Off';b.disabled=false;}).catch(function(){f.submit();});});</script>"
+
+
+def autopilot_switch_html(site_id: str, on: bool, label: str,
+                          return_to: str = "") -> str:
+    """The agents' autopilot switch for one website (same look as the
+    Revenue switch). ``label`` names the website for screen readers."""
+    import html as _h
+
+    sid = _h.escape(site_id, quote=True)
+    back = (f"<input type='hidden' name='return_to' value='{_h.escape(return_to, quote=True)}'>"
+            if return_to else "")
+    return (f"<form class='v-switch-form' method='post' action='/account/sites/{sid}/autopilot'>"
+            f"<input type='hidden' name='on' value='{0 if on else 1}'>{back}"
+            f"<button type='submit' class='v-switch' role='switch' "
+            f"aria-checked='{'true' if on else 'false'}' "
+            f"aria-label='Agents on autopilot for {_h.escape(label, quote=True)}'>"
+            f"<span class='rev-track' aria-hidden='true'><span class='rev-knob'></span></span>"
+            f"<span class='v-switch-text'>{'On' if on else 'Off'}</span></button></form>")
+
+
 def platform_head_html(title: str, subtitle: str = "", *,
                        pending_approvals: int = 0,
                        pause_pill: str = "") -> str:
@@ -400,4 +433,4 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"<a href='/account/logout'>Sign out</a>"
         f"</div></div>"
         f"</div>"
-        f"</header>" + REVENUE_TOGGLE_JS)
+        f"</header>" + REVENUE_TOGGLE_JS + SWITCH_JS)

@@ -78,7 +78,8 @@ def test_owner_can_turn_it_off_and_on(client, store, config):
     store.grant_credits(acct["id"], 100, "test")
     site = store.create_site(acct["id"], "https://shop.example.com")
     page = client.get(f"/account/sites/{site['id']}").text
-    assert "Agents on autopilot" in page and "badge-ok'>On<" in page
+    assert "Agents on autopilot" in page
+    assert "class='v-switch' role='switch' aria-checked='true'" in page
     r = client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "0"},
                     follow_redirects=False)
     assert r.status_code == 303
@@ -100,3 +101,37 @@ def test_off_switch_for_the_loop(monkeypatch):
     monkeypatch.setenv("VENTORYN_AUTOPILOT", "off")
     assert autopilot.start(None, None, get_orchestrator=lambda: None,
                            reports_dir=Path(".")) is None
+
+
+
+def test_switch_flips_in_place_and_list_redirects_back(client, store, config):
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://shop.example.com")
+    listing = client.get("/portfolio").text
+    assert f"action='/account/sites/{site['id']}/autopilot'" in listing
+    assert "name='return_to' value='/portfolio'" in listing
+    r = client.post(f"/account/sites/{site['id']}/autopilot", data={"on": "0"},
+                    headers={"Accept": "application/json"})
+    assert r.status_code == 200 and r.json() == {"on": False}
+    assert store.get_site(site["id"])["autopilot"] == 0
+    r = client.post(f"/account/sites/{site['id']}/autopilot",
+                    data={"on": "1", "return_to": "/portfolio"}, follow_redirects=False)
+    assert r.headers["location"] == "/portfolio"
+    r = client.post(f"/account/sites/{site['id']}/autopilot",
+                    data={"on": "1", "return_to": "https://evil.example"}, follow_redirects=False)
+    assert r.headers["location"] == f"/account/sites/{site['id']}#autopilot"
+
+
+def test_job_orphaned_by_a_restart_is_refunded_and_retried(store, config):
+    acct = _account(store)
+    store.grant_credits(acct["id"], 100, "test")
+    site = store.create_site(acct["id"], "https://shop.example.com")
+    stuck = store.charge_credits(acct["id"], "seo_article", site["id"])  # stays queued
+    assert "seo_article" not in autopilot.due_jobs(store, store.get_site(site["id"]), NOW)
+    later = NOW + timedelta(hours=3)
+    assert autopilot.expire_stale_jobs(store, later) == 1
+    job = store.get_job(stuck["id"])
+    assert job["status"] == "failed" and "refunded 10" in job["result"]
+    assert store.credit_balance(acct["id"]) == 100
+    assert "seo_article" in autopilot.due_jobs(store, store.get_site(site["id"]),
+                                               later + timedelta(days=1, minutes=1))

@@ -44,4 +44,4 @@ def test_each_website_is_one_row_with_its_key_numbers():
     for head in ("Website", "Visitors (30 days)", "Paying customers", "Revenue", "Autopilot"):
         assert f">{head}</th>" in html or f">{head} <button" in html
     assert html.count("<a class='v-site-name' href='/account/sites/") == 2
-    assert "Connect Stripe</a>" in html and "badge-ok'>On<" in html
+    assert "Connect Stripe</a>" in html and "role='switch' aria-checked='true'" in html

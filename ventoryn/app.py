@@ -1995,9 +1995,11 @@ if (demoToggle && demoValue) {{
                         revenue = f"<span data-rev-site='{sid}'>hidden</span>"
                     else:
                         revenue = (f"${rev['revenue']['total_cents'] / 100:,.2f}")
-                auto = ("<span class='badge badge-ok'>On</span>"
-                        if int(site.get("autopilot", 1) or 0)
-                        else "<span class='badge badge-off'>Off</span>")
+                from ventoryn.nav import autopilot_switch_html
+
+                auto = autopilot_switch_html(
+                    site["id"], bool(int(site.get("autopilot", 1) or 0)),
+                    r["name"], return_to="/portfolio")
                 body += (f"<tr><td><a class='v-site-name' href='/account/sites/{sid}'>"
                          f"{esc(r['name'])}</a></td>"
                          f"<td class='num'>{visitors}</td><td class='num'>{paying}</td>"
