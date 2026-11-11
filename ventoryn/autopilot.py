@@ -95,10 +95,31 @@ def execute(store, config, account: dict, site: dict, job_type: str, *,
     return store.get_job(job["id"])
 
 
+#: A job still "queued" this long after it started was orphaned (the
+#: server restarted mid-run): it is failed and refunded so it can retry.
+STALE_AFTER = timedelta(hours=2)
+
+
+def expire_stale_jobs(store, now: datetime) -> int:
+    """Fail + refund jobs orphaned by a restart. Returns how many."""
+    n = 0
+    for job in store.stale_jobs((now - STALE_AFTER).isoformat()):
+        charged = int(job.get("credits_charged") or 0)
+        if charged:
+            store.grant_credits(job["account_id"], charged,
+                                f"Refund — {job['job_type']} job interrupted")
+        store.set_job_result(job["id"], "failed",
+                             "Interrupted (the server restarted mid-run)"
+                             + (f" — refunded {charged} credits" if charged else ""))
+        n += 1
+    return n
+
+
 def run_once(store, config, *, orchestrator, reports_dir: Path,
              now: datetime | None = None, max_jobs: int = 1) -> list[dict]:
     """Run up to ``max_jobs`` due jobs across all websites."""
     now = now or datetime.now(timezone.utc)
+    expire_stale_jobs(store, now)
     ran: list[dict] = []
     for site in store.all_sites():
         account = store.get_account(site["account_id"])

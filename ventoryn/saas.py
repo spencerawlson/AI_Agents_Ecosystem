@@ -1307,6 +1307,15 @@ class SaasStore:
             self._conn.execute("UPDATE saas_sites SET autopilot = ? WHERE id = ?",
                                (1 if on else 0, site_id))
 
+    def stale_jobs(self, older_than_iso: str) -> list[dict]:
+        """Jobs still queued/running that started before the cutoff —
+        orphaned by a server restart mid-run."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_jobs WHERE status IN ('queued', 'running')"
+                " AND created_at < ?", (older_than_iso,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
     def last_job(self, site_id: str, job_type: str) -> dict | None:
         """The most recent job of this type on this site, or None."""
         with self._lock:

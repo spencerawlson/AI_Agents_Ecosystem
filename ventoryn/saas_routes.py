@@ -1567,19 +1567,21 @@ funnel counts it. This is the owner-recorded fallback.</p>
         plan = ", ".join(
             f"{site_jobs.JOB_LABELS[jt].split(' — ')[0]} every {days} days"
             for jt, days in autopilot.AUTOPILOT_JOBS)
-        state = ("<span class='badge badge-ok'>On</span>" if on
-                 else "<span class='badge badge-off'>Off</span>")
-        label = "Turn off" if on else "Turn on"
-        return (f"<div class='card' id='autopilot'><h3>Agents on autopilot {state}</h3>"
-                f"<p class='muted'>The agents work on this website by themselves: "
+        from ventoryn.nav import autopilot_switch_html
+
+        return (f"<div class='card' id='autopilot'><div class='v-autopilot-head'>"
+                f"<h3>Agents on autopilot</h3>"
+                f"{autopilot_switch_html(site['id'], on, site['host'] or site['url'])}</div>"
+                f"<p class='muted'>When on, the agents work on this website by themselves: "
                 f"{esc(plan)}. Each run costs the same credits as running it by hand; "
                 f"nothing is published without your approval.</p>"
-                f"<form method='post' action='/account/sites/{esc(site['id'])}/autopilot'>"
-                f"<input type='hidden' name='on' value='{0 if on else 1}'>"
-                f"<button class='btn' type='submit'>{label}</button></form></div>")
+                "<style>.v-autopilot-head{display:flex;align-items:center;"
+                "justify-content:space-between;gap:12px}"
+                ".v-autopilot-head h3{margin:0}</style></div>")
 
     @app.post("/account/sites/{site_id}/autopilot")
-    def site_autopilot(request: Request, site_id: str, on: str = Form("1")):
+    def site_autopilot(request: Request, site_id: str, on: str = Form("1"),
+                       return_to: str = Form("")):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1588,7 +1590,12 @@ funnel counts it. This is the owner-recorded fallback.</p>
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account, current="account"), status_code=404)
         store.set_site_autopilot(site_id, on == "1")
-        return RedirectResponse(f"/account/sites/{site_id}#autopilot", status_code=303)
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"on": on == "1"})
+        # Only back to the Websites list or this site's page — never
+        # anywhere a crafted form names.
+        back = "/portfolio" if return_to == "/portfolio" else f"/account/sites/{site_id}#autopilot"
+        return RedirectResponse(back, status_code=303)
 
     @app.post("/account/sites/{site_id}/jobs")
     async def run_job(request: Request, site_id: str,
