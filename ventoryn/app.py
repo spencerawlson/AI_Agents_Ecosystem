@@ -957,8 +957,11 @@ def create_app(
         if current == "live-ops" and is_operator:
             pause_pill = ui.pause_pill_html(
                 _saas_store.get_global_pause(), "/ops")
+        from ventoryn.alerts import account_alerts
+
         head = platform_head_html(title, pending_approvals=pending,
-                                  pause_pill=pause_pill)
+                                  pause_pill=pause_pill,
+                                  alerts=account_alerts(_saas_store, account, pending))
         return ui.page(title, inner, sidebar=sidebar, page_head=head,
                        extra_css=extra_css)
 
@@ -4235,6 +4238,26 @@ shows verified conversions only.</p>"""
                     f"<th>Date</th><th></th></tr>{rows}</table></div></div>")
         return out
 
+    @app.get("/alerts", response_class=HTMLResponse)
+    def alerts_page(request: Request):
+        """Everything that needs the owner's attention, in one list."""
+        from ventoryn.alerts import ALERTS_CSS, account_alerts, alert_rows_html
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        owned = _owned_business_ids(account)
+        pending = len([a for a in state["approvals"].pending()
+                       if _approval_visible(account, a, owned)])
+        alerts = account_alerts(_saas_store, account, pending)
+        body = (f"<ul class='v-alerts'>{alert_rows_html(alerts)}</ul>" if alerts else
+                "<div class='card'><p>Nothing needs your attention right now.</p></div>")
+        return _operator_page(
+            "Alerts", f"<p class='muted'>What needs your attention, across your "
+            f"websites.</p>{body}", account=account, current="alerts",
+            is_operator=_saas_config.is_operator(account["email"]),
+            extra_css=ALERTS_CSS)
+
     @app.get("/agents", response_class=HTMLResponse)
     def agents_page(request: Request, campaign: str = ""):
         """The real agents from the orchestrator registry, with live
@@ -4639,13 +4662,9 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                           f"<p>{esc(blurb)}</p><div>{status}</div></a>")
         # Recommended next: without Stripe sales the funnel cannot verify
         # paying customers — say so plainly, linking to that site's window.
-        hints = "".join(
-            f"<div class='v-notice v-notice-warn'>"
-            f"<a href='/integrations/stripe_sales?site={esc(s['id'])}'>"
-            f"Connect Stripe sales for {esc(s['host'])}</a> to count paying "
-            f"customers — the funnel cannot verify sales without it.</div>"
-            for s in sites if not _integration_status(s["id"], "stripe_sales")[1])
-        inner = (f"{hints}<p class='muted'>Choose an app to see your websites "
+        # What still needs connecting is an alert (bell + /alerts),
+        # not a wall of banners here.
+        inner = (f"<p class='muted'>Choose an app to see your websites "
                  f"and connect each one.</p><div class='v-apps'>{cards}</div>")
         return _operator_page(
             "Integrations", inner, account=account, current="integrations",

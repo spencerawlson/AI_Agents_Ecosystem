@@ -28,7 +28,7 @@ def test_page_keeps_revenue_hidden_until_the_eye_is_clicked():
     html = client.get("/portfolio").text
     # One toggle, in the header in front of the bell (no per-card eyes).
     assert "id='rev-toggle'" in html and "aria-label='Show revenue'" in html
-    assert html.index("id='rev-toggle'") < html.index("aria-label='Approvals'")
+    assert html.index("id='rev-toggle'") < html.index("id='bell-btn'")
     assert "data-rev-eye" not in html and "class='v-eye'" not in html
     assert f"<span data-rev-site='{site['id']}'>hidden</span>" in html
     assert "$49.00" not in html  # the figure is never in the page itself

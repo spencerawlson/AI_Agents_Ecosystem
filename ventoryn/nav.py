@@ -209,6 +209,26 @@ SIDEBAR_CSS = """
 .pause-pill:hover { background: #f1ebff; }
 .pause-pill svg { width: 15px; height: 15px; display: block; }
 .avatar-menu { position: relative; }
+/* Alerts (the bell panel and /alerts share these). */
+.v-alerts { list-style: none; padding: 0; margin: 0; }
+.v-alert { display: flex; gap: 12px; align-items: baseline; justify-content: space-between;
+  padding: 12px 14px; border: 1px solid var(--v-line, #e4e0f2); border-radius: 12px;
+  background: var(--v-card, #fff); margin: 0 0 10px; }
+.v-alert-warn { border-left: 4px solid #d97706; }
+.v-alert-info { border-left: 4px solid #7c3aed; }
+.v-alert a { white-space: nowrap; font-weight: 700; }
+/* The bell: alerts count + a panel with the latest alerts. */
+.bell-menu { position: relative; }
+.bell-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50;
+  width: min(380px, 86vw); background: #fff; border: 1px solid var(--v-line, #e7e3f3);
+  border-radius: 14px; box-shadow: 0 18px 48px rgba(11, 14, 30, .22); padding: 12px; }
+.bell-panel h4 { margin: 2px 4px 10px; font-size: 14px; }
+.bell-panel .v-alerts { max-height: 360px; overflow: auto; }
+.bell-panel .v-alert { font-size: 13px; padding: 10px 12px; flex-direction: column;
+  align-items: flex-start; gap: 6px; margin-bottom: 8px; }
+.bell-panel .bell-all { display: block; text-align: center; font-weight: 700;
+  padding: 8px; border-radius: 8px; }
+.bell-panel .bell-empty { margin: 4px; color: #6b6684; font-size: 13px; }
 .avatar { background: #6d28d9; border: 0; border-radius: 50%; width: 41px;
   height: 41px; min-height: 41px; padding: 0; color: #fff; font-weight: 800;
   font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;
@@ -393,9 +413,34 @@ def autopilot_switch_html(site_id: str, on: bool, label: str,
             f"<span class='v-switch-text'>{'On' if on else 'Off'}</span></button></form>")
 
 
+BELL_JS = "<script>(function(){var b=document.getElementById('bell-btn'),p=document.getElementById('bell-panel');if(!b||!p)return;function close(){p.hidden=true;b.setAttribute('aria-expanded','false');}b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var open=p.hidden;p.hidden=!open;b.setAttribute('aria-expanded',String(open));});document.addEventListener('click',function(e){if(!p.hidden&&!p.contains(e.target)&&!b.contains(e.target))close();});document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});})();</script>"
+
+
+def _bell_html(alerts, badge_html: str) -> str:
+    """The notification bell. With ``alerts`` (a list), it shows their
+    count and opens a panel with the latest ones and a link to /alerts.
+    Without (admin pages), it stays the old link to Approvals."""
+    if alerts is None:
+        return (f"<a class='notification' href='/approvals' aria-label='Approvals'>"
+                f"{icon('bell', 23)}{badge_html}</a>")
+    from ventoryn.alerts import alert_rows_html
+
+    n = len(alerts)
+    badge = f"<b class='header-badge'>{n}</b>" if n else ""
+    body = (f"<ul class='v-alerts'>{alert_rows_html(alerts, 6)}</ul>" if n else
+            "<p class='bell-empty'>Nothing needs your attention.</p>")
+    return (f"<div class='bell-menu'>"
+            f"<a class='notification' id='bell-btn' href='/alerts' "
+            f"aria-label='Alerts ({n})' aria-haspopup='true' aria-expanded='false' "
+            f"aria-controls='bell-panel'>{icon('bell', 23)}{badge}</a>"
+            f"<div class='bell-panel' id='bell-panel' hidden><h4>Alerts</h4>{body}"
+            f"<a class='bell-all' href='/alerts'>See all alerts</a></div></div>")
+
+
 def platform_head_html(title: str, subtitle: str = "", *,
                        pending_approvals: int = 0,
-                       pause_pill: str = "") -> str:
+                       pause_pill: str = "",
+                       alerts: list | None = None) -> str:
     """The app header: mobile sidebar toggle, page title + subtitle,
     approvals bell (badged when there are pending approvals), and an
     avatar button ("V") opening a dropdown with My account /
@@ -422,8 +467,7 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"<span class='rev-label'>Revenue</span>"
         f"<span class='rev-track' aria-hidden='true'><span class='rev-knob'></span></span>"
         f"</button>"
-        f"<a class='notification' href='/approvals' aria-label='Approvals'>"
-        f"{icon('bell', 23)}{badge_html}</a>"
+        f"{_bell_html(alerts, badge_html)}"
         f"<div class='avatar-menu'>"
         f"<button class='avatar' type='button' aria-haspopup='true' "
         f"aria-expanded='false' aria-label='Account menu'>V</button>"
@@ -433,4 +477,5 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"<a href='/account/logout'>Sign out</a>"
         f"</div></div>"
         f"</div>"
-        f"</header>" + REVENUE_TOGGLE_JS + SWITCH_JS)
+        f"</header>" + REVENUE_TOGGLE_JS + SWITCH_JS
+        + (BELL_JS if alerts is not None else ""))
