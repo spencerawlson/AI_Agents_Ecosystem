@@ -27,8 +27,10 @@ from __future__ import annotations
 import html
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from ventoryn.campaign_cost import estimate_x_campaign, describe
+from ventoryn.icons import icon
 
 MAX_POSTS = 60          # one proposal never asks for more approvals than this
 X_MAX_CHARS = 280
@@ -175,6 +177,25 @@ def _esc(v) -> str:
     return html.escape(str(v), quote=True)
 
 
+def post_preview_html(site: dict, draft: dict, index: int, cid: str) -> str:
+    """One drafted post as its own card — same framing as the website
+    snapshot cards (``.card`` + ``<h2>`` in a grid) — showing how it
+    will look and what it will say, with its own Remove button,
+    before the owner approves."""
+    name = site.get("host") or site.get("url", "") or "Your website"
+    link_line = ""
+    if draft.get("link_url"):
+        parsed = urlparse(draft["link_url"])
+        shown = (parsed.netloc + parsed.path).rstrip("/") or draft["link_url"]
+        link_line = (f"<p class='v-post-link'>{icon('globe', 14)}"
+                     f"<span>{_esc(shown)}</span></p>")
+    return (f"<div class='card'><h2>Post {index}</h2>"
+            f"<p class='muted'>{_esc(name)} on X</p>"
+            f"<p class='v-post-text'>{_esc(draft['text'])}</p>{link_line}"
+            f"<form method='post' action='/campaigns/{cid}/posts/{_esc(draft['id'])}/remove'>"
+            f"<button class='btn btn-small' type='submit'>Remove</button></form></div>")
+
+
 def proposal_card(store, config, campaign: dict, totp_field: str) -> str:
     """One proposed campaign, post by post, with its cost and the
     Approve (2FA) / Reject buttons."""
@@ -192,12 +213,7 @@ def proposal_card(store, config, campaign: dict, totp_field: str) -> str:
                f"will wait until you <a href='/integrations/x?site={_esc(site.get('id', ''))}'>"
                f"connect X</a>.</p>")
     cid = _esc(campaign["id"])
-    rows = "".join(
-        f"<li><p>{_esc(d['text'])}</p>"
-        + (f"<p class='muted'>Link: {_esc(d['link_url'])}</p>" if d["link_url"] else "")
-        + f"<form method='post' action='/campaigns/{cid}/posts/{_esc(d['id'])}/remove'>"
-          f"<button class='btn btn-small' type='submit'>Remove</button></form></li>"
-        for d in drafts)
+    rows = "".join(post_preview_html(site, d, i, cid) for i, d in enumerate(drafts, 1))
     who = "Proposed by the autopilot" if campaign["source"] == "autopilot" else "Started by you"
     return (
         f"<div class='card v-camp' id='campaign-{cid}'>"
@@ -205,7 +221,8 @@ def proposal_card(store, config, campaign: dict, totp_field: str) -> str:
         f"<p class='muted'>{who} on {_esc(str(campaign['created_at'])[:10])} — "
         f"{campaign['days']} days, {len(drafts)} posts.</p>"
         f"<p class='v-camp-cost'><strong>Cost:</strong> {_esc(describe(est))}</p>{connect}"
-        f"<details><summary>Read the {len(drafts)} posts</summary><ol class='v-camp-posts'>{rows}</ol></details>"
+        f"<h4>Preview — how each post will look</h4>"
+        f"<div class='v-camp-grid'>{rows}</div>"
         f"<form method='post' action='/campaigns/{cid}/approve'>{totp_field}"
         f"<p><button class='btn btn-primary' type='submit'>Approve campaign</button> "
         f"<button class='btn' type='submit' formaction='/campaigns/{cid}/reject'>Reject</button></p>"
@@ -225,10 +242,15 @@ def scheduled_summary(store, campaign: dict) -> str:
 
 
 CAMPAIGN_CSS = """
-.v-camp-posts { padding-left: 20px; }
-.v-camp-posts li { margin: 0 0 12px; }
-.v-camp-posts li p { margin: 0 0 4px; }
-.v-camp-posts form { margin: 0; }
 .v-camp-warn { color: #92400e; }
 .btn-small { padding: 4px 10px; font-size: 12px; min-height: 0; }
+.v-camp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.v-camp-grid > .card { margin: 0; min-width: 0; }
+.v-camp-grid form { margin: 8px 0 0; }
+.v-post-text { white-space: pre-wrap; }
+.v-post-link { display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--v-line); border-radius: var(--v-radius-sm);
+  padding: 6px 10px; color: var(--v-muted); font-size: 13px; margin: 0 0 10px; }
+.v-post-link svg { flex: 0 0 auto; }
+@media (max-width: 760px) { .v-camp-grid { grid-template-columns: minmax(0, 1fr); } }
 """
