@@ -321,3 +321,10 @@ def test_approvals_page_human_readable(tmp_path, monkeypatch):
     client.post(f"/approvals/{appr.id}/decide", data={"approved": "true"})
     r = client.post(f"/approvals/{appr.id}/decide", data={"approved": "true"})
     assert r.status_code == 400
+
+
+def test_report_document_is_centered():
+    from ventoryn import ui
+
+    assert ".v-doc { max-width: 820px; padding: 24px 28px; margin-inline: auto; }" in ui.DOC_CSS
+    assert ".v-doc-wrap { max-width: 820px; margin-inline: auto; }" in ui.DOC_CSS
