@@ -192,7 +192,7 @@ def esc(value: object) -> str:
 def _page(title: str, inner: str, account: dict | None = None,
           current: str | None = None, is_operator: bool = False,
           sidebar: bool = False, verified: int = 0,
-          pending_approvals: int = 0) -> str:
+          pending_approvals: int = 0, alerts: list | None = None) -> str:
     """Shell for the shell's own pages: the platform shell (purple
     sidebar + app header) whenever an account is given, else the
     shared centered page (no navigation for unsigned error pages —
@@ -227,7 +227,8 @@ def _page(title: str, inner: str, account: dict | None = None,
                       pending_approvals=pending_approvals,
                       account_email=account.get("email", ""))
     head = platform_head_html(title,
-                              pending_approvals=pending_approvals)
+                              pending_approvals=pending_approvals,
+                              alerts=alerts)
     return ui.page(title, inner, sidebar=sb, page_head=head,
                    extra_css=_SAAS_CSS)
 
@@ -498,9 +499,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         pending = len([a for a in gate.pending()
                        if a.business_id in site_biz_ids
                        or (is_op and a.business_id is None)])
+        from ventoryn.alerts import account_alerts
+
         return _page(title, inner, account, current=current,
                      is_operator=is_op, sidebar=True, verified=verified,
-                     pending_approvals=pending)
+                     pending_approvals=pending,
+                     alerts=account_alerts(store, account, pending))
 
     def _safe_next(value: str) -> str:
         """Where a 2FA page sends the user after: a same-site path
