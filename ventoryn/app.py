@@ -1732,8 +1732,8 @@ $20/month subscription.</p>
 <div class="col"><h4>Company</h4>
 <span class="soon">Documentation — coming soon</span>
 <span class="soon">Support — coming soon</span>
-<span class="soon">Privacy Policy — coming soon</span>
-<span class="soon">Terms of Service — coming soon</span></div>
+<a href="/privacy">Privacy Policy</a>
+<a href="/terms">Terms of Service</a></div>
 </div>
 <p class="base">Ventoryn — AI customer acquisition for your website.</p>
 </div></footer>
@@ -5439,6 +5439,8 @@ a real Stripe payment, no signature.</p>"""
     register_analytics_routes(app, _saas_store, _saas_config)
     from ventoryn.public_files import register_public_files
     register_public_files(app, _saas_config)
+    from ventoryn.legal import register_legal_pages
+    register_legal_pages(app)
     from ventoryn.indexnow import register_indexnow
     register_indexnow(app, _saas_config)
     from core.llm import set_usage_hook

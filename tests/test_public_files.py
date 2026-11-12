@@ -31,7 +31,7 @@ def test_sitemap_lists_only_the_public_home_page():
     r = _client().get("/sitemap.xml")
     assert r.status_code == 200 and "xml" in r.headers["content-type"]
     assert "<loc>https://ventoryn.app/</loc>" in r.text
-    assert r.text.count("<loc>") == 1
+    assert r.text.count("<loc>") == 3  # home, privacy, terms
 
 
 def test_llms_txt_is_public_plain_text():
