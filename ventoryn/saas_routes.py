@@ -85,10 +85,11 @@ from pathlib import Path
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
-from ventoryn import site_jobs
+from ventoryn import pricing, site_jobs
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
+from ventoryn.plans import is_wallet_account
 from ventoryn.qrcode import qr_svg
 from ventoryn.campaign_cost import (
     MAX_DAYS, MAX_POSTS_PER_DAY, X_RATE_LINKED_POST_USD,
@@ -126,6 +127,7 @@ from ventoryn.saas import (
     SESSION_COOKIE,
     SESSION_TTL_DAYS,
     InsufficientCredits,
+    InsufficientWalletFunds,
     SaasConfig,
     SaasError,
     SaasStore,
@@ -2838,23 +2840,44 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       account, current="websites"),
                 status_code=code)
         is_op = config.is_operator(account["email"])
-        balance = store.credit_balance(account["id"])
-        if not is_op and balance < cost:
-            return HTMLResponse(
-                _signed_page(site["url"],
-                      f"<p>That job costs {cost} credits and the balance is "
-                      f"{balance}. Nothing ran and nothing was charged. "
-                      f"Top up by subscribing on the "
-                      f"<a href='/account/subscribe'>Subscribe</a> page.</p>",
-                      account, current="websites"),
-                status_code=402)
+        wallet = is_wallet_account(account) and not is_op
+        if wallet:
+            estimate = pricing.wallet_reserve_estimate_cents(job_type)
+            available = store.wallet_available_cents(account["id"])
+            if available < estimate:
+                return HTMLResponse(
+                    _signed_page(site["url"],
+                          f"<p>That job needs an estimated ${estimate / 100:.2f} "
+                          f"and the wallet has ${available / 100:.2f} available. "
+                          f"Nothing ran and nothing was charged. Add funds on the "
+                          f"<a href='/account/dashboard'>account</a> page.</p>",
+                          account, current="websites"),
+                    status_code=402)
+        else:
+            balance = store.credit_balance(account["id"])
+            if not is_op and balance < cost:
+                return HTMLResponse(
+                    _signed_page(site["url"],
+                          f"<p>That job costs {cost} credits and the balance is "
+                          f"{balance}. Nothing ran and nothing was charged. "
+                          f"Top up by subscribing on the "
+                          f"<a href='/account/subscribe'>Subscribe</a> page.</p>",
+                          account, current="websites"),
+                    status_code=402)
         # Charge first (atomic — the job row is created with the charge),
         # run second; a failed run is refunded, so nobody pays for work
         # that did not happen.
         try:
-            job = store.charge_credits(account["id"], job_type, site_id,
-                                       is_operator=is_op)
-        except InsufficientCredits as exc:
+            if wallet:
+                reservation = store.reserve_wallet_funds(
+                    account["id"], pricing.wallet_reserve_estimate_cents(job_type),
+                    f"{job_type} job")
+                job = store.create_wallet_job(account["id"], job_type, site_id,
+                                              reservation["id"])
+            else:
+                job = store.charge_credits(account["id"], job_type, site_id,
+                                           is_operator=is_op)
+        except (InsufficientCredits, InsufficientWalletFunds) as exc:
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>{esc(exc)}</p><p><a href='/websites/sites/"
@@ -2879,6 +2902,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 finally:
                     persist_usage_events(store, events, account_id=account["id"],
                                          job_id=job["id"], site_id=site_id)
+                    if job["wallet_reservation_id"]:
+                        pricing.price_and_settle_job(
+                            store, job["id"], job["wallet_reservation_id"])
             store.set_job_result(job["id"], "done", summary)
             # The admin's recent-activity feed: a real job ran.
             store.record_activity_event(

@@ -822,6 +822,11 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("saas_accounts", "auto_topup_monthly_cap_cents", "INTEGER NOT NULL DEFAULT 0"),
     ("saas_accounts", "auto_topup_spent_cents", "INTEGER NOT NULL DEFAULT 0"),
     ("saas_accounts", "auto_topup_month", "TEXT NOT NULL DEFAULT ''"),
+    # Axionory Phase 5 (pricing engine): a wallet-funded job's
+    # reservation id, so expire_stale_jobs can resolve a reservation
+    # orphaned by a mid-job server restart. '' for every legacy
+    # (credits-charged) job — it never reserves a wallet hold.
+    ("saas_jobs", "wallet_reservation_id", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Admin login rate limit: this many wrong guesses lock the login
@@ -1530,6 +1535,26 @@ class SaasStore:
                 raise
         return self.get_job(job_id)
 
+    def create_wallet_job(self, account_id: str, job_type: str, site_id: str,
+                          reservation_id: str) -> dict:
+        """Axionory Phase 5: the wallet-funded counterpart to
+        charge_credits — records the job with credits_charged 0 (a
+        wallet job never touches saas_credit_ledger) and remembers the
+        reservation opened for it, so it can be settled or released
+        once the job's real usage is known (and, if the server
+        restarts mid-job, by expire_stale_jobs). Caller reserves the
+        funds first via reserve_wallet_funds; nothing here checks or
+        holds a balance."""
+        job_id = _new_id()
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_jobs (id, account_id, site_id, job_type,"
+                " credits_charged, status, created_at, wallet_reservation_id)"
+                " VALUES (?, ?, ?, ?, 0, 'queued', ?, ?)",
+                (job_id, account_id, site_id, job_type, now, reservation_id))
+        return self.get_job(job_id)
+
     # -- wallet (Axionory tiers: 100% wallet-funded usage) --------------------
 
     def wallet_balance_cents(self, account_id: str) -> int:
@@ -1834,6 +1859,19 @@ class SaasStore:
                 "SELECT * FROM saas_usage_events WHERE id = ?",
                 (event_id,)).fetchone()
         return _row_dict(row)
+
+    def price_usage_event(self, event_id: str, customer_charge_cents: int,
+                          pricing_version: str) -> None:
+        """Axionory Phase 5: stamp the priced charge onto a usage event
+        recorded by Phase 4. Overwrites unconditionally — callers (see
+        ventoryn/pricing.py) are expected to check customer_charge_cents
+        is still None before pricing an event, so this itself does not
+        guard against re-pricing an already-priced one."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_usage_events SET customer_charge_cents = ?,"
+                " pricing_version = ? WHERE id = ?",
+                (customer_charge_cents, pricing_version, event_id))
 
     def record_wallet_topup(self, account_id: str, payment_intent_id: str,
                             amount_cents: int) -> dict:

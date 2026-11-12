@@ -28,8 +28,9 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ventoryn import site_jobs
-from ventoryn.saas import CREDIT_COSTS, InsufficientCredits
+from ventoryn import pricing, site_jobs
+from ventoryn.plans import is_wallet_account
+from ventoryn.saas import CREDIT_COSTS, InsufficientCredits, InsufficientWalletFunds
 
 #: (job type, days between runs)
 AUTOPILOT_JOBS: tuple[tuple[str, int], ...] = (
@@ -91,10 +92,20 @@ def execute(store, config, account: dict, site: dict, job_type: str, *,
             orchestrator, reports_dir: Path, inputs: dict | None = None,
             job: dict | None = None) -> dict:
     """Charge (unless ``job`` was already charged), run, record —
-    refund on failure. Returns the job row."""
+    refund on failure. A wallet-tier account reserves an estimated
+    hold instead of spending credits; a legacy account is charged
+    exactly as before. Returns the job row."""
     is_op = config.is_operator(account.get("email"))
     if job is None:
-        job = store.charge_credits(account["id"], job_type, site["id"], is_operator=is_op)
+        if is_wallet_account(account) and not is_op:
+            reservation = store.reserve_wallet_funds(
+                account["id"], pricing.wallet_reserve_estimate_cents(job_type),
+                f"{job_type} job")
+            job = store.create_wallet_job(account["id"], job_type, site["id"],
+                                          reservation["id"])
+        else:
+            job = store.charge_credits(account["id"], job_type, site["id"], is_operator=is_op)
+    reservation_id = job["wallet_reservation_id"]
     auto = not (inputs or {}).get("source") == "manual"
     prefix = AUTO_PREFIX if auto else ""
     from ventoryn.usage_metering import collecting_usage, persist_usage_events
@@ -110,6 +121,8 @@ def execute(store, config, account: dict, site: dict, job_type: str, *,
                 # if the job fails right after — recorded either way.
                 persist_usage_events(store, events, account_id=account["id"],
                                      job_id=job["id"], site_id=site["id"])
+                if reservation_id:
+                    pricing.price_and_settle_job(store, job["id"], reservation_id)
         store.set_job_result(job["id"], "done", prefix + summary)
         store.record_activity_event(
             account["id"], "job",
@@ -139,6 +152,12 @@ def expire_stale_jobs(store, now: datetime) -> int:
         if charged:
             store.grant_credits(job["account_id"], charged,
                                 f"Refund — {job['job_type']} job interrupted")
+        reservation_id = job.get("wallet_reservation_id") or ""
+        if reservation_id:
+            # Whatever usage was persisted before the crash is priced
+            # and settled; a reservation with no recorded usage yet is
+            # released — it never stays held forever.
+            pricing.price_and_settle_job(store, job["id"], reservation_id)
         store.set_job_result(job["id"], "failed",
                              "Interrupted (the server restarted mid-run)"
                              + (f" — refunded {charged} credits" if charged else ""))
@@ -164,10 +183,15 @@ def run_once(store, config, *, orchestrator, reports_dir: Path,
         if account is None:
             continue
         is_op = config.is_operator(account.get("email"))
+        wallet = is_wallet_account(account) and not is_op
         for job_type in due_jobs(store, site, now):
             if len(ran) >= max_jobs:
                 return ran
-            if not is_op and store.credit_balance(account["id"]) < CREDIT_COSTS[job_type]:
+            if wallet:
+                if (store.wallet_available_cents(account["id"])
+                        < pricing.wallet_reserve_estimate_cents(job_type)):
+                    continue
+            elif not is_op and store.credit_balance(account["id"]) < CREDIT_COSTS[job_type]:
                 continue
             try:
                 inputs = {"source": "autopilot"}
@@ -177,7 +201,7 @@ def run_once(store, config, *, orchestrator, reports_dir: Path,
                 ran.append(execute(store, config, account, site, job_type,
                                    orchestrator=orchestrator, reports_dir=reports_dir,
                                    inputs=inputs))
-            except InsufficientCredits:
+            except (InsufficientCredits, InsufficientWalletFunds):
                 continue
     return ran
 

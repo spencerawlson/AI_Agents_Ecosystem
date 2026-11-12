@@ -76,3 +76,9 @@ def limit(plan: str, key: str):
     or does not define that key."""
     tier = plan_limits(plan)
     return tier.get(key) if tier else None
+
+
+def is_wallet_account(account: dict) -> bool:
+    """True for any new-tier account (billed from the prepaid wallet);
+    False for a legacy flat-credit account (plan == '')."""
+    return bool(account.get("plan"))
