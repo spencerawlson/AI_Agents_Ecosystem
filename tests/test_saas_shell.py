@@ -322,8 +322,9 @@ def test_subscribe_page_shows_20_and_checkout(client, store, monkeypatch):
     assert "$20/month" in r.text
     assert "100 credits" in r.text
 
-    def _fake_checkout(config, account, site_url=None):
+    def _fake_checkout(config, account, site_url=None, plan=""):
         assert config.stripe_price_id == "price_20usd"
+        assert plan == ""
         return {"id": "cs_test_1",
                 "url": "https://checkout.stripe.com/pay/cs_test_1"}
 

@@ -706,7 +706,7 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
     assert "ada.example.com" in r.text
     assert "name='site_url'" in r.text
 
-    def _fake_checkout(cfg, account, site_url=None):
+    def _fake_checkout(cfg, account, site_url=None, plan=""):
         assert site_url == "https://ada.example.com"
         return {"id": "cs_test_1",
                 "url": "https://checkout.stripe.com/pay/cs_test_1"}

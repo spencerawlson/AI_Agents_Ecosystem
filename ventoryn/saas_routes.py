@@ -89,7 +89,8 @@ from ventoryn import pricing, site_jobs
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
-from ventoryn.plans import is_wallet_account
+from ventoryn.plans import PLAN_NAMES, PLANS, is_wallet_account
+from ventoryn.ui import money
 from ventoryn.qrcode import qr_svg
 from ventoryn.campaign_cost import (
     MAX_DAYS, MAX_POSTS_PER_DAY, X_RATE_LINKED_POST_USD,
@@ -264,6 +265,109 @@ def _credit_table() -> str:
         for name, cost in CREDIT_COSTS.items())
     return (f"<div class='table-wrap'><table><tr><th>Agent work</th>"
             f"<th>Cost</th><th>Status</th></tr>{rows}</table></div>")
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _plan_cards_html(config: SaasConfig, pending_field: str,
+                     pending_note: str) -> str:
+    """The Subscribe page's plan picker: the legacy flat-credit plan
+    alongside the Axionory tiers (ventoryn/plans.py). A plan whose
+    Stripe price is not configured yet shows "Coming soon" instead of
+    a checkout button — the page never breaks, it just grows as each
+    price is added. Tier usage is wallet-funded, not credit-funded —
+    see ventoryn/pricing.py."""
+    legacy_body = (
+        f"<ul><li>{config.monthly_credits:,} credits every month</li>"
+        "<li>Your websites on Axionory, working to find new paying "
+        "customers</li><li>Growth reports per site</li></ul>")
+    if config.stripe_configured:
+        legacy_body += (
+            f"{pending_note}<form method='post' action='/account/subscribe'>"
+            f"{pending_field}<button class='btn btn-primary' type='submit'>"
+            f"Subscribe — {esc(PLAN_PRICE_LABEL)}</button></form>"
+            "<p class='muted'>Checkout is handled by Stripe. Axionory "
+            "never sees your card.</p>")
+    else:
+        legacy_body += (
+            "<p class='muted'><strong>Payments are not set up yet.</strong>"
+            f" The price is {esc(PLAN_PRICE_LABEL)}; the Stripe connection "
+            "is still being set up, so checkout is not available on this "
+            "page yet.</p>")
+    cards = [f"<div class='card'><h3>{esc(PLAN_NAME)}</h3>"
+             f"<p class='muted'>{esc(PLAN_PRICE_LABEL)} — the original "
+             f"flat-rate plan.</p>{legacy_body}</div>"]
+    for name in PLAN_NAMES:
+        info = PLANS[name]
+        features = "".join(
+            f"<li>{_plural(info[key], label)}</li>" for key, label in (
+                ("workspaces", "workspace"),
+                ("active_agents", "active agent"),
+                ("active_campaigns", "active campaign"),
+                ("team_seats", "team seat")))
+        body = (f"<p class='muted'>${info['price_usd']}/month — access "
+                "only; every agent action is billed from your prepaid "
+                f"wallet.</p><ul>{features}</ul>")
+        if config.stripe_secret_key and config.tier_price_id(name):
+            body += (
+                f"{pending_note}<form method='post' "
+                f"action='/account/subscribe'>{pending_field}"
+                f"<input type='hidden' name='plan' value='{esc(name)}'>"
+                f"<button class='btn btn-primary' type='submit'>Subscribe "
+                f"— ${info['price_usd']}/month</button></form>")
+        else:
+            body += "<p class='muted'><strong>Coming soon.</strong></p>"
+        cards.append(f"<div class='card'><h3>{esc(info['label'])}</h3>"
+                     f"{body}</div>")
+    return ("<div class='card'><h2>Choose a plan</h2>"
+            "<p class='muted'>The flat-rate plan includes monthly credits. "
+            "A tier is access only — workspaces, agent and campaign slots, "
+            "team seats — with every agent action billed from your "
+            "prepaid wallet at its real, metered cost.</p></div>"
+            "<div style='display:grid;grid-template-columns:repeat("
+            "auto-fit,minmax(240px,1fr));gap:16px'>" + "".join(cards)
+            + "</div>")
+
+
+def _wallet_account_html(store: SaasStore, config: SaasConfig,
+                         account: dict) -> str:
+    """The Subscribe page for an already-active tier account: which
+    tier, the wallet balance, and a way to add funds. Usage is billed
+    from this wallet as agent work runs (ventoryn/pricing.py), not
+    from the subscription itself."""
+    plan = account.get("plan") or ""
+    label = PLANS.get(plan, {}).get("label", plan or "Unknown")
+    balance = store.wallet_balance_cents(account["id"])
+    reserved = store.wallet_reserved_cents(account["id"])
+    presets = "".join(
+        "<form method='post' action='/account/wallet/topup' "
+        "style='display:inline-block'>"
+        f"<input type='hidden' name='amount_cents' value='{cents}'>"
+        f"<button class='btn' type='submit'>${cents // 100}</button></form>"
+        for cents in (1000, 2500, 5000, 10000)
+        if config.wallet_topup_min_cents <= cents <= config.wallet_topup_max_cents)
+    return (
+        f"<div class='card'><p><span class='badge badge-ok'>{esc(label)} "
+        "— active</span></p>"
+        f"<p>Wallet balance: <strong>{money(balance / 100)}</strong></p>"
+        f"<p class='muted'>Held by running jobs: {money(reserved / 100)} "
+        f"— available now: {money((balance - reserved) / 100)}</p></div>"
+        "<div class='card'><h3>Add funds</h3>"
+        "<p class='muted'>Usage is billed from this wallet as your agents "
+        "work — a job reserves an estimate, then settles for the real "
+        "cost.</p>"
+        f"<div style='display:flex;gap:8px;flex-wrap:wrap;"
+        f"align-items:center'>{presets}"
+        "<form method='post' action='/account/wallet/topup' "
+        "style='display:inline-flex;gap:6px;align-items:center'>"
+        "<input type='number' name='amount_cents' "
+        f"min='{config.wallet_topup_min_cents}' "
+        f"max='{config.wallet_topup_max_cents}' step='100' "
+        "placeholder='custom (cents)' style='width:150px'>"
+        "<button class='btn btn-primary' type='submit'>Add funds</button>"
+        "</form></div></div>")
 
 
 def _funnel_rows(store: SaasStore, site: dict,
@@ -1600,11 +1704,15 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             notice = ("<div class='card'><p>Checkout was cancelled — "
                       "nothing was charged.</p></div>")
         if account["subscription_status"] == "active":
-            inner = (f"{_account_subnav_html('subscribe')}{notice}"
-                     f"<div class='card'><p>You are subscribed "
-                     f"to {esc(PLAN_NAME)} at {esc(PLAN_PRICE_LABEL)}."
-                     "</p><p>Your monthly credits arrive with each "
-                     "billing cycle.</p></div>")
+            if is_wallet_account(account):
+                inner = (f"{_account_subnav_html('subscribe')}{notice}"
+                         f"{_wallet_account_html(store, config, account)}")
+            else:
+                inner = (f"{_account_subnav_html('subscribe')}{notice}"
+                         f"<div class='card'><p>You are subscribed "
+                         f"to {esc(PLAN_NAME)} at {esc(PLAN_PRICE_LABEL)}."
+                         "</p><p>Your monthly credits arrive with each "
+                         "billing cycle.</p></div>")
             if pending_url:
                 inner += (f"<div class='card'>{pending_note}<p><a class='btn "
                           f"btn-primary' href='/websites/sites/new?url="
@@ -1612,41 +1720,15 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                           f"Add {esc(pending_url)}</a></p></div>")
             return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
-        if not config.stripe_configured:
-            inner = (f"{_account_subnav_html('subscribe')}{notice}"
-                     f"<div class='card'><h2>{esc(PLAN_NAME)} — "
-                     f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
-                     f"<ul><li>{config.monthly_credits:,} credits every "
-                     f"month</li><li>Your websites on Axionory, working "
-                     f"to find new paying customers</li>"
-                     f"<li>Growth reports per site</li></ul>"
-                     f"<p><strong>Payments are not set up yet.</strong> "
-                     f"The price is {esc(PLAN_PRICE_LABEL)}; the Stripe "
-                     f"connection is still being set up, so checkout is "
-                     f"not available on this page yet.</p></div>"
-                     f"<h2>What a credit buys</h2>{_credit_table()}")
-            return _signed_page("Subscribe", inner, account,
-                                current="subscribe")
         inner = (f"{_account_subnav_html('subscribe')}{notice}"
-                 f"<div class='card'><h2>{esc(PLAN_NAME)} — "
-                 f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
-                 f"<ul><li>{config.monthly_credits:,} credits every month"
-                 f"</li><li>Your websites on Axionory, working to find "
-                 f"new paying customers</li>"
-                 f"<li>Growth reports per site</li></ul>"
-                 f"{pending_note}"
-                 f"<form method='post' action='/account/subscribe'>"
-                 f"{pending_field}"
-                 f"<button class='btn btn-primary' type='submit'>"
-                 f"Subscribe — $20/month</button></form>"
-                 f"<p class='muted'>Checkout is handled by Stripe. "
-                 f"Axionory never sees your card.</p></div>"
+                 f"{_plan_cards_html(config, pending_field, pending_note)}"
                  f"<h2>What a credit buys</h2>{_credit_table()}")
         return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
 
     @app.post("/account/subscribe")
-    def subscribe_start(request: Request, site_url: str = Form("")):
+    def subscribe_start(request: Request, site_url: str = Form(""),
+                        plan: str = Form("")):
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
@@ -1655,6 +1737,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if config.is_operator(account["email"]):
             # The owner has no $20/month plan to buy.
             return RedirectResponse("/account/dashboard", status_code=303)
+        if plan not in PLAN_NAMES:
+            # An unrecognized value (tampered form, stale page) falls
+            # back to the legacy plan rather than erroring.
+            plan = ""
         try:
             pending_url = validate_site_url(site_url) if site_url else ""
         except ValueError:
@@ -1662,7 +1748,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         try:
             session = create_checkout_session(
                 config, account,
-                site_url=pending_url or None)
+                site_url=pending_url or None, plan=plan)
         except SaasError as exc:
             return HTMLResponse(
                 _signed_page("Subscribe", f"<p>{esc(exc)}</p>"
