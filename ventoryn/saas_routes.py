@@ -2536,9 +2536,14 @@ funnel counts it. This is the owner-recorded fallback.</p>
         form = {k: str(v) for k, v in (await request.form()).items()}
         try:
             token = tt.fresh_access_token(store, site_id)
+        except tt.TikTokError as exc:
+            print(f"tiktok post token failed site={site_id} job={job_id}: {exc}", flush=True)
+            return _tiktok_page(site, account, f"<p>{esc(exc)}</p>", 400)
+        try:
             creator = tt.creator_info(token)
         except tt.TikTokError as exc:
-            return _tiktok_page(site, account, f"<p>{esc(exc)}</p>", 502)
+            print(f"tiktok post creator_info failed site={site_id} job={job_id}: {exc}", flush=True)
+            return _tiktok_page(site, account, f"<p>{esc(exc)}</p>", 400)
         ok, err = _fresh_totp_ok(account, form.get("totp_code", ""))
         if not ok:
             return _tiktok_form(site, account, job, creator, form, err, 400)
@@ -2551,7 +2556,8 @@ funnel counts it. This is the owner-recorded fallback.</p>
         try:
             publish_id = tt.publish(token, url, mode=mode, post_info=post_info)
         except tt.TikTokError as exc:
-            return _tiktok_form(site, account, job, creator, form, str(exc), 502)
+            print(f"tiktok post publish failed site={site_id} job={job_id}: {exc}", flush=True)
+            return _tiktok_form(site, account, job, creator, form, str(exc), 400)
         post = store.add_tiktok_post(site_id, job_id, publish_id, mode,
                                      (post_info or {}).get("privacy_level", form.get("privacy", "")),
                                      form.get("title", "")[:2200])
