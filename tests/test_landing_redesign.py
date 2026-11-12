@@ -201,6 +201,34 @@ def test_faq_ten_items_with_2fa_in_ten():
     assert "zero-trust" in r.text.lower()
 
 
+def test_landing_is_wide_logo_far_left():
+    # Spencer 2026-11-12 (wide monitor): the page was a narrow centered
+    # column with big empty margins on both ends, the hero preview a
+    # tall narrow box, and the logo inset with the container. The page
+    # container is wide now, the hero wider still, and the header spans
+    # the full viewport so the brand sits at the far left edge.
+    r = _landing()
+    assert ".wrap { max-width: 1440px; margin: 0 auto; padding: 0 20px; }" in r.text
+    assert ".hero .wrap { max-width: 1680px; }" in r.text
+    assert (".site-nav .wrap { display: flex; align-items: center; gap: 16px;\n"
+            "  min-height: 60px; max-width: none; padding: 0 24px; }" in r.text)
+    # The nav links stay centred in the wide header: the <nav> wrapper
+    # takes the free space between the far-left brand and the right-hand
+    # actions, and the links centre inside it.
+    assert (".nav-links { display: flex; gap: 4px; margin: 0; list-style: none;\n"
+            "  padding: 0; flex: 1; justify-content: center; }" in r.text)
+    assert (".site-nav nav { flex: 1; display: flex; justify-content: center; }"
+            in r.text)
+    # The brand is the first header item after the (mobile-only)
+    # hamburger: far left, ahead of the nav links and the actions.
+    assert (r.text.index('class="brand"')
+            < r.text.index('class="nav-links"'))
+    assert (r.text.index('class="brand"')
+            < r.text.index('class="nav-actions"'))
+    # The preview still lives inside the two-column hero.
+    assert 'class="wrap hero-grid"' in r.text
+
+
 def test_final_cta_footer_seo_vector_only():
     r = _landing()
     assert "Your Next Customer Is Out There." in r.text

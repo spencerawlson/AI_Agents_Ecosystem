@@ -1019,7 +1019,7 @@ body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
   sans-serif; margin: 0; overflow-x: hidden; color: var(--ink);
   background: var(--bg); line-height: 1.55; }
 a { color: var(--violet-deep); }
-.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 20px; }
 .muted { color: var(--muted); font-size: 14px; }
 .btn { display: inline-block; min-height: 44px; line-height: 44px;
   padding: 0 22px; margin: 4px 4px 4px 0; border-radius: 10px;
@@ -1036,11 +1036,17 @@ a { color: var(--violet-deep); }
 .site-nav { position: sticky; top: 0; z-index: 50; background: var(--navy);
   color: #fff; }
 .site-nav .wrap { display: flex; align-items: center; gap: 16px;
-  min-height: 60px; }
+  min-height: 60px; max-width: none; padding: 0 24px; }
+/* The header spans the full viewport width (not the page container),
+   so the brand logo sits at the far left edge of the screen. */
 .brand { display: inline-flex; align-items: center; text-decoration: none; }
 .brand img { height: 52px; width: auto; display: block; }
-.nav-links { display: flex; gap: 4px; margin: 0 auto; list-style: none;
-  padding: 0; }
+.nav-links { display: flex; gap: 4px; margin: 0; list-style: none;
+  padding: 0; flex: 1; justify-content: center; }
+/* The <nav> wrapper is the flex item in the header (the <ul> sits
+   inside it): it takes the free space and centres the links, so the
+   nav stays centred between the far-left brand and the actions. */
+.site-nav nav { flex: 1; display: flex; justify-content: center; }
 .nav-links a { color: #d9d4f5; text-decoration: none; font-size: 15px;
   padding: 10px 12px; border-radius: 8px; min-height: 44px;
   display: inline-flex; align-items: center; }
@@ -1070,7 +1076,7 @@ a { color: var(--violet-deep); }
   transparent 60%), radial-gradient(900px 480px at 10% 110%, rgba(59,130,246,.35),
   transparent 55%), linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
   color: #fff; padding: 56px 0 64px; }
-.hero .wrap { max-width: 1280px; }
+.hero .wrap { max-width: 1680px; }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   gap: 44px; align-items: start; }
 .hero-copy { min-width: 0; text-align: left; }
