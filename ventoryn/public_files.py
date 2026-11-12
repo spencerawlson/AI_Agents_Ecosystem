@@ -58,7 +58,7 @@ def _base(config) -> str:
 
 
 def register_public_files(app, config) -> None:
-    @app.get("/robots.txt", response_class=PlainTextResponse)
+    @app.api_route("/robots.txt", methods=["GET", "HEAD"], response_class=PlainTextResponse)
     def robots_txt():
         lines = ["User-agent: *", "Allow: /$"]
         lines += [f"Disallow: {p}" for p in PRIVATE_PREFIXES]
@@ -66,7 +66,7 @@ def register_public_files(app, config) -> None:
         return PlainTextResponse("\n".join(lines),
                                  headers={"Cache-Control": "public, max-age=3600"})
 
-    @app.get("/sitemap.xml")
+    @app.api_route("/sitemap.xml", methods=["GET", "HEAD"])
     def sitemap_xml():
         body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -78,7 +78,7 @@ def register_public_files(app, config) -> None:
         return Response(body, media_type="application/xml",
                         headers={"Cache-Control": "public, max-age=3600"})
 
-    @app.get("/llms.txt", response_class=PlainTextResponse)
+    @app.api_route("/llms.txt", methods=["GET", "HEAD"], response_class=PlainTextResponse)
     def llms_txt():
         return PlainTextResponse(LLMS_TXT.replace("{base}", _base(config)),
                                  headers={"Cache-Control": "public, max-age=3600"})
