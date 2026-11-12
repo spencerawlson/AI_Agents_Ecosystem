@@ -20,6 +20,11 @@ from __future__ import annotations
 import html
 import urllib.parse
 
+#: Below this, a new-tier account (wallet-funded usage) sees a
+#: low-balance alert regardless of its own auto-topup threshold —
+#: auto-topup may not be configured at all.
+LOW_WALLET_BALANCE_CENTS = 500  # $5
+
 
 def _esc(v) -> str:
     return html.escape(str(v), quote=True)
@@ -28,6 +33,16 @@ def _esc(v) -> str:
 def account_alerts(store, account: dict, pending_approvals: int = 0) -> list[dict]:
     alerts: list[dict] = []
     sites = store.list_sites(account["id"])
+    # Low wallet balance — Axionory tiers only (legacy accounts don't
+    # use the wallet, so this would be a meaningless alert for them).
+    if account.get("plan"):
+        available = store.wallet_available_cents(account["id"])
+        if available < LOW_WALLET_BALANCE_CENTS:
+            alerts.append({
+                "key": f"wallet_low:{available}", "level": "warn",
+                "href": "/account/dashboard", "action": "Add funds",
+                "text": f"Wallet balance is ${available / 100:.2f} — "
+                        "agent actions will pause until you add funds."})
     # Work waiting for a decision.
     proposals = store.list_campaigns(account["id"], status="proposed")
     if proposals:

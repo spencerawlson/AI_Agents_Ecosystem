@@ -144,6 +144,7 @@ from ventoryn.saas import (
     validate_site_url,
     verify_webhook_signature,
     create_checkout_session,
+    create_wallet_topup_session,
     x_account_summary,
     x_auth_url,
     x_userinfo,
@@ -1621,6 +1622,21 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 _signed_page("Subscribe", f"<p>{esc(exc)}</p>"
                       "<p><a href='/account/subscribe'>Back</a>.</p>",
                       account, current="subscribe"),
+                status_code=400)
+        return RedirectResponse(session["url"], status_code=303)
+
+    @app.post("/account/wallet/topup")
+    def wallet_topup_start(request: Request, amount_cents: int = Form(...)):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        try:
+            session = create_wallet_topup_session(config, account, amount_cents)
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page("Wallet top-up", f"<p>{esc(exc)}</p>"
+                      "<p><a href='/account/dashboard'>Back</a>.</p>",
+                      account, current="account"),
                 status_code=400)
         return RedirectResponse(session["url"], status_code=303)
 

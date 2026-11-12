@@ -67,6 +67,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from core.countries import normalize_country
+from ventoryn.plans import PLAN_NAMES, PLANS, STARTER_WALLET_CREDIT_CENTS
 from ventoryn.signature import (make_tag, parse_tag, sign_agent_link,
                                 tag_from_url)
 from ventoryn.token_crypto import decrypt_token, encrypt_token, is_encrypted
@@ -153,6 +154,18 @@ class InsufficientCredits(SaasError):
         self.balance = balance
 
 
+class InsufficientWalletFunds(SaasError):
+    """A wallet reservation was refused: available (balance minus
+    already-reserved) cannot cover the requested hold."""
+
+    def __init__(self, cents: int, available_cents: int) -> None:
+        super().__init__(
+            f"That action needs ${cents / 100:.2f} and the wallet has "
+            f"${available_cents / 100:.2f} available.")
+        self.cents = cents
+        self.available_cents = available_cents
+
+
 @dataclass
 class SaasConfig:
     """Everything the shell reads from the environment. Empty values
@@ -217,6 +230,25 @@ class SaasConfig:
     social_daily_cap_usd: float = 10.00
     social_account_monthly_cap_usd: float = 50.00
     social_site_monthly_cap_usd: float = 25.00
+    #: IndexNow key (VENTORYN_INDEXNOW_KEY) for submitting Ventoryn's
+    #: own public pages to search engines that support the protocol
+    #: (Bing, and by extension Brave Search). Empty means the key
+    #: verification route and submission are both unavailable.
+    indexnow_key: str = ""
+    #: Axionory tiers (STRIPE_PRICE_ID_STARTER/GROWTH/PRO). Separate
+    #: from stripe_price_id (the legacy $20/month flat-credit plan,
+    #: unaffected). An empty value means that tier cannot be
+    #: subscribed to yet — fails the same way stripe_configured does
+    #: today, never silently falls back to the legacy price.
+    stripe_price_id_starter: str = ""
+    stripe_price_id_growth: str = ""
+    stripe_price_id_pro: str = ""
+    #: Wallet top-up bounds in cents (VENTORYN_WALLET_TOPUP_MIN_CENTS /
+    #: _MAX_CENTS). The spec's four presets ($10/$25/$50/$100) all
+    #: fall inside these; a custom amount is accepted anywhere in
+    #: range, rejected outside it.
+    wallet_topup_min_cents: int = 500
+    wallet_topup_max_cents: int = 50000
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "SaasConfig":
@@ -260,6 +292,14 @@ class SaasConfig:
                 env.get("VENTORYN_SOCIAL_ACCOUNT_MONTHLY_CAP_USD"), 50.00),
             social_site_monthly_cap_usd=_safe_float(
                 env.get("VENTORYN_SOCIAL_SITE_MONTHLY_CAP_USD"), 25.00),
+            indexnow_key=env.get("VENTORYN_INDEXNOW_KEY", ""),
+            stripe_price_id_starter=env.get("STRIPE_PRICE_ID_STARTER", ""),
+            stripe_price_id_growth=env.get("STRIPE_PRICE_ID_GROWTH", ""),
+            stripe_price_id_pro=env.get("STRIPE_PRICE_ID_PRO", ""),
+            wallet_topup_min_cents=_safe_int(
+                env.get("VENTORYN_WALLET_TOPUP_MIN_CENTS"), 500),
+            wallet_topup_max_cents=_safe_int(
+                env.get("VENTORYN_WALLET_TOPUP_MAX_CENTS"), 50000),
         )
 
     def app_registered(self, kind: str) -> bool:
@@ -298,6 +338,15 @@ class SaasConfig:
     @property
     def stripe_configured(self) -> bool:
         return bool(self.stripe_secret_key and self.stripe_price_id)
+
+    def tier_price_id(self, plan: str) -> str:
+        """The Stripe price ID for an Axionory tier ('starter' /
+        'growth' / 'pro'), or '' when unknown or not yet configured."""
+        return {
+            "starter": self.stripe_price_id_starter,
+            "growth": self.stripe_price_id_growth,
+            "pro": self.stripe_price_id_pro,
+        }.get(plan, "")
 
     @property
     def google_redirect_uri(self) -> str:
@@ -405,6 +454,13 @@ def _new_id() -> str:
 def _safe_float(raw: str | None, default: float) -> float:
     try:
         return float(raw) if raw else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(raw: str | None, default: int) -> int:
+    try:
+        return int(raw) if raw else default
     except (TypeError, ValueError):
         return default
 
@@ -603,6 +659,36 @@ CREATE TABLE IF NOT EXISTS saas_social_spend (
     amount_usd REAL NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_workspaces (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_wallet_ledger (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    delta_cents INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_wallet_reservations (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    cents INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'held',
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    settled_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS saas_wallet_topups (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    payment_intent_id TEXT NOT NULL DEFAULT '',
+    amount_cents INTEGER NOT NULL,
+    refunded_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 #: Columns added to tables that already exist on a deployed state
@@ -652,6 +738,31 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("saas_conversions", "payment_intent_id", "TEXT NOT NULL DEFAULT ''"),
     ("saas_conversions", "refunded_at", "TEXT NOT NULL DEFAULT ''"),
     ("saas_conversions", "disputed_at", "TEXT NOT NULL DEFAULT ''"),
+    # Axionory tiers (Starter/Growth/Pro): '' means the legacy
+    # $20/month flat-credit plan, untouched and unaffected by any of
+    # this. A non-empty plan buys access only — its AI usage is
+    # 100% wallet-funded, never included credits (see plans.py).
+    ("saas_accounts", "plan", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_accounts", "wallet_balance_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "wallet_reserved_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "starter_credit_granted", "INTEGER NOT NULL DEFAULT 0"),
+    # Workspaces are new: existing single-account-per-site accounts
+    # get exactly one workspace, created lazily (ensure_workspace),
+    # not backfilled in bulk.
+    ("saas_sites", "workspace_id", "TEXT NOT NULL DEFAULT ''"),
+    # Auto-topup: explicit opt-in only (auto_topup_enabled starts 0).
+    # The monthly cap is enforced against auto_topup_spent_this_month
+    # by needs_auto_topup's caller, reset when the tracked month
+    # rolls over (auto_topup_month, 'YYYY-MM'). NOTE: these columns
+    # configure WHEN a top-up should happen; actually charging a
+    # saved payment method off-session is not implemented yet (needs
+    # the Phase 6 payment-method-on-file work) — see plans.py.
+    ("saas_accounts", "auto_topup_enabled", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "auto_topup_threshold_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "auto_topup_amount_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "auto_topup_monthly_cap_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "auto_topup_spent_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "auto_topup_month", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Admin login rate limit: this many wrong guesses lock the login
@@ -936,6 +1047,15 @@ class SaasStore:
                 " current_period_end = COALESCE(?, current_period_end)"
                 " WHERE id = ?",
                 (status, subscription_id, current_period_end, account_id))
+
+    def set_plan(self, account_id: str, plan: str) -> None:
+        """Set an account's Axionory tier ('starter'/'growth'/'pro').
+        Never called for the legacy plan — that account simply keeps
+        plan == ''."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_accounts SET plan = ? WHERE id = ?",
+                (plan, account_id))
 
     # -- sessions ------------------------------------------------------------
     def create_session(self, account_id: str) -> str:
@@ -1310,6 +1430,363 @@ class SaasStore:
                 raise
         return self.get_job(job_id)
 
+    # -- wallet (Axionory tiers: 100% wallet-funded usage) --------------------
+
+    def wallet_balance_cents(self, account_id: str) -> int:
+        account = self.get_account(account_id)
+        return int(account["wallet_balance_cents"]) if account else 0
+
+    def grant_wallet_credit(self, account_id: str, cents: int, reason: str) -> int:
+        """Add money to the wallet (a top-up, the one-time starter
+        credit, a refund adjustment). Returns the new balance in
+        cents. Never used for the legacy plan's credit allowance —
+        that stays on saas_credit_ledger, untouched."""
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_accounts SET wallet_balance_cents ="
+                " wallet_balance_cents + ? WHERE id = ?",
+                (cents, account_id))
+            self._conn.execute(
+                "INSERT INTO saas_wallet_ledger (id, account_id, delta_cents,"
+                " reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                (_new_id(), account_id, cents, reason, now))
+        return self.wallet_balance_cents(account_id)
+
+    def grant_starter_wallet_credit_once(self, account_id: str, cents: int) -> bool:
+        """Grant the one-time new-tier starter credit exactly once per
+        account, atomically (a races-safe check-and-set on the
+        starter_credit_granted flag). Returns True if granted this
+        call, False if it was already granted before."""
+        now = _iso(_now())
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT starter_credit_granted FROM saas_accounts"
+                    " WHERE id = ?", (account_id,)).fetchone()
+                if row is None or int(row[0]):
+                    self._conn.commit()
+                    return False
+                self._conn.execute(
+                    "UPDATE saas_accounts SET starter_credit_granted = 1,"
+                    " wallet_balance_cents = wallet_balance_cents + ?"
+                    " WHERE id = ?", (cents, account_id))
+                self._conn.execute(
+                    "INSERT INTO saas_wallet_ledger (id, account_id,"
+                    " delta_cents, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (_new_id(), account_id, cents,
+                     "One-time starter wallet credit — new plan subscription",
+                     now))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return True
+
+    def wallet_reserved_cents(self, account_id: str) -> int:
+        account = self.get_account(account_id)
+        return int(account["wallet_reserved_cents"]) if account else 0
+
+    def wallet_available_cents(self, account_id: str) -> int:
+        """Spendable now: balance minus what's already held by other
+        in-flight reservations."""
+        account = self.get_account(account_id)
+        if account is None:
+            return 0
+        return (int(account["wallet_balance_cents"])
+                - int(account["wallet_reserved_cents"]))
+
+    def reserve_wallet_funds(self, account_id: str, cents: int,
+                             reason: str) -> dict:
+        """Atomically hold ``cents`` against the wallet before an
+        expensive action runs. Raises InsufficientWalletFunds (nothing
+        held) when available funds don't cover it. Returns the
+        reservation row; settle or release it afterward — never leave
+        it held."""
+        now = _iso(_now())
+        reservation_id = _new_id()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT wallet_balance_cents, wallet_reserved_cents"
+                    " FROM saas_accounts WHERE id = ?", (account_id,)
+                    ).fetchone()
+                balance = int(row[0]) if row else 0
+                reserved = int(row[1]) if row else 0
+                available = balance - reserved
+                if cents > available:
+                    self._conn.rollback()
+                    raise InsufficientWalletFunds(cents, available)
+                self._conn.execute(
+                    "UPDATE saas_accounts SET wallet_reserved_cents ="
+                    " wallet_reserved_cents + ? WHERE id = ?",
+                    (cents, account_id))
+                self._conn.execute(
+                    "INSERT INTO saas_wallet_reservations (id, account_id,"
+                    " cents, status, reason, created_at)"
+                    " VALUES (?, ?, ?, 'held', ?, ?)",
+                    (reservation_id, account_id, cents, reason, now))
+                self._conn.commit()
+            except InsufficientWalletFunds:
+                raise
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_wallet_reservation(reservation_id)
+
+    def get_wallet_reservation(self, reservation_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_wallet_reservations WHERE id = ?",
+                (reservation_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def settle_wallet_reservation(self, reservation_id: str,
+                                  actual_cents: int, reason: str) -> dict | None:
+        """The action ran: debit ``actual_cents`` (may be less than
+        the hold — the rest is released back to available) and close
+        the reservation. Idempotent — settling an already-settled or
+        released reservation is a no-op, so a retried settle call
+        (e.g. a retried job) never double-charges."""
+        now = _iso(_now())
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM saas_wallet_reservations WHERE id = ?",
+                    (reservation_id,)).fetchone()
+                if row is None or row["status"] != "held":
+                    self._conn.commit()
+                    return _row_dict(row) if row else None
+                held_cents = int(row["cents"])
+                self._conn.execute(
+                    "UPDATE saas_accounts SET wallet_reserved_cents ="
+                    " wallet_reserved_cents - ?,"
+                    " wallet_balance_cents = wallet_balance_cents - ?"
+                    " WHERE id = ?",
+                    (held_cents, actual_cents, row["account_id"]))
+                if actual_cents:
+                    self._conn.execute(
+                        "INSERT INTO saas_wallet_ledger (id, account_id,"
+                        " delta_cents, reason, created_at)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (_new_id(), row["account_id"], -actual_cents,
+                         reason, now))
+                self._conn.execute(
+                    "UPDATE saas_wallet_reservations SET status = 'settled',"
+                    " settled_at = ? WHERE id = ?", (now, reservation_id))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_wallet_reservation(reservation_id)
+
+    def release_wallet_reservation(self, reservation_id: str) -> dict | None:
+        """The action never ran (refused, cancelled, failed before
+        starting): release the full hold, charge nothing. Idempotent,
+        same as settle."""
+        now = _iso(_now())
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM saas_wallet_reservations WHERE id = ?",
+                    (reservation_id,)).fetchone()
+                if row is None or row["status"] != "held":
+                    self._conn.commit()
+                    return _row_dict(row) if row else None
+                self._conn.execute(
+                    "UPDATE saas_accounts SET wallet_reserved_cents ="
+                    " wallet_reserved_cents - ? WHERE id = ?",
+                    (int(row["cents"]), row["account_id"]))
+                self._conn.execute(
+                    "UPDATE saas_wallet_reservations SET status = 'released',"
+                    " settled_at = ? WHERE id = ?", (now, reservation_id))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_wallet_reservation(reservation_id)
+
+    def set_auto_topup(self, account_id: str, *, enabled: bool,
+                       threshold_cents: int, amount_cents: int,
+                       monthly_cap_cents: int) -> None:
+        """Explicit customer opt-in for auto-topup — never enabled by
+        default. This configures WHEN a top-up should trigger
+        (needs_auto_topup) and the monthly spending cap
+        (record_auto_topup_spend); it does not itself charge anything
+        — actually billing a saved payment method off-session is a
+        Phase 6 follow-up (needs a saved payment method on file)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_accounts SET auto_topup_enabled = ?,"
+                " auto_topup_threshold_cents = ?, auto_topup_amount_cents = ?,"
+                " auto_topup_monthly_cap_cents = ? WHERE id = ?",
+                (1 if enabled else 0, threshold_cents, amount_cents,
+                 monthly_cap_cents, account_id))
+
+    def needs_auto_topup(self, account_id: str) -> bool:
+        """True when auto-topup is enabled and available wallet funds
+        have dropped to or below the configured threshold."""
+        account = self.get_account(account_id)
+        if account is None or not int(account["auto_topup_enabled"]):
+            return False
+        return (self.wallet_available_cents(account_id)
+                <= int(account["auto_topup_threshold_cents"]))
+
+    def record_auto_topup_spend(self, account_id: str, cents: int,
+                                now: datetime | None = None) -> bool:
+        """True when ``cents`` fits this calendar month's auto-topup
+        cap (and records it); False when it would exceed the cap (the
+        caller must not top up). Rolls the tracked month over to 0
+        spent automatically."""
+        now = now or _now()
+        month = now.strftime("%Y-%m")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT auto_topup_month, auto_topup_spent_cents,"
+                    " auto_topup_monthly_cap_cents FROM saas_accounts"
+                    " WHERE id = ?", (account_id,)).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return False
+                spent = 0 if row[0] != month else int(row[1])
+                cap = int(row[2])
+                if spent + cents > cap:
+                    self._conn.execute(
+                        "UPDATE saas_accounts SET auto_topup_month = ?,"
+                        " auto_topup_spent_cents = ? WHERE id = ?",
+                        (month, spent, account_id))
+                    self._conn.commit()
+                    return False
+                self._conn.execute(
+                    "UPDATE saas_accounts SET auto_topup_month = ?,"
+                    " auto_topup_spent_cents = ? WHERE id = ?",
+                    (month, spent + cents, account_id))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return True
+
+    def wallet_transactions(self, account_id: str, limit: int = 100) -> list[dict]:
+        """Ledger rows newest first — the transaction history /
+        statement data (actual debits and credits; reservations that
+        were released without settling never appear here, since
+        nothing was charged)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_wallet_ledger WHERE account_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (account_id, limit)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def wallet_statement_csv(self, account_id: str, limit: int = 1000) -> str:
+        """A downloadable statement: date, amount, reason — oldest
+        first (a statement reads top-to-bottom chronologically)."""
+        import csv
+        import io
+
+        rows = list(reversed(self.wallet_transactions(account_id, limit)))
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(["date", "amount_usd", "reason"])
+        for r in rows:
+            writer.writerow([r["created_at"], f"{r['delta_cents'] / 100:.2f}",
+                             r["reason"]])
+        return out.getvalue()
+
+    def record_wallet_topup(self, account_id: str, payment_intent_id: str,
+                            amount_cents: int) -> dict:
+        """Record a confirmed wallet top-up payment, so a later
+        refund/dispute on it can be found and reversed."""
+        topup_id = _new_id()
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_wallet_topups (id, account_id,"
+                " payment_intent_id, amount_cents, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (topup_id, account_id, payment_intent_id, amount_cents, now))
+        return {"id": topup_id, "account_id": account_id,
+                "payment_intent_id": payment_intent_id,
+                "amount_cents": amount_cents, "created_at": now,
+                "refunded_at": ""}
+
+    def get_wallet_topup_by_payment_intent(self, payment_intent_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_wallet_topups WHERE payment_intent_id = ?",
+                (payment_intent_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def reverse_wallet_topup(self, topup_id: str) -> bool:
+        """A refund or lost dispute on a top-up: debit the wallet back
+        by the original amount and mark it reversed, atomically.
+        Idempotent — a replayed or duplicate reversal on an
+        already-reversed topup is a no-op, never a double debit."""
+        now = _iso(_now())
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM saas_wallet_topups WHERE id = ?",
+                    (topup_id,)).fetchone()
+                if row is None or row["refunded_at"]:
+                    self._conn.commit()
+                    return False
+                cents = int(row["amount_cents"])
+                self._conn.execute(
+                    "UPDATE saas_wallet_topups SET refunded_at = ?"
+                    " WHERE id = ?", (now, topup_id))
+                self._conn.execute(
+                    "UPDATE saas_accounts SET wallet_balance_cents ="
+                    " wallet_balance_cents - ? WHERE id = ?",
+                    (cents, row["account_id"]))
+                self._conn.execute(
+                    "INSERT INTO saas_wallet_ledger (id, account_id,"
+                    " delta_cents, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (_new_id(), row["account_id"], -cents,
+                     "Wallet top-up refunded/disputed", now))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return True
+
+    # -- workspaces (Axionory tiers) ------------------------------------------
+
+    def list_workspaces(self, account_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_workspaces WHERE account_id = ?"
+                " ORDER BY created_at", (account_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def ensure_default_workspace(self, account_id: str) -> dict:
+        """Every account has at least one workspace. Existing
+        accounts (which predate workspaces entirely) get exactly one,
+        created lazily on first use rather than backfilled in bulk."""
+        existing = self.list_workspaces(account_id)
+        if existing:
+            return existing[0]
+        return self.create_workspace(account_id, "Default")
+
+    def create_workspace(self, account_id: str, name: str) -> dict:
+        workspace_id = _new_id()
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_workspaces (id, account_id, name,"
+                " created_at) VALUES (?, ?, ?, ?)",
+                (workspace_id, account_id, name, now))
+        return {"id": workspace_id, "account_id": account_id, "name": name,
+                "created_at": now}
+
     def get_job(self, job_id: str) -> dict | None:
         with self._lock:
             row = self._conn.execute(
@@ -1359,15 +1836,19 @@ class SaasStore:
         clean = validate_site_url(url)
         # Any real ISO 3166-1 code is accepted; anything else raises.
         clean_country = normalize_country(country)
+        # Called before the lock below (ensure_default_workspace takes
+        # its own lock; self._lock is not reentrant).
+        workspace = self.ensure_default_workspace(account_id)
         site_id = _new_id()
         now = _iso(_now())
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO saas_sites (id, account_id, url, host, country,"
-                " language, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " language, workspace_id, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (site_id, account_id, clean, urlparse(clean).netloc,
                  clean_country,
-                 (language or "en").lower()[:2], now))
+                 (language or "en").lower()[:2], workspace["id"], now))
             for kind, status, note in DEFAULT_CONNECTIONS:
                 self._conn.execute(
                     "INSERT INTO saas_connections (id, site_id, kind, status,"
@@ -2684,33 +3165,89 @@ def stripe_auth_header(secret_key: str) -> dict:
 
 
 def create_checkout_session(config: SaasConfig, account: dict,
-                            urlopen=None, site_url: str | None = None) -> dict:
-    """Create a $20/month subscription checkout session for an account.
-    Returns {"id", "url"}. Raises SaasError when Stripe is not
-    configured or the call fails. When ``site_url`` is given, the
-    success URL carries it, so the customer lands back on their
-    dashboard with the site they typed already filled in."""
-    if not config.stripe_configured:
-        raise SaasError(
-            "Payments are not set up yet — the price is $20/month, but "
-            "the Stripe connection is still being set up.")
+                            urlopen=None, site_url: str | None = None,
+                            plan: str = "") -> dict:
+    """Create a subscription checkout session for an account. With
+    ``plan`` empty (default), this is the legacy $20/month flat-credit
+    plan, unchanged. With ``plan`` set to an Axionory tier
+    ('starter'/'growth'/'pro'), it uses that tier's price and tags the
+    session with metadata[plan] so the webhook knows which tier to
+    activate. Returns {"id", "url"}. Raises SaasError when Stripe (or
+    the requested tier's price) is not configured, or the call fails.
+    When ``site_url`` is given, the success URL carries it, so the
+    customer lands back on their dashboard with the site they typed
+    already filled in."""
+    if plan:
+        price_id = config.tier_price_id(plan)
+        if not config.stripe_secret_key or not price_id:
+            raise SaasError(
+                f"The {plan} plan is not set up for payments yet.")
+    else:
+        if not config.stripe_configured:
+            raise SaasError(
+                "Payments are not set up yet — the price is $20/month, but "
+                "the Stripe connection is still being set up.")
+        price_id = config.stripe_price_id
     success_url = f"{config.base_url}/account/dashboard?subscribed=1"
     if site_url:
         success_url += ("&site_url=" +
                         urllib.parse.quote(site_url, safe=""))
     fields = {
         "mode": "subscription",
-        "line_items[0][price]": config.stripe_price_id,
+        "line_items[0][price]": price_id,
         "line_items[0][quantity]": "1",
         "client_reference_id": account["id"],
         "customer_email": account["email"],
         "success_url": success_url,
         "cancel_url": f"{config.base_url}/account/subscribe?cancelled=1",
     }
+    if plan:
+        fields["metadata[plan]"] = plan
     from ventoryn.analytics import own_site_id
     if own_site_id():
         # ventoryn.app counts its own subscribers as paying customers.
         fields["metadata[ventoryn_site_id]"] = own_site_id()
+    body = _http_post_form(
+        STRIPE_CHECKOUT_SESSIONS_URL, fields,
+        headers=stripe_auth_header(config.stripe_secret_key),
+        urlopen=urlopen)
+    if body.get("error") or not body.get("url"):
+        message = (body.get("error") or {}).get("message") or \
+            "Stripe did not create a checkout session."
+        raise SaasError(f"Could not start checkout: {message}")
+    return {"id": body["id"], "url": body["url"]}
+
+
+def create_wallet_topup_session(config: SaasConfig, account: dict,
+                                amount_cents: int, urlopen=None) -> dict:
+    """A one-time (mode=payment) checkout session for a wallet
+    top-up of ``amount_cents`` — one of the $10/$25/$50/$100 presets
+    or any custom amount in SaasConfig's configured bounds. Raises
+    SaasError when Stripe is not configured or the amount is out of
+    bounds. The wallet is credited only by the webhook, on confirmed
+    payment — never here, never from a success-page redirect."""
+    if not config.stripe_secret_key:
+        raise SaasError("Payments are not set up yet.")
+    if not (config.wallet_topup_min_cents <= amount_cents
+            <= config.wallet_topup_max_cents):
+        raise SaasError(
+            f"Top-up amount must be between "
+            f"${config.wallet_topup_min_cents / 100:.2f} and "
+            f"${config.wallet_topup_max_cents / 100:.2f}.")
+    fields = {
+        "mode": "payment",
+        "line_items[0][price_data][currency]": "usd",
+        "line_items[0][price_data][product_data][name]":
+            "Axionory wallet top-up",
+        "line_items[0][price_data][unit_amount]": str(int(amount_cents)),
+        "line_items[0][quantity]": "1",
+        "client_reference_id": account["id"],
+        "customer_email": account["email"],
+        "metadata[kind]": "wallet_topup",
+        "metadata[account_id]": account["id"],
+        "success_url": f"{config.base_url}/account/dashboard?topup=1",
+        "cancel_url": f"{config.base_url}/account/dashboard?topup=cancelled",
+    }
     body = _http_post_form(
         STRIPE_CHECKOUT_SESSIONS_URL, fields,
         headers=stripe_auth_header(config.stripe_secret_key),
@@ -2765,6 +3302,20 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
     obj = data.get("object") or {}
 
     if etype == "checkout.session.completed":
+        metadata = obj.get("metadata") or {}
+        if metadata.get("kind") == "wallet_topup":
+            account = store.get_account(obj.get("client_reference_id") or "")
+            amount = obj.get("amount_total")
+            if account is None or not isinstance(amount, int) or amount <= 0:
+                return "ignored"
+            store.record_wallet_topup(
+                account["id"], obj.get("payment_intent") or "", amount)
+            store.grant_wallet_credit(
+                account["id"], amount, "Wallet top-up")
+            store.record_activity_event(
+                account["id"], "wallet_topup",
+                f"${amount / 100:.2f} added to the wallet")
+            return "ok"
         account = store.get_account(obj.get("client_reference_id") or "")
         if account is None:
             return "ignored"
@@ -2773,6 +3324,24 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
             obj.get("subscription"))
         store.set_subscription(account["id"], "active",
                                obj.get("subscription"))
+        plan = metadata.get("plan") or ""
+        if plan in PLAN_NAMES:
+            # Axionory tier: access only, zero included credits — all
+            # usage is wallet-funded (ventoryn/plans.py). Never grants
+            # the legacy monthly credit allowance.
+            store.set_plan(account["id"], plan)
+            if store.grant_starter_wallet_credit_once(
+                    account["id"], STARTER_WALLET_CREDIT_CENTS):
+                store.record_activity_event(
+                    account["id"], "subscribed",
+                    f"{PLANS[plan]['label']} subscription started — "
+                    f"${STARTER_WALLET_CREDIT_CENTS / 100:.2f} starter "
+                    "wallet credit added")
+            else:
+                store.record_activity_event(
+                    account["id"], "subscribed",
+                    f"{PLANS[plan]['label']} subscription started")
+            return "ok"
         store.grant_credits(account["id"], config.monthly_credits,
                             "Monthly credit allowance — subscription started")
         store.record_activity_event(
@@ -2809,6 +3378,22 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
             return "ignored"
         store.grant_credits(account["id"], config.monthly_credits,
                             "Monthly credit allowance — renewal")
+        return "ok"
+
+    if etype in ("charge.refunded", "charge.dispute.created",
+                 "charge.dispute.closed"):
+        # Platform-level reversal — only acts when the charge matches
+        # a recorded wallet top-up; a refund on the legacy plan's
+        # subscription invoice has nothing to reverse here.
+        if etype == "charge.dispute.closed" and obj.get("status") != "lost":
+            return "ok"
+        payment_intent_id = obj.get("payment_intent") or ""
+        if not payment_intent_id:
+            return "ignored"
+        topup = store.get_wallet_topup_by_payment_intent(payment_intent_id)
+        if topup is None:
+            return "ignored"
+        store.reverse_wallet_topup(topup["id"])
         return "ok"
 
     return "ignored"
