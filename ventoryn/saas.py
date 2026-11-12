@@ -1314,6 +1314,35 @@ class SaasStore:
                 " VALUES ('tick_paused', ?)",
                 ("1" if paused else "0",))
 
+    def delete_site(self, site_id: str) -> dict:
+        """Remove one website and everything that belongs to it: every
+        row in every table with a site_id column (connections, jobs,
+        campaigns and posts, sales, analytics, snapshot, spend logs…),
+        the reviews of its videos, then the site. Returns rows removed
+        per table. Revoking provider tokens is the caller's job, first."""
+        removed: dict = {}
+        with self._lock, self._conn:
+            tables = [r[0] for r in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")]
+            if "saas_video_reviews" in tables:
+                n = self._conn.execute(
+                    "DELETE FROM saas_video_reviews WHERE job_id IN"
+                    " (SELECT id FROM saas_jobs WHERE site_id = ?)", (site_id,)).rowcount
+                if n:
+                    removed["saas_video_reviews"] = n
+            for t in tables:
+                if t == "saas_sites":
+                    continue
+                cols = [c[1] for c in self._conn.execute(f"PRAGMA table_info({t})")]
+                if "site_id" in cols:
+                    n = self._conn.execute(f"DELETE FROM {t} WHERE site_id = ?",
+                                           (site_id,)).rowcount
+                    if n:
+                        removed[t] = n
+            removed["saas_sites"] = self._conn.execute(
+                "DELETE FROM saas_sites WHERE id = ?", (site_id,)).rowcount
+        return removed
+
     def delete_account(self, account_id: str) -> None:
         """Delete an account and everything it owns: sites and their
         connections (tokens included — the caller revokes at the
