@@ -246,3 +246,14 @@ def test_http_layer_sends_the_documented_requests():
     with pytest.raises(tt.TikTokError, match="Too many posts"):
         tt.creator_info("a", urlopen=urlopen)
     assert sent[2].get_method() == "POST"
+
+
+def test_website_added_before_tiktok_existed_can_connect(client, store, reports, fake):
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://www.road2cissp.com")
+    with store._lock, store._conn:  # an older website: no TikTok row yet
+        store._conn.execute("DELETE FROM saas_connections WHERE site_id = ? AND kind = 'tiktok'",
+                            (site["id"],))
+    assert store.get_connection(site["id"], "tiktok") is None
+    _connect(client, store, site)
+    assert store.get_connection(site["id"], "tiktok")["status"] == "connected"

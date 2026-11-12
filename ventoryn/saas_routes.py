@@ -2420,6 +2420,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if not tt.configured():
             return _tiktok_page(site, account, "<p>TikTok is not set up on this server yet. "
                                 "Nothing was connected.</p>", 400)
+        store.ensure_connections(site_id)  # websites added before TikTok existed
         state = store.create_connection_oauth_state(site_id, "tiktok", "")
         return RedirectResponse(tt.authorize_url(base, state), status_code=303)
 
@@ -2449,6 +2450,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                                 f"<p>Connecting TikTok did not complete: {esc(exc)}</p>"
                                 "<p><a href='/integrations/tiktok'>Back</a>.</p>", 502)
         name = who.get("display_name") or "your TikTok account"
+        store.ensure_connections(site["id"])
         store.update_connection(site["id"], "tiktok", "connected", f"Connected as {name}",
                                 {**tokens, **who})
         store.record_activity_event(account["id"], "site",

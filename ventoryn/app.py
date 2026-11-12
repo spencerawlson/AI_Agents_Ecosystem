@@ -4809,6 +4809,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
         sites = _saas_store.list_sites(account["id"])
         rows, dialogs = "", ""
         for s in sites:
+            _saas_store.ensure_connections(s["id"])  # kinds added after the site
             conn, connected = _integration_status(s["id"], kind)
             sid = esc(s["id"])
             badge = ("<span class='badge badge-ok'>Connected</span>" if connected
