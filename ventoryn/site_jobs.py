@@ -348,7 +348,10 @@ def _run_video(site, inputs, ctx):
     from orchestrator.models import TaskStatus
 
     profile, titles, _inv = _site_profile(site)
+    # The creative agent labels its output with the slug; without one the
+    # label is empty and peer review rejects the draft as a placeholder.
     experiment = {"name": f"Intro video for {_host(site)}",
+                  "slug": f"video-{_slug(_host(site))}",
                   "channel": "short-form video",
                   "hypothesis": "A short explainer brings new visitors.",
                   "content_needed": ["video-script"]}

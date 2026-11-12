@@ -265,3 +265,26 @@ def test_website_without_presenter_is_refused_before_charging(monkeypatch):
         site_jobs.preflight("video_render", {"presenter": "heygen", "avatar_id": "none"})
     monkeypatch.delenv("HEYGEN_AVATAR_ID")
     site_jobs.preflight("video_render", {"presenter": "heygen", "avatar_id": "jerrod1"})  # ok
+
+
+def test_video_script_request_carries_a_slug(tmp_path, monkeypatch):
+    # The creative agent echoes experiment.slug; an empty one fails peer
+    # review ("placeholder top-level fields: ['experiment']").
+    from ventoryn import site_jobs
+
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_dispatch(orch, agent, action, inputs, budget, criteria):
+        seen.update(inputs)
+        raise Stop()
+
+    monkeypatch.setattr(site_jobs, "_site_profile", lambda site: ({"what": "x"}, ["T"], None))
+    monkeypatch.setattr(site_jobs, "_dispatch", fake_dispatch)
+    site = {"id": "s1", "account_id": "a1", "url": "https://www.road2cissp.com",
+            "host": "www.road2cissp.com", "country": "us", "language": "en"}
+    with pytest.raises(Stop):
+        site_jobs._run_video(site, {}, {**_video_ctx(tmp_path, None), "orchestrator": None})
+    assert seen["experiment"]["slug"] == "video-www-road2cissp-com"
