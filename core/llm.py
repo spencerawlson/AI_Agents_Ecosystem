@@ -15,7 +15,20 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Callable
+
+#: An optional callback, invoked with {model, input_tokens,
+#: output_tokens, cost_usd} after every successful completion. core
+#: has no dependency on any higher-level package (e.g. ventoryn) —
+#: a consumer registers itself here instead (see
+#: ventoryn/usage_metering.py, wired once at app startup). A hook
+#: failure is swallowed: metering must never break a real LLM call.
+_usage_hook: Callable[[dict], None] | None = None
+
+
+def set_usage_hook(hook: Callable[[dict], None] | None) -> None:
+    global _usage_hook
+    _usage_hook = hook
 
 
 class LLMUnavailable(RuntimeError):
@@ -126,6 +139,13 @@ class LLMGateway:
             except json.JSONDecodeError as exc:
                 raise LLMUnavailable(
                     f"LLM did not return valid JSON: {text[:200]}") from exc
+        if _usage_hook is not None:
+            try:
+                _usage_hook({"model": model, "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                            "cost_usd": cost_usd})
+            except Exception:  # noqa: BLE001 - metering must never break a call
+                pass
         return {
             "text": text,
             "json": parsed,

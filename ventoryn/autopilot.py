@@ -87,10 +87,19 @@ def execute(store, config, account: dict, site: dict, job_type: str, *,
         job = store.charge_credits(account["id"], job_type, site["id"], is_operator=is_op)
     auto = not (inputs or {}).get("source") == "manual"
     prefix = AUTO_PREFIX if auto else ""
+    from ventoryn.usage_metering import collecting_usage, persist_usage_events
+
     try:
-        summary, _report = site_jobs.run(job_type, site, inputs or {},
-                                         orchestrator=orchestrator,
-                                         reports_dir=reports_dir, store=store)
+        with collecting_usage() as events:
+            try:
+                summary, _report = site_jobs.run(
+                    job_type, site, inputs or {}, orchestrator=orchestrator,
+                    reports_dir=reports_dir, store=store)
+            finally:
+                # Any LLM calls that ran cost real provider money even
+                # if the job fails right after — recorded either way.
+                persist_usage_events(store, events, account_id=account["id"],
+                                     job_id=job["id"], site_id=site["id"])
         store.set_job_result(job["id"], "done", prefix + summary)
         store.record_activity_event(
             account["id"], "job",

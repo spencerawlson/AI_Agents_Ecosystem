@@ -2548,12 +2548,22 @@ funnel counts it. This is the owner-recorded fallback.</p>
         try:
             import asyncio
 
+            from ventoryn.usage_metering import collecting_usage, persist_usage_events
+
             orchestrator = app.state.ecosystem["orchestrator"]
             # The work is blocking (HTTP fetches, LLM calls, ffmpeg):
-            # run it off the event loop.
-            summary, _report = await asyncio.to_thread(
-                site_jobs.run, job_type, site, inputs,
-                orchestrator=orchestrator, reports_dir=REPORTS_DIR, store=store)
+            # run it off the event loop. asyncio.to_thread propagates
+            # the current context (incl. the usage collector below)
+            # into that thread.
+            with collecting_usage() as events:
+                try:
+                    summary, _report = await asyncio.to_thread(
+                        site_jobs.run, job_type, site, inputs,
+                        orchestrator=orchestrator, reports_dir=REPORTS_DIR,
+                        store=store)
+                finally:
+                    persist_usage_events(store, events, account_id=account["id"],
+                                         job_id=job["id"], site_id=site_id)
             store.set_job_result(job["id"], "done", summary)
             # The admin's recent-activity feed: a real job ran.
             store.record_activity_event(

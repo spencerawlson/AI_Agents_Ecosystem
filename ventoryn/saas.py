@@ -689,6 +689,22 @@ CREATE TABLE IF NOT EXISTS saas_wallet_topups (
     refunded_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_usage_events (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL DEFAULT '',
+    site_id TEXT NOT NULL DEFAULT '',
+    job_id TEXT NOT NULL DEFAULT '',
+    campaign_id TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    provider_cost_cents INTEGER NOT NULL DEFAULT 0,
+    customer_charge_cents INTEGER,
+    pricing_version TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 #: Columns added to tables that already exist on a deployed state
@@ -1704,6 +1720,41 @@ class SaasStore:
             writer.writerow([r["created_at"], f"{r['delta_cents'] / 100:.2f}",
                              r["reason"]])
         return out.getvalue()
+
+    # -- usage metering (Axionory Phase 4) ------------------------------------
+
+    def usage_events_for_job(self, job_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_usage_events WHERE job_id = ?",
+                (job_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def record_usage_event(self, *, account_id: str, workspace_id: str = "",
+                           site_id: str = "", job_id: str = "",
+                           campaign_id: str = "", provider: str = "",
+                           model: str = "", input_tokens: int = 0,
+                           output_tokens: int = 0, provider_cost_cents: int = 0,
+                           pricing_version: str = "") -> dict:
+        """One billable LLM call. ``customer_charge_cents`` starts
+        unset (None) — Phase 4 only records what happened; Phase 5's
+        pricing engine fills in the actual customer charge."""
+        event_id = _new_id()
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_usage_events (id, account_id, workspace_id,"
+                " site_id, job_id, campaign_id, provider, model, input_tokens,"
+                " output_tokens, provider_cost_cents, pricing_version,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (event_id, account_id, workspace_id, site_id, job_id,
+                 campaign_id, provider, model, input_tokens, output_tokens,
+                 provider_cost_cents, pricing_version, now))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_usage_events WHERE id = ?",
+                (event_id,)).fetchone()
+        return _row_dict(row)
 
     def record_wallet_topup(self, account_id: str, payment_intent_id: str,
                             amount_cents: int) -> dict:

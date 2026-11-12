@@ -5441,6 +5441,9 @@ a real Stripe payment, no signature.</p>"""
     register_public_files(app, _saas_config)
     from ventoryn.indexnow import register_indexnow
     register_indexnow(app, _saas_config)
+    from core.llm import set_usage_hook
+    from ventoryn.usage_metering import record_llm_usage
+    set_usage_hook(record_llm_usage)
 
     # Autopilot: the agents work on every website by default.
     def _start_autopilot():
