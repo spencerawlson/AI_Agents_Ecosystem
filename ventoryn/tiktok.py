@@ -34,6 +34,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from ventoryn.keyed_lock import KeyedLock
+
 AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/"
 API = "https://open.tiktokapis.com"
 TOKEN_URL = f"{API}/v2/oauth/token/"
@@ -209,19 +211,27 @@ def media_job(token: str, now: float | None = None, env=None) -> str | None:
     return job_id
 
 
+#: Serializes fresh_access_token per site — without this, two
+#: concurrent refreshes for the same connection both read the same
+#: single-use refresh token, and only one actually works (see
+#: ventoryn/keyed_lock.py).
+_refresh_lock = KeyedLock()
+
+
 def fresh_access_token(store, site_id: str, env=None, urlopen=None) -> str:
     """The site's TikTok access token, refreshed (and the rotated refresh
     token saved) when it is about to expire."""
-    conn = store.get_connection(site_id, "tiktok") or {}
-    raw = dict(conn.get("_detail_raw") or {})
-    if conn.get("status") != "connected" or not raw.get("access_token"):
-        raise TikTokError("TikTok is not connected for this website")
-    if int(raw.get("expires_at") or 0) - 300 > time.time():
+    with _refresh_lock(site_id):
+        conn = store.get_connection(site_id, "tiktok") or {}
+        raw = dict(conn.get("_detail_raw") or {})
+        if conn.get("status") != "connected" or not raw.get("access_token"):
+            raise TikTokError("TikTok is not connected for this website")
+        if int(raw.get("expires_at") or 0) - 300 > time.time():
+            return raw["access_token"]
+        new = refresh(raw.get("refresh_token", ""), env=env, urlopen=urlopen)
+        raw.update(new)
+        store.update_connection(site_id, "tiktok", "connected", conn.get("note", "Connected"), raw)
         return raw["access_token"]
-    new = refresh(raw.get("refresh_token", ""), env=env, urlopen=urlopen)
-    raw.update(new)
-    store.update_connection(site_id, "tiktok", "connected", conn.get("note", "Connected"), raw)
-    return raw["access_token"]
 
 
 # -- the posting screen (TikTok's required UX for Direct Post) ---------------

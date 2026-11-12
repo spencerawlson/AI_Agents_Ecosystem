@@ -210,6 +210,45 @@ def test_expired_access_token_is_refreshed_and_rotated(store, monkeypatch):
     assert raw["refresh_token"] == "rt-new"
 
 
+def test_concurrent_refresh_exchanges_the_refresh_token_exactly_once(
+        store, monkeypatch):
+    """Regression: TikTok's refresh token is single-use and rotated on
+    every refresh. Two concurrent refreshes for the same site used to
+    both read it and both try to exchange it — only one could work.
+    ventoryn/keyed_lock.py serializes fresh_access_token per site, so
+    a second concurrent caller sees the already-rotated token instead
+    of racing to reuse the now-invalid one."""
+    import threading
+    import time as _time
+
+    acct = _account(store)
+    site = store.create_site(acct["id"], "https://www.road2cissp.com")
+    store.update_connection(site["id"], "tiktok", "connected", "Connected as R",
+                            {"access_token": "old", "refresh_token": "rt-old",
+                             "expires_at": int(time.time()) - 10})
+    seen = []
+
+    def _fake_refresh(rt, **k):
+        seen.append(rt)
+        _time.sleep(0.05)  # widen the race window
+        return {"access_token": "new", "refresh_token": "rt-new",
+                "expires_at": int(time.time()) + 7200}
+
+    monkeypatch.setattr(tt, "refresh", _fake_refresh)
+    results = []
+
+    def worker():
+        results.append(tt.fresh_access_token(store, site["id"]))
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    assert results == ["new"] * 5
+    assert seen == ["rt-old"]
+
+
 class _Resp(io.BytesIO):
     def __enter__(self):
         return self

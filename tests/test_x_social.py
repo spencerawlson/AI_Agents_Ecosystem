@@ -492,6 +492,45 @@ def test_fresh_x_access_token_raises_when_refresh_rejected(store, config):
         saas.fresh_x_access_token(store, config, site["id"], urlopen=_urlopen)
 
 
+def test_concurrent_refresh_exchanges_the_refresh_token_exactly_once(
+        store, config, monkeypatch):
+    """Regression: X's refresh token is single-use. Two concurrent
+    refreshes for the same site used to both read it and both try to
+    exchange it — only one could work, and the other failed with a
+    confusing "reconnect" error even though the account was fine.
+    ventoryn/keyed_lock.py serializes fresh_x_access_token per site,
+    so a second concurrent caller sees the already-rotated token
+    instead of racing to reuse the now-invalid one."""
+    import threading
+    import time
+
+    account = _account(store)
+    site = store.create_site(account["id"], "https://example.com")
+    _connect_x_expired(store, site["id"])
+    calls = []
+
+    def _fake_refresh(cfg, refresh_token, urlopen=None):
+        calls.append(refresh_token)
+        time.sleep(0.05)  # widen the race window
+        return {"access_token": "x-tok-new", "refresh_token": "x-refresh-new",
+                "expires_in": 7200}
+
+    monkeypatch.setattr(saas, "refresh_x_token", _fake_refresh)
+    results = []
+
+    def worker():
+        results.append(saas.fresh_x_access_token(store, config, site["id"]))
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    assert len(results) == 5
+    assert all(token == "x-tok-new" for token, _ in results)
+    assert calls == ["x-refresh-old"]
+
+
 # ---------------------------------------------------------------------------
 # Read-only audience summary
 # ---------------------------------------------------------------------------
