@@ -72,6 +72,8 @@ def register_public_files(app, config) -> None:
                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
                 f"  <url><loc>{_base(config)}/</loc>"
                 "<changefreq>weekly</changefreq><priority>1.0</priority></url>\n"
+                f"  <url><loc>{_base(config)}/privacy</loc><changefreq>yearly</changefreq></url>\n"
+                f"  <url><loc>{_base(config)}/terms</loc><changefreq>yearly</changefreq></url>\n"
                 "</urlset>\n")
         return Response(body, media_type="application/xml",
                         headers={"Cache-Control": "public, max-age=3600"})
