@@ -194,7 +194,7 @@ def register_legal_pages(app) -> None:
             raise HTTPException(404, "not found")
         return PlainTextResponse(f"tiktok-developers-site-verification={code}")
 
-    for _prefix in ("", "/privacy", "/terms"):
+    for _prefix in ("", "/privacy", "/terms", "/media", "/media/tiktok"):
         app.add_api_route(_prefix + "/tiktok{code}.txt", _tiktok_file,
                           methods=["GET", "HEAD"], include_in_schema=False)
 

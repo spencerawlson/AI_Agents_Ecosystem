@@ -1992,6 +1992,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                             "provider's developer console and sets the app "
                             "credentials — that step is not built here "
                             "and nothing is faked.</p>")
+            elif kind == "tiktok":
+                if conn["status"] == "connected":
+                    form = ("<p class='muted'>Post approved videos from "
+                            "<a href='/approvals'>Approvals</a> with Post to TikTok.</p>")
+                else:
+                    form = (f"<p><a class='btn btn-primary' href='/websites/sites/"
+                            f"{esc(site_id)}/connections/tiktok/start'>Connect with "
+                            f"TikTok</a></p>")
             else:
                 # Reddit: no free API access exists for this anymore —
                 # honest, permanent "not available" rather than a
@@ -2372,6 +2380,220 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 + (f"<label>Presenter (HeyGen)<select name='avatar_id'>{a_opts}</select></label>"
                    if avatars else "<input type='hidden' name='avatar_id' value=''>")
                 + "<p><button class='btn' type='submit'>Save</button></p></form></div>")
+
+    # -- TikTok: connect, post an approved video, follow its status --------
+    def _tiktok_site(request: Request, site_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return None, None, redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            raise HTTPException(404, "website not found")
+        return account, site, None
+
+    def _tiktok_page(site, account, body, status_code=200):
+        return HTMLResponse(_signed_page(f"TikTok for {site['host']}", body, account,
+                                         current="approvals"), status_code=status_code)
+
+    def _approved_video(site_id: str, job_id: str):
+        from ventoryn.videos import video_path
+
+        job = store.get_job(job_id)
+        if (job is None or job["site_id"] != site_id or job["job_type"] != "video_render"
+                or video_path(job, REPORTS_DIR) is None):
+            raise HTTPException(404, "video not found")
+        return job
+
+    @app.get("/websites/sites/{site_id}/connections/tiktok/start")
+    def tiktok_connect_start(request: Request, site_id: str):
+        from ventoryn import tiktok as tt
+
+        base = config.base_url.rstrip("/")
+        host = (request.headers.get("host") or "").lower()
+        if host and host != urllib.parse.urlsplit(base).netloc.lower():
+            # TikTok sends the owner back to www.axionory.com only (the
+            # registered redirect) — start there so the session matches.
+            return RedirectResponse(f"{base}{request.url.path}", status_code=303)
+        account, site, redirect = _tiktok_site(request, site_id)
+        if redirect is not None:
+            return redirect
+        if not tt.configured():
+            return _tiktok_page(site, account, "<p>TikTok is not set up on this server yet. "
+                                "Nothing was connected.</p>", 400)
+        state = store.create_connection_oauth_state(site_id, "tiktok", "")
+        return RedirectResponse(tt.authorize_url(base, state), status_code=303)
+
+    @app.get("/account/auth/tiktok/callback", response_class=HTMLResponse)
+    def tiktok_connect_callback(request: Request, code: str = "", state: str = "",
+                                error: str = "", error_description: str = ""):
+        from ventoryn import tiktok as tt
+
+        account = _account(request)
+        pending = store.consume_connection_oauth_state(state)
+        if error or not code or pending is None or pending["kind"] != "tiktok":
+            why = error_description or error or "the link expired or was already used"
+            return HTMLResponse(_page("Connect TikTok",
+                                      f"<p>Connecting TikTok did not complete ({esc(why)}). "
+                                      "<a href='/integrations/tiktok'>Back</a>.</p>"),
+                                status_code=400)
+        site = store.get_site(pending["site_id"])
+        if site is None or account is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_page("Connect TikTok",
+                                      "<p>This connection link is not valid.</p>"),
+                                status_code=400)
+        try:
+            tokens = tt.exchange_code(config.base_url, code)
+            who = tt.user_info(tokens["access_token"])
+        except tt.TikTokError as exc:
+            return _tiktok_page(site, account,
+                                f"<p>Connecting TikTok did not complete: {esc(exc)}</p>"
+                                "<p><a href='/integrations/tiktok'>Back</a>.</p>", 502)
+        name = who.get("display_name") or "your TikTok account"
+        store.update_connection(site["id"], "tiktok", "connected", f"Connected as {name}",
+                                {**tokens, **who})
+        store.record_activity_event(account["id"], "site",
+                                    f"Connected TikTok for {site['host']}")
+        return RedirectResponse(f"/integrations/tiktok?site={site['id']}", status_code=303)
+
+    @app.api_route("/media/tiktok/{token}.mp4", methods=["GET", "HEAD"],
+                   include_in_schema=False)
+    def tiktok_media(token: str):
+        """The approved video TikTok pulls (PULL_FROM_URL): public, signed,
+        expires after two hours, only for approved videos, no redirect."""
+        from fastapi.responses import FileResponse
+        from ventoryn import tiktok as tt
+        from ventoryn.videos import video_path
+
+        job_id = tt.media_job(token)
+        job = store.get_job(job_id) if job_id else None
+        path = video_path(job, REPORTS_DIR) if job else None
+        if path is None or store.video_review_status(job["id"]) != "approved":
+            raise HTTPException(404, "not found")
+        return FileResponse(path, media_type="video/mp4")
+
+    def _tiktok_not_ready(site, account, job_id, conn_status):
+        if conn_status != "connected":
+            return _tiktok_page(site, account, (
+                f"<div class='card'><h3>Connect TikTok first</h3><p class='muted'>Connect the "
+                f"TikTok account for {esc(site['host'])}, then come back to post this video."
+                f"</p><p><a class='btn btn-primary' href='/websites/sites/{esc(site['id'])}"
+                f"/connections/tiktok/start'>Connect with TikTok</a></p></div>"))
+        return _tiktok_page(site, account, (
+            "<p>Approve this video in Approvals first; only approved videos can be posted."
+            f"</p><p><a href='/approvals#video-{esc(job_id)}'>Back to Approvals</a>.</p>"), 400)
+
+    def _tiktok_form(site, account, job, creator, form=None, error="", status_code=200):
+        from ventoryn import tiktok as tt
+
+        src = f"/websites/sites/{site['id']}/videos/{job['id']}"
+        posts = store.tiktok_posts_for_job(job["id"])
+        history = "".join(
+            f"<li><a href='/websites/sites/{esc(site['id'])}/tiktok/posts/{esc(p['id'])}'>"
+            f"{esc(str(p['created_at'])[:16].replace('T', ' '))}</a> "
+            f"{esc(tt.STATUS_WORDS.get(p['status'], p['status']))}</li>" for p in posts)
+        body = (f"<p class='v-crumbs'><a href='/approvals#video-{esc(job['id'])}'>Approvals"
+                f"</a></p><h2>Post to TikTok</h2>"
+                + tt.post_form_html(action=f"{src}/tiktok", video_src=src, creator=creator,
+                                    totp_field=_totp_field(account),
+                                    title=(form or {}).get("title", ""), error=error)
+                + (f"<div class='card'><h3>Earlier posts of this video</h3><ul>{history}</ul>"
+                   f"</div>" if history else ""))
+        return _tiktok_page(site, account, body, status_code)
+
+    @app.get("/websites/sites/{site_id}/videos/{job_id}/tiktok", response_class=HTMLResponse)
+    def tiktok_post_screen(request: Request, site_id: str, job_id: str):
+        from ventoryn import tiktok as tt
+
+        account, site, redirect = _tiktok_site(request, site_id)
+        if redirect is not None:
+            return redirect
+        job = _approved_video(site_id, job_id)
+        conn = store.get_connection(site_id, "tiktok") or {}
+        if conn.get("status") != "connected" or store.video_review_status(job_id) != "approved":
+            return _tiktok_not_ready(site, account, job_id, conn.get("status"))
+        try:
+            creator = tt.creator_info(tt.fresh_access_token(store, site_id))
+        except tt.TikTokError as exc:
+            return _tiktok_page(site, account, f"<p>{esc(exc)}</p><p>TikTok may limit how "
+                                "often an account can post; try again later.</p>", 502)
+        return _tiktok_form(site, account, job, creator)
+
+    @app.post("/websites/sites/{site_id}/videos/{job_id}/tiktok")
+    async def tiktok_post_submit(request: Request, site_id: str, job_id: str):
+        from ventoryn import tiktok as tt
+
+        account, site, redirect = _tiktok_site(request, site_id)
+        if redirect is not None:
+            return redirect
+        job = _approved_video(site_id, job_id)
+        conn = store.get_connection(site_id, "tiktok") or {}
+        if conn.get("status") != "connected" or store.video_review_status(job_id) != "approved":
+            return _tiktok_not_ready(site, account, job_id, conn.get("status"))
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        try:
+            token = tt.fresh_access_token(store, site_id)
+            creator = tt.creator_info(token)
+        except tt.TikTokError as exc:
+            return _tiktok_page(site, account, f"<p>{esc(exc)}</p>", 502)
+        ok, err = _fresh_totp_ok(account, form.get("totp_code", ""))
+        if not ok:
+            return _tiktok_form(site, account, job, creator, form, err, 400)
+        mode = "inbox" if form.get("mode") == "inbox" else "direct"
+        post_info, err = (tt.post_info_from_form(form, creator) if mode == "direct"
+                          else ({}, ""))
+        if err:
+            return _tiktok_form(site, account, job, creator, form, err, 400)
+        url = f"{config.base_url.rstrip('/')}/media/tiktok/{tt.media_token(job_id)}.mp4"
+        try:
+            publish_id = tt.publish(token, url, mode=mode, post_info=post_info)
+        except tt.TikTokError as exc:
+            return _tiktok_form(site, account, job, creator, form, str(exc), 502)
+        post = store.add_tiktok_post(site_id, job_id, publish_id, mode,
+                                     (post_info or {}).get("privacy_level", form.get("privacy", "")),
+                                     form.get("title", "")[:2200])
+        store.record_activity_event(account["id"], "site",
+                                    f"Sent a video to TikTok for {site['host']}")
+        return RedirectResponse(f"/websites/sites/{site_id}/tiktok/posts/{post['id']}",
+                                status_code=303)
+
+    @app.get("/websites/sites/{site_id}/tiktok/posts/{post_id}", response_class=HTMLResponse)
+    def tiktok_post_status(request: Request, site_id: str, post_id: str):
+        from ventoryn import tiktok as tt
+
+        account, site, redirect = _tiktok_site(request, site_id)
+        if redirect is not None:
+            return redirect
+        post = store.get_tiktok_post(post_id)
+        if post is None or post["site_id"] != site_id:
+            raise HTTPException(404, "post not found")
+        note = ""
+        if post["status"] not in tt.FINAL_STATES:
+            try:
+                data = tt.status(tt.fresh_access_token(store, site_id), post["publish_id"])
+                if data.get("status"):
+                    store.set_tiktok_post_status(post_id, data["status"],
+                                                 str(data.get("fail_reason") or ""))
+                    post = store.get_tiktok_post(post_id)
+            except tt.TikTokError as exc:
+                note = f"<p class='muted'>Could not check with TikTok just now: {esc(exc)}</p>"
+        done = post["status"] in tt.FINAL_STATES
+        words = tt.STATUS_WORDS.get(post["status"], post["status"])
+        badge = ("badge-ok" if post["status"] in ("PUBLISH_COMPLETE", "SEND_TO_USER_INBOX")
+                 else "badge-off" if post["status"] == "FAILED" else "")
+        fail = (f"<p>Reason from TikTok: <code>{esc(post['fail_reason'])}</code></p>"
+                if post["fail_reason"] else "")
+        body = (f"<p class='v-crumbs'><a href='/approvals#video-{esc(post['job_id'])}'>"
+                f"Approvals</a></p><h2>TikTok post</h2><div class='card'>"
+                f"<p><span class='badge {badge}'>{esc(words)}</span></p>{fail}{note}"
+                f"<p class='muted'>{'Posted directly' if post['mode'] == 'direct' else 'Sent as a draft'}"
+                f" {esc(str(post['created_at'])[:16].replace('T', ' '))} UTC"
+                f"{(', visible to ' + esc(tt.PRIVACY_LABELS.get(post['privacy'], post['privacy']))) if post['privacy'] else ''}.</p>"
+                + ("" if done else "<p class='muted'>TikTok can take a few minutes to process "
+                   "the video. This page checks again every 10 seconds.</p>"
+                   "<meta http-equiv='refresh' content='10'>")
+                + f"<p><a class='btn' href='/websites/sites/{esc(site_id)}/videos/"
+                f"{esc(post['job_id'])}/tiktok'>Back to the video</a></p></div>")
+        return _tiktok_page(site, account, body)
 
     @app.get("/websites/sites/{site_id}/videos/{job_id}")
     def video_file(request: Request, site_id: str, job_id: str, download: str = ""):

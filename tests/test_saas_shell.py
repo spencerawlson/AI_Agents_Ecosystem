@@ -148,7 +148,7 @@ def test_site_defaults_to_honest_connections(store):
     site = store.create_site(account["id"], "https://road2cissp.com")
     kinds = {c["kind"]: c for c in store.get_connections(site["id"])}
     assert set(kinds) == {"reddit", "x", "facebook", "instagram",
-                          "plausible", "stripe_sales"}
+                          "plausible", "stripe_sales", "tiktok"}
     assert all(c["status"] == "not_connected" for c in kinds.values())
     assert "app registration" in kinds["reddit"]["note"]
     # Facebook and Instagram are honest about the Meta gates too —

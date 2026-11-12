@@ -69,7 +69,9 @@ def review_section(store, account_id: str, reports_dir: Path, hosts: dict) -> st
         actions = (f"<form method='post' action='{src}/review' class='v-video-actions'>"
                    f"<button class='btn btn-primary' name='decision' value='approve'>Approve</button> "
                    f"<button class='btn' name='decision' value='reject'>Reject</button></form>"
-                   if v["review"] == "pending" else "")
+                   if v["review"] == "pending" else
+                   f"<p class='v-video-actions'><a class='btn btn-primary' href='{src}/tiktok'>"
+                   f"Post to TikTok</a></p>" if v["review"] == "approved" else "")
         cards += (f"<div class='card v-video' id='video-{jid}'>"
                   f"<video controls preload='metadata' playsinline src='{src}'></video>"
                   f"<div><h3>{_esc(hosts.get(v['site_id'], ''))} {state}</h3>"

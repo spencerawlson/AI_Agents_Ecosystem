@@ -658,6 +658,19 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
     cost_usd_cents INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_tiktok_posts (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    publish_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    privacy TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    fail_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS saas_video_reviews (
     job_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
@@ -849,6 +862,9 @@ DEFAULT_CONNECTIONS = (
     ("stripe_sales", "not_connected",
      "Not connected — point your Stripe webhook at the URL below to "
      "see real paying customers here."),
+    ("tiktok", "not_connected",
+     "Not connected — connect the TikTok account this website's "
+     "approved videos are posted to."),
 )
 
 #: Secret fields inside a connection's detail JSON. Never returned by
@@ -877,6 +893,9 @@ CONNECTION_SCOPES: dict[str, str] = {
     # Stripe sales: the customer's own webhook — read payments only.
     # Axionory never charges or refunds through it.
     "stripe_sales": "read payments",
+    # TikTok Login Kit + Content Posting API: who you are, post a
+    # video you approved, or send it to your TikTok inbox as a draft.
+    "tiktok": "user.info.basic video.publish video.upload",
 }
 
 #: Plain-words consent text shown on each Connect screen: exactly
@@ -913,6 +932,11 @@ CONNECTION_CONSENT: dict[str, str] = {
                      "so it can count paying customers. It cannot charge "
                      "a card, refund a payment, or change anything in "
                      "your Stripe account."),
+    "tiktok": ("Axionory can read your TikTok name and post videos you "
+               "approved to your TikTok account, or send them to your "
+               "TikTok inbox as drafts. It cannot read your messages, "
+               "comment, follow, or change your account. Every post is "
+               "set up and confirmed by you on the posting screen."),
 }
 
 #: Kinds whose connection needs the operator to register an OAuth
@@ -927,6 +951,7 @@ APP_REGISTRATION_KINDS = frozenset({"reddit", "x", "facebook", "instagram"})
 #: customer is told to remove it in the provider's dashboard.
 CONNECTION_REVOKE_NOTE: dict[str, str] = {
     "reddit": "The Reddit token is revoked at Reddit when you disconnect.",
+    "tiktok": "The TikTok token is revoked at TikTok when you disconnect.",
     "x": "The X token is revoked at X when you disconnect.",
     "facebook": ("Meta has no API to revoke a Page token — remove "
                  "Axionory in your Facebook Settings > Business "
@@ -2628,6 +2653,47 @@ class SaasStore:
                 (site_id, _iso(month_start))).fetchone()
         return int(row[0]) / 100
 
+    # -- TikTok posts of approved videos --------------------------------
+    def add_tiktok_post(self, site_id: str, job_id: str, publish_id: str, mode: str,
+                        privacy: str, title: str) -> dict:
+        row = {"id": secrets.token_hex(12), "site_id": site_id, "job_id": job_id,
+               "publish_id": publish_id, "mode": mode, "privacy": privacy,
+               "title": title, "status": "PROCESSING_UPLOAD", "fail_reason": "",
+               "created_at": _iso(_now()), "updated_at": _iso(_now())}
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_tiktok_posts (id, site_id, job_id, publish_id, mode,"
+                " privacy, title, status, fail_reason, created_at, updated_at)"
+                " VALUES (:id, :site_id, :job_id, :publish_id, :mode, :privacy, :title,"
+                " :status, :fail_reason, :created_at, :updated_at)", row)
+        return row
+
+    def get_tiktok_post(self, post_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM saas_tiktok_posts WHERE id = ?",
+                                     (post_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def tiktok_posts_for_job(self, job_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_tiktok_posts WHERE job_id = ? ORDER BY created_at DESC",
+                (job_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def tiktok_posts_today(self, site_id: str) -> int:
+        cutoff = _iso(_now() - timedelta(days=1))
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM saas_tiktok_posts WHERE site_id = ? AND created_at > ?",
+                (site_id, cutoff)).fetchone()[0]
+
+    def set_tiktok_post_status(self, post_id: str, status: str, fail_reason: str = "") -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_tiktok_posts SET status = ?, fail_reason = ?, updated_at = ?"
+                " WHERE id = ?", (status, fail_reason, _iso(_now()), post_id))
+
     def video_review_status(self, job_id: str) -> str:
         """pending (no decision yet), approved or rejected."""
         with self._lock:
@@ -3670,6 +3736,19 @@ def revoke_provider_token(kind: str, detail: dict,
             "https://api.twitter.com/2/oauth2/revoke",
             {"token": token, "token_type_hint": "access_token"},
             client_id, client_secret, urlopen)
+    if kind == "tiktok":
+        from ventoryn import tiktok as _tt
+
+        token = (detail or {}).get("access_token") or ""
+        if not token or not _tt.configured():
+            return True, "Nothing to revoke at TikTok — no live token was stored."
+        try:
+            _tt.revoke(token, urlopen=urlopen)
+        except Exception:  # noqa: BLE001 - reported, the local copy still goes
+            return False, ("TikTok did not confirm the revocation — the token "
+                           "was deleted here; remove Axionory in TikTok's "
+                           "Settings > Security > Apps to be sure.")
+        return True, CONNECTION_REVOKE_NOTE["tiktok"]
     return True, CONNECTION_REVOKE_NOTE.get(kind, "")
 
 
