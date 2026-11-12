@@ -3250,6 +3250,14 @@ id="analyze-submit">Analyze</button>
         decided_campaigns = [
             c for c in _saas_store.list_campaigns(account["id"], limit=100)
             if c["status"] in ("scheduled", "rejected")]
+        # A video's approve/reject is a THIRD, separate decision table
+        # (saas_video_reviews, ventoryn/videos.py) — also never goes
+        # through the gate or saas_campaigns. Checked from the same
+        # `jobs` already fetched above, no extra store call per video.
+        decided_videos = [
+            j for j in jobs
+            if j["job_type"] == "video_render"
+            and _saas_store.video_review_status(j["id"]) != "pending"]
         any_sig = any(
             _saas_store.list_signatures(s["id"]) for s in sites)
         # Strongest evidence first: Axionory Analytics saw a visit that
@@ -3290,7 +3298,8 @@ id="analyze-submit">Analyze</button>
         _flow = [
             ("AI Recommendation", bool(jobs),
              "A job ran for this account."),
-            ("Customer Approval", bool(decided_here) or bool(decided_campaigns),
+            ("Customer Approval",
+             bool(decided_here) or bool(decided_campaigns) or bool(decided_videos),
              "An approval was decided by this account."),
             ("Signed Campaign Link", any_sig,
              "A signed Axionory link was created."),

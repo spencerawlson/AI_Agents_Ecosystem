@@ -262,6 +262,28 @@ def test_customer_approval_evidenced_by_a_decided_campaign():
     assert "v-flow-step done" in step_html
 
 
+def test_customer_approval_evidenced_by_a_decided_video():
+    """Regression: approving/rejecting a video is a THIRD, separate
+    decision table (saas_video_reviews, ventoryn/videos.py) — also
+    never touches ApprovalGate or saas_campaigns. "Customer Approval"
+    must show evidence from that alone too, with neither of the other
+    two decisions ever made."""
+    app, store = _app_with()
+    client = TestClient(app)
+    account = sign_in(client, store, email=CUSTOMER_A[0],
+                      sub="google-sub-ada", name="Ada")
+    site = store.create_site(account["id"], "https://ada.example.com")
+    job = store.charge_credits(account["id"], "video_render", site["id"],
+                               is_operator=True)
+    store.set_job_result(job["id"], "done", "Video rendered (40s, 5 scenes)")
+    store.set_video_review(job["id"], account["id"], "approved")
+    r = client.get("/report")
+    assert r.status_code == 200
+    i = r.text.index("Customer Approval")
+    step_html = r.text[max(0, i - 400):i]
+    assert "v-flow-step done" in step_html
+
+
 def test_operator_report_content_unchanged():
     app, store = _app_with()
     client = TestClient(app)
