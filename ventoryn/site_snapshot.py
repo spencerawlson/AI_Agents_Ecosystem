@@ -32,6 +32,7 @@ import itertools
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 import urllib.parse
@@ -508,12 +509,22 @@ class SnapshotStore:
         return True
 
     def finish(self, site_id: str, status: str, data: dict | None) -> None:
-        with self._lock, self._conn:
-            self._conn.execute(
-                "UPDATE saas_site_snapshots SET status = ?, finished_at = ?, "
-                "data = COALESCE(?, data) WHERE site_id = ?",
-                (status, datetime.now(timezone.utc).isoformat(),
-                 json.dumps(data) if data is not None else None, site_id))
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "UPDATE saas_site_snapshots SET status = ?, finished_at = ?, "
+                    "data = COALESCE(?, data) WHERE site_id = ?",
+                    (status, datetime.now(timezone.utc).isoformat(),
+                     json.dumps(data) if data is not None else None, site_id))
+        except sqlite3.ProgrammingError:
+            # The store was closed (app shutdown, or — in tests — the
+            # fixture torn down) while this background capture was
+            # still running. A snapshot is a disposable refresh, not
+            # a transactional write: mark_running's 5-minute cooldown
+            # already self-heals a row stuck at "running", so dropping
+            # this result is a correct no-op, not silent loss of
+            # anything that mattered.
+            pass
 
 
 def snapshot_store_for(saas_store) -> SnapshotStore:

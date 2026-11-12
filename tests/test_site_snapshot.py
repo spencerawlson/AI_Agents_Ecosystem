@@ -15,6 +15,7 @@ import ventoryn.saas_routes as saas_routes
 from _signin import operator_store_and_config, sign_in
 from ventoryn import site_snapshot
 from ventoryn.app import create_app
+from ventoryn.saas import SaasStore
 from ventoryn.site_screenshot import _allowed
 
 HOME = """<!doctype html><html lang="en"><head>
@@ -68,6 +69,21 @@ SITE = {"id": "site123", "url": "https://shop.example.com", "host": "shop.exampl
 
 def _by_label(items):
     return {i["label"]: i for i in items}
+
+
+def test_finish_after_store_closed_is_a_quiet_no_op():
+    """Regression: a background snapshot thread (site_snapshot.start)
+    is fire-and-forget — nothing joins it before the store closes
+    (app shutdown, or a test fixture tearing down). finish() used to
+    raise sqlite3.ProgrammingError in that case, an unhandled
+    exception in a daemon thread. It is now a quiet no-op — a
+    snapshot is a disposable refresh, and mark_running's cooldown
+    self-heals a row stuck at "running" either way."""
+    store = SaasStore(":memory:")
+    snaps = site_snapshot.snapshot_store_for(store)
+    assert snaps.mark_running("site123") is True
+    store.close()
+    snaps.finish("site123", "done", {"ok": True})  # must not raise
 
 
 def test_collect_without_keys_is_honest():
