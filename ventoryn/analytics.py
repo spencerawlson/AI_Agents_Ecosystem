@@ -108,7 +108,10 @@ def own_snippet() -> str:
     site = own_site_id()
     if not site:
         return ""
-    return f'<script defer data-site="{site}" src="https://ventoryn.app/v.js"></script>'
+    # Same origin as the page (relative src): the tag loads and reports on
+    # whichever of our domains the visitor is on (axionory.com, ventoryn.app)
+    # within the platform CSP ('self').
+    return f'<script defer data-site="{site}" src="/v.js"></script>'
 
 
 def _bare_host(host: str) -> str:
@@ -436,6 +439,15 @@ def register_analytics_routes(app, saas_store, config) -> None:
         site = saas_store.get_site(str(data.get("s", ""))[:64])
         if site is None:
             return done
+        # The platform's own site is served on every domain of the app
+        # (main + extra base URLs); any other site only on its own host.
+        page_host = urlsplit(str(data.get("u", ""))).hostname or ""
+        hosts = [site["host"]]
+        if site["id"] == own_site_id():
+            hosts += [urlsplit(u).hostname or "" for u in
+                      (config.base_url, *getattr(config, "extra_base_urls", ()))]
+        match = next((h for h in hosts if h and host_matches(page_host, h)), site["host"])
+        site = {**site, "host": match}
         origin = request.headers.get("origin")
         if origin and not host_matches(urlsplit(origin).hostname or "",
                                        site["host"]):
