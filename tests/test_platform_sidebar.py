@@ -153,6 +153,9 @@ def test_new_pages_vector_only_no_glyph_arrows():
         assert r.status_code == 200, path
         for glyph in BANNED_GLYPHS:
             assert glyph not in r.text, (path, repr(glyph))
+        # Vector only, except the brand logo/favicon (Spencer, 2026-11-12).
+        text = (r.text.replace("<img src='/static/logo.png' alt='Axionory'>", "")
+                .replace("<link rel='icon' type='image/png' href='/favicon.png'>", ""))
         for ext in BITMAP_EXTS:
             # A bitmap reference is a file URL: the extension must
             # be followed by a quote, whitespace, ? or # — this
@@ -160,7 +163,7 @@ def test_new_pages_vector_only_no_glyph_arrows():
             # ".ico".
             assert not re.search(
                 r"\." + re.escape(ext.lstrip(".")) + r"[\"'\s?#>#]",
-                r.text.lower()), (path, ext)
+                text.lower()), (path, ext)
         # The broken-arrow symptom: a bare "92" between cards.
         assert ">92<" not in r.text, path
         assert "\\2192" not in r.text, path

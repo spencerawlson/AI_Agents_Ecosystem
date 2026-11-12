@@ -213,10 +213,14 @@ def test_final_cta_footer_seo_vector_only():
     assert 'property="og:image"' not in r.text
     assert "application/ld+json" in r.text
     assert '"price": "20"' in r.text
-    # Vector only: no bitmap references, no <img> on the page.
-    for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
-        assert ext not in r.text
-    assert "<img" not in r.text
+    # Vector only, except the brand logo/favicon (Spencer, 2026-11-12):
+    # no OTHER bitmap reference, no other <img> on the page.
+    text = r.text.replace('<img src="/static/logo.png" alt="Axionory">', ""
+                          ).replace('<link rel="icon" type="image/png" href="/favicon.png">', "")
+    for ext in (".jpg", ".jpeg", ".webp", ".gif"):
+        assert ext not in text
+    assert ".png" not in text
+    assert "<img" not in text
     # No image-2 copy or concept.
     assert "multiple businesses" not in r.text.lower()
     assert "Get Started Free" not in r.text

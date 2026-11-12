@@ -1,4 +1,5 @@
-"""robots.txt, sitemap.xml and llms.txt for Axionory's own public site.
+"""robots.txt, sitemap.xml, llms.txt and the brand image files for
+Axionory's own public site.
 
 Only the landing page is public; everything else needs a sign-in, so
 the sitemap lists just "/" and robots.txt keeps crawlers out of the
@@ -7,7 +8,14 @@ assistants, written from the landing page's own copy — no claims that
 page does not make.
 """
 
-from fastapi.responses import PlainTextResponse, Response
+from pathlib import Path
+
+from fastapi.responses import FileResponse, PlainTextResponse, Response
+
+#: The Axionory logo (nav brand) and favicon — the one deliberate
+#: exception to the vector-only rule (Spencer, 2026-11-12): a
+#: supplied brand asset, not a generated graphic.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # Signed-in or machine-only areas: nothing there for a crawler.
 PRIVATE_PREFIXES = (
@@ -82,3 +90,13 @@ def register_public_files(app, config) -> None:
     def llms_txt():
         return PlainTextResponse(LLMS_TXT.replace("{base}", _base(config)),
                                  headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.api_route("/favicon.png", methods=["GET", "HEAD"])
+    def favicon_png():
+        return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.api_route("/static/logo.png", methods=["GET", "HEAD"])
+    def logo_png():
+        return FileResponse(STATIC_DIR / "logo.png", media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})

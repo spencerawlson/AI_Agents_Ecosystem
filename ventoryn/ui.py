@@ -291,6 +291,7 @@ def page(title: str, inner: str, *, header: str = "",
             f"<title>{esc(title)} — Axionory</title>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<meta name='theme-color' content='#0b0e1e'>"
+            f"<link rel='icon' type='image/png' href='/favicon.png'>"
             f"<style>{BASE_CSS}{SIDEBAR_CSS}{extra_css}</style>{head_extra}{_own_snippet()}"
             f"</head><body{cls}><div class='app-layout'>{sidebar}"
             f"<div class='app-content'>{page_head}"
@@ -301,6 +302,7 @@ def page(title: str, inner: str, *, header: str = "",
         f"<title>{esc(title)} — Axionory</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta name='theme-color' content='#0b0e1e'>"
+        f"<link rel='icon' type='image/png' href='/favicon.png'>"
         f"<style>{BASE_CSS}{extra_css}</style>{head_extra}{_own_snippet()}"
         f"</head><body{cls}>{header}<main class='v-main'>{inner}</main>"
         "</body></html>")

@@ -1,17 +1,23 @@
-"""Vector only — no bitmap images anywhere on Axionory.
+"""Vector only — no bitmap images anywhere on Axionory, except two
+deliberate brand exceptions.
 
 Every graphic on Axionory (landing, signed-in pages, admin) is
 vector (inline SVG). No PNG, JPG, WebP, or GIF is rendered on any
-page. The og-image is intentionally ABSENT (it would be a bitmap,
-used only by external link previews, never rendered on a page) —
-that is Spencer's call, flagged in the report, not silently changed.
+page, with the exceptions below. The og-image is intentionally
+ABSENT (it would be a bitmap, used only by external link previews,
+never rendered on a page) — that is Spencer's call, flagged in the
+report, not silently changed.
 
-ONE deliberate exception (Spencer, 2026-11-09): the website snapshot's
-screenshot of the customer's OWN site, shown only on that owner's site
-page and served by the owner-only route
-/websites/sites/<id>/snapshot-image. It is customer content, not a
-Axionory graphic. The template scan below allows exactly that <img>
-and nothing else.
+Deliberate exceptions:
+- (Spencer, 2026-11-09) the website snapshot's screenshot of the
+  customer's OWN site, shown only on that owner's site page and
+  served by the owner-only route /websites/sites/<id>/snapshot-image.
+  It is customer content, not a Axionory graphic.
+- (Spencer, 2026-11-12) the Axionory logo — a supplied brand asset,
+  not a generated graphic — used as the nav brand (landing header +
+  signed-in sidebar) and the favicon, served from ventoryn/static/
+  by ventoryn/public_files.py.
+The template scan below allows exactly those and nothing else.
 """
 
 import re
@@ -38,6 +44,9 @@ from _signin import (
 CUSTOMER_A = ("ada@example.com", "google-sub-ada", "Ada")
 ADMIN_PASSWORD = "test-admin-password"
 BITMAP = re.compile(r"\.(png|jpg|jpeg|webp|gif)\b", re.IGNORECASE)
+BRAND_IMG = re.compile(r"<img src=['\"]/static/logo\.png['\"] alt=['\"]Axionory['\"]>")
+FAVICON_LINK = re.compile(
+    r"<link rel=['\"]icon['\"] type=['\"]image/png['\"] href=['\"]/favicon\.png['\"]>")
 
 
 def _app_with():
@@ -94,8 +103,9 @@ def test_no_bitmap_in_any_rendered_page():
     for c, path in pages:
         r = c.get(path)
         assert r.status_code == 200, path
-        assert "<img" not in r.text.lower(), path
-        assert not BITMAP.search(r.text), (path, BITMAP.search(r.text))
+        text = FAVICON_LINK.sub("", BRAND_IMG.sub("", r.text))
+        assert "<img" not in text.lower(), path
+        assert not BITMAP.search(text), (path, BITMAP.search(text))
         assert "og:image" not in r.text, path  # intentionally absent
 
 
@@ -110,18 +120,32 @@ def test_no_bitmap_reference_in_page_templates():
         here / "ventoryn" / "nav.py",
         here / "ventoryn" / "saas_routes.py",
         here / "ventoryn" / "site_snapshot.py",
+        here / "ventoryn" / "ui.py",
         # (The game file ventoryn/static/game.html is deleted —
         # Overview is server-rendered now — so it is no longer
         # scanned.)
     ]
     snapshot_img = re.compile(
         r"<img class='v-snap-shot' src='/websites/sites/\{sid\}/snapshot-image'")
+    # Expected count of each allowed exception, by file: the brand
+    # logo renders once in the landing nav (app.py) and once in the
+    # signed-in sidebar (nav.py); the favicon link renders once per
+    # <head> — app.py's landing page has one, ui.py's shared shell
+    # has two (sidebar and centered page variants).
+    brand_counts = {"app.py": 1, "nav.py": 1}
+    favicon_counts = {"app.py": 1, "ui.py": 2}
     for path in sources:
         text = path.read_text(encoding="utf-8")
         if path.name == "site_snapshot.py":
             # The one allowed image: the owner's own-site screenshot.
             assert len(snapshot_img.findall(text)) == 1, path
             text = snapshot_img.sub("", text)
+        if path.name in brand_counts:
+            assert len(BRAND_IMG.findall(text)) == brand_counts[path.name], path
+            text = BRAND_IMG.sub("", text)
+        if path.name in favicon_counts:
+            assert len(FAVICON_LINK.findall(text)) == favicon_counts[path.name], path
+            text = FAVICON_LINK.sub("", text)
         assert "<img" not in text.lower(), path
         match = BITMAP.search(text)
         assert match is None, (path, match.group(0) if match else "")

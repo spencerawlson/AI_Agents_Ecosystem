@@ -94,14 +94,9 @@ SIDEBAR_CSS = """
   border-right: 1px solid rgba(255, 255, 255, .06);
   color: #fff; padding: 24px 13px; display: flex; flex-direction: column;
   gap: 27px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-.sidebar-brand { display: inline-flex; align-items: center; gap: 12px;
-  font-size: 27px; font-weight: 800; letter-spacing: -1.2px; color: #fff;
-  text-decoration: none; white-space: nowrap; padding: 0 17px; }
-.sidebar-brand .brand-mark { display: inline-block; font-weight: 1000;
-  font-size: 40px; line-height: .8; letter-spacing: -8px; padding-right: 9px;
-  background: linear-gradient(135deg, #c4b5fd 8%, #8b5cf6 55%, #3b82f6);
-  color: transparent; background-clip: text; transform: skew(-8deg); }
-.sidebar-brand:hover { color: #fff; }
+.sidebar-brand { display: inline-flex; align-items: center;
+  text-decoration: none; padding: 0 17px; }
+.sidebar-brand img { height: 48px; width: auto; display: block; }
 .app-nav { display: flex; flex-direction: column; gap: 4px; }
 .app-nav .nav-item { position: relative; display: flex; align-items: center;
   gap: 17px; width: 100%; background: transparent; color: #fff; border: 0;
@@ -386,7 +381,7 @@ def sidebar_html(current: str | None, is_operator: bool, *,
     return (
         f"<aside class='app-sidebar' id='app-sidebar'>"
         f"<a class='sidebar-brand' href='/ops'>"
-        f"<span class='brand-mark'>A</span> Axionory</a>"
+        f"<img src='/static/logo.png' alt='Axionory'></a>"
         f"<nav class='app-nav' aria-label='Platform'>{items}{admin}</nav>"
         f"<div class='growth-plan'>"
         f"<div class='growth-title'>Growth Plan</div>"

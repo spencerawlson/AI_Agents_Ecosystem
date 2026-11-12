@@ -1033,9 +1033,8 @@ a { color: var(--violet-deep); }
   color: #fff; }
 .site-nav .wrap { display: flex; align-items: center; gap: 16px;
   min-height: 60px; }
-.brand { font-size: 22px; font-weight: 800; letter-spacing: .02em;
-  color: #fff; text-decoration: none; white-space: nowrap; }
-.brand span { color: var(--violet-soft); }
+.brand { display: inline-flex; align-items: center; text-decoration: none; }
+.brand img { height: 52px; width: auto; display: block; }
 .nav-links { display: flex; gap: 4px; margin: 0 auto; list-style: none;
   padding: 0; }
 .nav-links a { color: #d9d4f5; text-decoration: none; font-size: 15px;
@@ -1430,6 +1429,7 @@ section.alt { background: var(--bg-tint); }
 <html lang="en"><head><title>Axionory — Become a Founding Customer</title>
 <meta charset="utf-8">
 <meta name='viewport' content='width=device-width, initial-scale=1'>
+<link rel="icon" type="image/png" href="/favicon.png">
 <meta name="description" content="Axionory&#x27;s AI agents find your audience and prepare campaigns. You approve every action; verified attribution shows which efforts bring paying customers.">
 <meta property="og:title" content="Axionory — Become a Founding Customer">
 <meta property="og:description" content="Enter your website, connect your accounts, and let Axionory's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
@@ -1439,7 +1439,7 @@ section.alt { background: var(--bg-tint); }
 <style>{_LANDING_CSS}</style>{_own_snippet_landing()}</head><body>
 <header class="site-nav"><div class="wrap">
 <button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 5h16M3 11h16M3 17h16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></button>
-<a class="brand" href="/">Axionory<span>.</span></a>
+<a class="brand" href="/"><img src="/static/logo.png" alt="Axionory"></a>
 <nav aria-label="Product"><ul class="nav-links" id="nav-links">
 <li class="nav-item"><button class="nav-drop-btn" id="nav-drop-btn" aria-expanded="false" aria-haspopup="true">Product <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 <div class="nav-drop" id="nav-drop">
