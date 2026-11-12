@@ -47,3 +47,14 @@ def test_public_pages_answer_head_requests():
     for path in ("/", "/privacy", "/terms", "/robots.txt", "/sitemap.xml", "/llms.txt"):
         r = c.head(path)
         assert r.status_code == 200, path
+
+
+def test_tiktok_verification_file_is_served_where_tiktok_looks(monkeypatch):
+    monkeypatch.setenv("TIKTOK_VERIFICATION_CODES", "yC6HGG2oUcX1qgQRCxWBYhGkDd7R0rXS")
+    c = _client()
+    for prefix in ("", "/privacy", "/terms"):
+        r = c.get(prefix + "/tiktokyC6HGG2oUcX1qgQRCxWBYhGkDd7R0rXS.txt")
+        assert r.status_code == 200, prefix
+        assert r.text == "tiktok-developers-site-verification=yC6HGG2oUcX1qgQRCxWBYhGkDd7R0rXS"
+        assert c.head(prefix + "/tiktokyC6HGG2oUcX1qgQRCxWBYhGkDd7R0rXS.txt").status_code == 200
+    assert c.get("/privacy/tiktokSOMETHINGELSE123.txt").status_code == 404

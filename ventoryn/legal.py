@@ -177,6 +177,27 @@ def _render(title: str, body: str) -> str:
 def register_legal_pages(app) -> None:
     from fastapi.responses import HTMLResponse
 
+    # TikTok developer site verification: TikTok asks for a file named
+    # tiktok<code>.txt under the URL it verifies (the site root, /privacy or
+    # /terms), containing "tiktok-developers-site-verification=<code>".
+    # The codes are public by design; they live in TIKTOK_VERIFICATION_CODES
+    # (comma-separated) so a new one needs no code change.
+    import os
+    import re as _re
+    from fastapi.responses import PlainTextResponse
+
+    def _tiktok_file(code: str):
+        codes = {c.strip() for c in os.environ.get("TIKTOK_VERIFICATION_CODES", "").split(",")
+                 if _re.fullmatch(r"[A-Za-z0-9]{8,64}", c.strip())}
+        if code not in codes:
+            from fastapi import HTTPException
+            raise HTTPException(404, "not found")
+        return PlainTextResponse(f"tiktok-developers-site-verification={code}")
+
+    for _prefix in ("", "/privacy", "/terms"):
+        app.add_api_route(_prefix + "/tiktok{code}.txt", _tiktok_file,
+                          methods=["GET", "HEAD"], include_in_schema=False)
+
     @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():
         return _render("Privacy Policy", PRIVACY)
