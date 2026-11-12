@@ -4280,6 +4280,11 @@ shows verified conversions only.</p>"""
                              f"<th>Date</th><th></th></tr>{rows}</table></div></div>"))
         sections.sort(key=lambda s: s[0], reverse=True)
         out += "".join(html for _ts, html in sections)
+        # A link to /approvals#campaign-<id> opens that proposal.
+        out += ("<script>(function(){function o(){var h=location.hash.slice(1);"
+                "if(!h)return;var d=document.getElementById(h);"
+                "if(d&&d.tagName==='DETAILS'){d.open=true;d.scrollIntoView();}}"
+                "o();window.addEventListener('hashchange',o);})();</script>")
         if not proposed:
             out += ("<h2>Campaign proposals (0)</h2><div class='card'><p class='muted'>No campaign "
                     "waiting. Start one from <a href='/agents#start-campaign'>Agents</a>, or let "
