@@ -1412,6 +1412,45 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         store.set_posting_paused(account["id"], paused == "1")
         return RedirectResponse("/account/security", status_code=303)
 
+    def _revoke_site_tokens(site_id: str) -> None:
+        """Best-effort revoke of every connected account of a website.
+        get_connections() strips secrets, so each token is read with
+        get_connection()."""
+        for conn in store.get_connections(site_id):
+            full = store.get_connection(site_id, conn["kind"]) or {}
+            raw = full.get("_detail_raw") or {}
+            if raw:
+                try:
+                    revoke_provider_token(conn["kind"], raw)
+                except Exception:  # noqa: BLE001 - revocation must not block deletion
+                    pass
+
+    @app.post("/websites/sites/{site_id}/delete")
+    def delete_website(request: Request, site_id: str, confirm: str = Form(""),
+                       totp_code: str = Form("")):
+        """Remove a website: type its address and a fresh 2FA code.
+        Connected accounts are revoked first; its data is deleted."""
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            raise HTTPException(404, "website not found")
+
+        def back(msg):
+            return HTMLResponse(_signed_page(
+                site["url"], f"<p>{esc(msg)}</p><p><a href='/websites/sites/{esc(site_id)}"
+                f"#remove-website'>Back</a>.</p>", account, current="websites"), status_code=400)
+        if confirm.strip().lower() != site["host"].lower():
+            return back(f"Type {site['host']} exactly to confirm. Nothing was removed.")
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return back(err)
+        _revoke_site_tokens(site_id)
+        store.delete_site(site_id)
+        store.record_activity_event(account["id"], "site", f"Removed {site['host']}")
+        return RedirectResponse("/portfolio", status_code=303)
+
     @app.post("/account/delete")
     def delete_account_route(request: Request,
                              totp_code: str = Form("")):
@@ -1428,10 +1467,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # Revoke at the provider first, best-effort, then delete
         # everything the account owns.
         for site in store.list_sites(account["id"]):
-            for conn in store.get_connections(site["id"]):
-                raw = conn.get("_detail_raw") or {}
-                if raw:
-                    revoke_provider_token(conn["kind"], raw)
+            _revoke_site_tokens(site["id"])
         store.delete_account(account["id"])
         token = request.cookies.get(SESSION_COOKIE, "")
         if token:
@@ -2144,6 +2180,17 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <h2>Connections</h2>{conn_rows}
 {privacy_card}
 {signature_card}"""
+        inner += (f"<div class='card v-danger' id='remove-website'><h3>Remove this website</h3>"
+                  f"<p class='muted'>Removes {esc(site['host'])} from your account with everything "
+                  f"that belongs to it: connections (revoked), agent work, campaigns, sales and "
+                  f"visitor stats. This cannot be undone.</p>"
+                  f"<form method='post' action='/websites/sites/{esc(site_id)}/delete'>"
+                  f"<label>Type <strong>{esc(site['host'])}</strong> to confirm"
+                  f"<input type='text' name='confirm' autocomplete='off' spellcheck='false'></label>"
+                  f"{_totp_field(account)}"
+                  f"<p><button class='btn v-btn-danger' type='submit'>Remove website</button></p>"
+                  f"</form><style>.v-danger{{border-color:#fecaca}}.v-btn-danger{{color:#b91c1c;"
+                  f"border-color:#fca5a5}}.v-btn-danger:hover{{background:#fef2f2}}</style></div>")
         return _signed_page(site["url"], inner, account, current="websites")
 
     @app.post("/websites/sites/{site_id}/connections/{kind}")
