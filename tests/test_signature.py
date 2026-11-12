@@ -1,11 +1,11 @@
-"""The Ventoryn signature — attribution, proved, never guessed.
+"""The Axionory signature — attribution, proved, never guessed.
 
 Every agent output that contains a link carries a signature: UTM
 parameters (utm_source=ventoryn, utm_medium=<agent>,
 utm_campaign=<site>) PLUS a signed per-action tag (vtn_<id>)
 generated per site + per agent action and RECORDED when the link is
 created (what it points to, which agent, which job, when). A payment
-is attributed to Ventoryn work ONLY where the signature reaches the
+is attributed to Axionory work ONLY where the signature reaches the
 payment (the tag in Stripe metadata / the webhook match); otherwise
 the sale is reported as unattributed, never assigned by guesswork.
 """
@@ -140,7 +140,7 @@ def test_payment_with_signature_attributed_without_it_unattributed():
     conv = by_event["evt_attr_2"]
     assert conv["attribution"] == "unattributed"
     assert not conv["signature_tag"]
-    # A payment carrying a tag Ventoryn never recorded: also
+    # A payment carrying a tag Axionory never recorded: also
     # unattributed (a forged or foreign tag proves nothing).
     assert handle_customer_sale_webhook(
         store, site["id"],

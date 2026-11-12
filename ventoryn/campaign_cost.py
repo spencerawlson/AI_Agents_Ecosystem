@@ -11,7 +11,7 @@ says "reported rate" and points at X's Developer Console as the source
 of truth. Nothing here is a quote from X.
 
     plain post            $0.015
-    post with a link      $0.20   (Ventoryn's signed attribution link
+    post with a link      $0.20   (Axionory's signed attribution link
                                    makes every linked post this rate)
 
 An estimate is arithmetic on those rates and on the website's real

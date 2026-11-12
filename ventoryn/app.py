@@ -1,8 +1,8 @@
-"""Ventoryn dashboard: FastAPI app.
+"""Axionory dashboard: FastAPI app.
 
 Public front door:
   GET /                    landing page (public, no sign-in) — what
-                           Ventoryn is, the URL box + free preview, $20/mo
+                           Axionory is, the URL box + free preview, $20/mo
 
 Customer pages (sign-in required; each account sees ONLY its own data):
   GET /ops                 Live Ops — the post-sign-in home for every
@@ -392,7 +392,7 @@ def create_app(
     }
     app.state.ecosystem = state
 
-    # -- Ventoryn accounts: who is looking, and what is theirs -----------
+    # -- Axionory accounts: who is looking, and what is theirs -----------
     # The SaaS store/config are resolved once here (not per route) so
     # every route below closes over the same store. Plain create_app()
     # stays hermetic: an in-memory store, config from env.
@@ -993,7 +993,7 @@ def create_app(
                        extra_css=extra_css)
 
     # -- public landing page ----------------------------------------------
-    # GET / is the front door: what Ventoryn is, the URL box + free
+    # GET / is the front door: what Axionory is, the URL box + free
     # preview, the $20/month price, and sign-in with Google — all in
     # one place. No sign-in needed to read it; no internal data on
     # it (no business names, revenue, costs, agent internals, no
@@ -1001,7 +1001,7 @@ def create_app(
     # a visitor who is not signed in. A signed-in visitor gets a
     # "Continue to Live Ops" button — /ops is their home.
     _LANDING_CSS = """
-/* Ventoryn landing page — premium AI SaaS (consolidated brief §2).
+/* Axionory landing page — premium AI SaaS (consolidated brief §2).
    Deep navy / near-black hero, electric violet + blue gradients,
    soft glass accents, clean white content sections. Vector only:
    every graphic is inline SVG or CSS — no bitmaps anywhere. */
@@ -1130,7 +1130,7 @@ section.alt { background: var(--bg-tint); }
 /* -- dashboard preview (§5) — reference images 1 + 2: the hero keeps
    image 1's navy background and copy; the preview inside it is rebuilt
    in image 2's clean light-panel dashboard style (dark mini sidebar +
-   white cards on a pale background), carrying Ventoryn's acquisition
+   white cards on a pale background), carrying Axionory's acquisition
    content — NOT image 2's multi-business content. -- */
 .preview { border: 1px solid #d9d2f2; border-radius: 20px; overflow: hidden;
   background: #fff; box-shadow: 0 24px 60px rgba(11,14,30,.18);
@@ -1422,10 +1422,10 @@ section.alt { background: var(--bg-tint); }
         json_ld = _json.dumps({
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
-            "name": "Ventoryn",
+            "name": "Axionory",
             "applicationCategory": "BusinessApplication",
             "operatingSystem": "Web",
-            "description": ("Ventoryn is an AI customer-acquisition "
+            "description": ("Axionory is an AI customer-acquisition "
                             "service. AI agents discover your "
                             "audience and prepare campaigns; you approve "
                             "every action; verified attribution shows "
@@ -1438,19 +1438,19 @@ section.alt { background: var(--bg-tint); }
             "url": _saas_config.base_url,
         })
         return f"""<!DOCTYPE html>
-<html lang="en"><head><title>Ventoryn — Become a Founding Customer</title>
+<html lang="en"><head><title>Axionory — Become a Founding Customer</title>
 <meta charset="utf-8">
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<meta name="description" content="Ventoryn&#x27;s AI agents find your audience and prepare campaigns. You approve every action; verified attribution shows which efforts bring paying customers.">
-<meta property="og:title" content="Ventoryn — Become a Founding Customer">
-<meta property="og:description" content="Enter your website, connect your accounts, and let Ventoryn's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
+<meta name="description" content="Axionory&#x27;s AI agents find your audience and prepare campaigns. You approve every action; verified attribution shows which efforts bring paying customers.">
+<meta property="og:title" content="Axionory — Become a Founding Customer">
+<meta property="og:description" content="Enter your website, connect your accounts, and let Axionory's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{esc(_saas_config.base_url)}/">
 <script type="application/ld+json">{json_ld}</script>
 <style>{_LANDING_CSS}</style>{_own_snippet_landing()}</head><body>
 <header class="site-nav"><div class="wrap">
 <button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 5h16M3 11h16M3 17h16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></button>
-<a class="brand" href="/">Ventoryn<span>.</span></a>
+<a class="brand" href="/">Axionory<span>.</span></a>
 <nav aria-label="Product"><ul class="nav-links" id="nav-links">
 <li class="nav-item"><button class="nav-drop-btn" id="nav-drop-btn" aria-expanded="false" aria-haspopup="true">Product <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 <div class="nav-drop" id="nav-drop">
@@ -1472,10 +1472,10 @@ section.alt { background: var(--bg-tint); }
 <div class="wrap hero-grid">
 <div class="hero-copy">
 <span class="eyebrow">AI-Powered Customer Acquisition</span>
-<h1>Become a Ventoryn <span class="grad">Founding Customer</span>.</h1>
+<h1>Become an Axionory <span class="grad">Founding Customer</span>.</h1>
 <h2 class="sub">Let AI Find Them. You Approve Every Move.</h2>
 <p class="lede">Enter your website, connect your accounts, and let
-Ventoryn&rsquo;s AI agents discover your audience, prepare campaigns, and
+Axionory&rsquo;s AI agents discover your audience, prepare campaigns, and
 identify opportunities to grow. You approve every action, while verified
 attribution shows which efforts turn into paying customers.</p>
 <div class="hero-ctas">
@@ -1490,7 +1490,7 @@ attribution shows which efforts turn into paying customers.</p>
 {hero_signin_line}
 <div class="card url-card">
 <h2><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:-4px;margin-right:6px"><circle cx="11" cy="11" r="7" fill="none" stroke="#6d28d9" stroke-width="2"/><line x1="16.5" y1="16.5" x2="21" y2="21" stroke="#6d28d9" stroke-width="2" stroke-linecap="round"/></svg>Analyze your site — free preview</h2>
-<p class="muted">The same analysis Ventoryn runs before it starts work:
+<p class="muted">The same analysis Axionory runs before it starts work:
 your site score, your answer-engine (GEO) score, and the top things
 to fix. Nothing is published.</p>
 <form id="landing-analyze-form">
@@ -1509,12 +1509,12 @@ to fix. Nothing is published.</p>
 <div id="landing-cta" hidden></div>
 </div>
 </div>
-<div class="preview" role="img" aria-label="Illustrative preview of the Ventoryn dashboard: verified customers, acquisition funnel, agent activity, approval queue, and a conversion attribution trace. All numbers are example data.">
+<div class="preview" role="img" aria-label="Illustrative preview of the Axionory dashboard: verified customers, acquisition funnel, agent activity, approval queue, and a conversion attribution trace. All numbers are example data.">
 <div class="preview-bar">
 <span class="dot" style="background:#ff5f57"></span>
 <span class="dot" style="background:#febc2e"></span>
 <span class="dot" style="background:#28c840"></span>
-<span class="title">Ventoryn — Live Ops</span>
+<span class="title">Axionory — Live Ops</span>
 <span class="meta">
 <span class="demo-tag">ILLUSTRATIVE DEMO DATA</span>
 <span class="range">Last 30 Days <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -1577,19 +1577,19 @@ customer: <span class="hidden-amt" id="demo-revenue-value">$••• hidden</sp
 </div>
 <p class="demo-note"><strong>Illustrative product preview — not live customer data.</strong> Every
 number in this preview is an example to show how the dashboard reads —
-not real customer data, not a result Ventoryn promises.</p>
+not real customer data, not a result Axionory promises.</p>
 </div>
 </div>
 </div>
 </section>
 <section id="how-it-works" class="alt">
 <div class="wrap">
-<h2>How <span class="grad">Ventoryn</span> Works</h2>
+<h2>How <span class="grad">Axionory</span> Works</h2>
 <p class="lede">From your website to verified paying customers — in 5 simple steps.</p>
 <ol class="steps">
-<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="none" stroke="#6d28d9" stroke-width="2"/><path d="M3 14h22M14 3c3 3.5 3 18.5 0 22M14 3c-3 3.5-3 18.5 0 22" fill="none" stroke="#6d28d9" stroke-width="1.6"/></svg></span><span class="step-num">1</span><strong>Enter Your Website</strong><span>Tell Ventoryn where your business lives. We analyze your website, product positioning, and potential audience.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="none" stroke="#6d28d9" stroke-width="2"/><path d="M3 14h22M14 3c3 3.5 3 18.5 0 22M14 3c-3 3.5-3 18.5 0 22" fill="none" stroke="#6d28d9" stroke-width="1.6"/></svg></span><span class="step-num">1</span><strong>Enter Your Website</strong><span>Tell Axionory where your business lives. We analyze your website, product positioning, and potential audience.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="4" y="8" width="20" height="12" rx="2" fill="none" stroke="#3b82f6" stroke-width="2"/><path d="M10 14h8" stroke="#3b82f6" stroke-width="2"/></svg></span><span class="step-num">2</span><strong>Connect Your Accounts</strong><span>Securely connect supported social networks, analytics tools, and Stripe to bring your acquisition data together.</span></li>
-<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="#8b5cf6" stroke-width="2"/><line x1="17" y1="17" x2="24" y2="24" stroke="#8b5cf6" stroke-width="2"/></svg></span><span class="step-num">3</span><strong>Let AI Research Opportunities</strong><span>Ventoryn&rsquo;s agents find relevant audiences, conversations, communities, and content opportunities.</span></li>
+<li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="#8b5cf6" stroke-width="2"/><line x1="17" y1="17" x2="24" y2="24" stroke="#8b5cf6" stroke-width="2"/></svg></span><span class="step-num">3</span><strong>Let AI Research Opportunities</strong><span>Axionory&rsquo;s agents find relevant audiences, conversations, communities, and content opportunities.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 3l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11V7z" fill="none" stroke="#166534" stroke-width="2"/><path d="M10 14l3 3 5-6" fill="none" stroke="#166534" stroke-width="2"/></svg></span><span class="step-num">4</span><strong>Approve Every Action</strong><span>Review recommended posts, replies, and campaigns before anything is published or executed.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M6 25V4" stroke="#92400e" stroke-width="2"/><path d="M6 4h16l-4 5 4 5H6" fill="none" stroke="#92400e" stroke-width="2"/></svg></span><span class="step-num">5</span><strong>Track Verified Customers</strong><span>Follow attribution from approved action to checkout and see which approved actions turned into verified paying customers.</span></li>
 </ol>
@@ -1598,7 +1598,7 @@ not real customer data, not a result Ventoryn promises.</p>
 </section>
 <section id="product">
 <div class="wrap">
-<h2>What Ventoryn does for your website</h2>
+<h2>What Axionory does for your website</h2>
 <p class="lede">AI does the research. You make the decisions. Nothing
 goes live without your approval.</p>
 <div class="features">
@@ -1614,7 +1614,7 @@ goes live without your approval.</p>
 <section id="attribution" class="alt">
 <div class="wrap">
 <h2>Not Just Clicks. Real Paying Customers.</h2>
-<p class="lede">Ventoryn connects approved marketing actions to actual
+<p class="lede">Axionory connects approved marketing actions to actual
 checkout events, giving you evidence of which activities contributed to
 new paying customers.</p>
 <div class="flow">
@@ -1632,7 +1632,7 @@ new paying customers.</p>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Refunds, disputes, and reversed payments are reconciled — a sale that is later refunded or a dispute that is lost is removed from the verified count automatically.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Protection against replay, manipulation, and unauthorized reassignment of attribution.</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Consent, privacy, and tracking requirements are respected; cross-device and cross-session attribution is shown as limited when deterministic evidence is unavailable.</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Ventoryn never claims every customer can be attributed with certainty — where the evidence is missing, a sale is shown as Unattributed or Verification Pending.</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Axionory never claims every customer can be attributed with certainty — where the evidence is missing, a sale is shown as Unattributed or Verification Pending.</li>
 </ul>
 </div>
 </section>
@@ -1640,7 +1640,7 @@ new paying customers.</p>
 <div class="wrap">
 <h2>AI Does the Research. You Make the Decisions.</h2>
 <p class="lede">Automation is not a substitute for authentic engagement.
-Ventoryn is built on three principles.</p>
+Axionory is built on three principles.</p>
 <div class="principles">
 <div class="principle"><h3>Your Brand, Your Voice</h3><p>Recommendations are aligned with your business&rsquo;s positioning — your voice, not a generic template.</p></div>
 <div class="principle"><h3>Nothing Goes Live Without Approval</h3><p>You control the content and every external action. Nothing is published, replied to, or sent without your explicit authorization.</p></div>
@@ -1650,12 +1650,12 @@ Ventoryn is built on three principles.</p>
 </section>
 <section id="who" class="alt">
 <div class="wrap">
-<h2>Who Ventoryn is for</h2>
+<h2>Who Axionory is for</h2>
 <p class="lede">Built for businesses looking for their first paying
 customers.</p>
 <div class="who-grid">
 <div class="who"><h3>SaaS founders</h3><p>Your product is live. Your paying customers are not — yet.</p></div>
-<div class="who"><h3>Independent software developers</h3><p>Ship the product, let Ventoryn find the people who will pay for it.</p></div>
+<div class="who"><h3>Independent software developers</h3><p>Ship the product, let Axionory find the people who will pay for it.</p></div>
 <div class="who"><h3>Startup teams</h3><p>Small team, no marketing department — agents do the daily outreach work.</p></div>
 <div class="who"><h3>Online service businesses</h3><p>Turn your website into a steady flow of new clients.</p></div>
 <div class="who"><h3>Digital product creators</h3><p>Courses, templates, tools — find the buyers already looking.</p></div>
@@ -1671,7 +1671,7 @@ customers.</p>
 <h2>$20/month</h2>
 <p><span class="big">$20</span> / month</p>
 <ul>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your websites on Ventoryn</li>
+<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your websites on Axionory</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>{_saas_config.monthly_credits:,} credits every month</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A growth report per site</li>
 <li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Agents working daily to find new paying customers</li>
@@ -1690,23 +1690,23 @@ Cancel anytime from your account.</p>
 <div class="wrap">
 <h2>Frequently asked questions</h2>
 <div class="faq">
-<details><summary>What does Ventoryn do?</summary><p>Ventoryn is an AI customer-acquisition service for websites. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities — and you approve every action before anything happens. Progress is measured in verified paying customers, not page views.</p></details>
-<details><summary>How does Ventoryn help me find customers?</summary><p>Its agents research where your audience already gathers — relevant communities, conversations, and search demand — then prepare outreach (posts, replies, articles, videos) for your review. Approved actions go out; everything else stays a draft.</p></details>
-<details><summary>Will Ventoryn post without my approval?</summary><p>No. Nothing is ever published, replied to, or sent without your explicit approval. Every proposed action sits in your approval queue first. You pay for the service — you decide what goes out under your name.</p></details>
+<details><summary>What does Axionory do?</summary><p>Axionory is an AI customer-acquisition service for websites. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities — and you approve every action before anything happens. Progress is measured in verified paying customers, not page views.</p></details>
+<details><summary>How does Axionory help me find customers?</summary><p>Its agents research where your audience already gathers — relevant communities, conversations, and search demand — then prepare outreach (posts, replies, articles, videos) for your review. Approved actions go out; everything else stays a draft.</p></details>
+<details><summary>Will Axionory post without my approval?</summary><p>No. Nothing is ever published, replied to, or sent without your explicit approval. Every proposed action sits in your approval queue first. You pay for the service — you decide what goes out under your name.</p></details>
 <details><summary>Which accounts can I connect?</summary><p>Per website: Reddit, X, Plausible (analytics), and Stripe (sales). Reddit and X posting need the platform OAuth app registrations first — until then the connection honestly says so. X&rsquo;s API is paid and rate-limited, so posting there is slower.</p></details>
-<details><summary>How does Ventoryn verify paying customers?</summary><p>Every approved action carries a unique, signed attribution link. When a visitor follows it and pays through your Stripe checkout, the payment notice (signature-verified, processed once) is matched to that link — and only then is the customer counted as verified. A sale with no signature is reported as unattributed, never guessed.</p></details>
-<details><summary>Do I need Stripe?</summary><p>To count verified paying customers, yes — Ventoryn reads payments from your Stripe account (read-only; it can never charge or refund). Without a Stripe connection, Ventoryn can still analyze your site and prepare campaigns, but paying customers show as unavailable until you connect it.</p></details>
-<details><summary>Can I hide my revenue?</summary><p>Yes — revenue is private by default. You choose, per website, whether revenue amounts are displayed and whether the customer count is displayed. They are two separate settings. With revenue hidden, no dollar figure appears anywhere on Ventoryn — your sales still count as verified customers. Revenue figures never go into logs.</p></details>
-<details><summary>Does Ventoryn guarantee new customers?</summary><p>No. Ventoryn does not guarantee a number of paying customers. What Ventoryn guarantees is the work: daily research, prepared campaigns, your approval on everything, and honest attribution of what actually turned into a paying customer.</p></details>
+<details><summary>How does Axionory verify paying customers?</summary><p>Every approved action carries a unique, signed attribution link. When a visitor follows it and pays through your Stripe checkout, the payment notice (signature-verified, processed once) is matched to that link — and only then is the customer counted as verified. A sale with no signature is reported as unattributed, never guessed.</p></details>
+<details><summary>Do I need Stripe?</summary><p>To count verified paying customers, yes — Axionory reads payments from your Stripe account (read-only; it can never charge or refund). Without a Stripe connection, Axionory can still analyze your site and prepare campaigns, but paying customers show as unavailable until you connect it.</p></details>
+<details><summary>Can I hide my revenue?</summary><p>Yes — revenue is private by default. You choose, per website, whether revenue amounts are displayed and whether the customer count is displayed. They are two separate settings. With revenue hidden, no dollar figure appears anywhere on Axionory — your sales still count as verified customers. Revenue figures never go into logs.</p></details>
+<details><summary>Does Axionory guarantee new customers?</summary><p>No. Axionory does not guarantee a number of paying customers. What Axionory guarantees is the work: daily research, prepared campaigns, your approval on everything, and honest attribution of what actually turned into a paying customer.</p></details>
 <details><summary>Can I disconnect my accounts?</summary><p>Yes, anytime, from your site&rsquo;s Connections section. Disconnecting revokes the token at the provider (where the provider allows it) and deletes the stored token and revenue data. Deleting your account does the same for everything it owns.</p></details>
-<details><summary>How is my information protected?</summary><p>Two-factor authentication (TOTP) is mandatory for every account from the first sign-in — you set it up with an authenticator app and backup codes. Sign-in is zero-trust: every request is verified server-side against your session, sessions expire, and a logged-out session stops working immediately. Tokens Ventoryn holds are encrypted at rest, server-side only, with the minimum scopes for the job. Sensitive actions — disconnecting a connection, changing the revenue display, disconnecting Stripe — ask for a fresh two-factor code. The admin account is protected by its own password plus two-factor, separate from any customer sign-in.</p></details>
+<details><summary>How is my information protected?</summary><p>Two-factor authentication (TOTP) is mandatory for every account from the first sign-in — you set it up with an authenticator app and backup codes. Sign-in is zero-trust: every request is verified server-side against your session, sessions expire, and a logged-out session stops working immediately. Tokens Axionory holds are encrypted at rest, server-side only, with the minimum scopes for the job. Sensitive actions — disconnecting a connection, changing the revenue display, disconnecting Stripe — ask for a fresh two-factor code. The admin account is protected by its own password plus two-factor, separate from any customer sign-in.</p></details>
 </div>
 </div>
 </section>
 <section class="final-cta">
 <div class="wrap">
 <h2>Your Next Customer Is Out There.</h2>
-<p>Give Ventoryn your website. Let intelligent agents discover
+<p>Give Axionory your website. Let intelligent agents discover
 opportunities, prepare outreach, and help turn real engagement into
 measurable customer growth.</p>
 <p>Joining the waitlist is free registration, separate from the
@@ -1735,7 +1735,7 @@ $20/month subscription.</p>
 <a href="/privacy">Privacy Policy</a>
 <a href="/terms">Terms of Service</a></div>
 </div>
-<p class="base">Ventoryn — AI customer acquisition for your website.</p>
+<p class="base">Axionory — AI customer acquisition for your website.</p>
 </div></footer>
 <script>
 "use strict";
@@ -1775,7 +1775,7 @@ function renderPreview(job) {{
   }}
   const findings = (r.findings || []).slice(0, 5);
   if (findings.length) {{
-    html += "<h3>Top findings — what Ventoryn would fix first</h3><ul class='findings'>";
+    html += "<h3>Top findings — what Axionory would fix first</h3><ul class='findings'>";
     for (const f of findings) {{
       html += "<li><strong>[" + esc(f.severity) + " · " + esc(f.area) + "]</strong> " + esc(f.issue) + " — Fix: " + esc(f.fix) + "</li>";
     }}
@@ -1995,7 +1995,7 @@ if (demoToggle && demoValue) {{
                 for i, r in enumerate(rows)) or (
                 "<div class='card'><p>No websites yet. "
                 "<a href='/websites/sites/new'>Add your first website</a> — "
-                "Ventoryn works to bring it new paying "
+                "Axionory works to bring it new paying "
                 "customers.</p></div>")
         def _site_list(rows) -> str:
             """Your websites as a compact list — one row per website,
@@ -2040,7 +2040,7 @@ if (demoToggle && demoValue) {{
                          f"{esc(r['name'])}</a></td>"
                          f"<td class='num'>{visitors}</td><td class='num'>{paying}</td>"
                          f"<td class='num'>{revenue}</td><td>{auto}</td>"
-                         # Open = the website's page in Ventoryn (its
+                         # Open = the website's page in Axionory (its
                          # snapshot, specs, funnel) — not the live site.
                          f"<td><a href='/websites/sites/{sid}'>Open</a></td></tr>")
             n = len(rows)
@@ -2723,7 +2723,7 @@ Day {snapshot["days_elapsed"]}/60 ({snapshot["days_remaining"]} remaining)</p>
             for i, b in enumerate(snap["businesses"])) or (
             "<div class='card'><p>No websites yet. "
             "<a href='/websites/sites/new'>Add your first website</a> — "
-            "Ventoryn works to bring it new paying "
+            "Axionory works to bring it new paying "
             "customers.</p></div>")
         # The landing funnel: a visitor who typed a URL on the
         # landing page arrives here with ?site_url= — prefill the
@@ -3268,16 +3268,16 @@ id="analyze-submit">Analyze</button>
             if getattr(a, "business_id", None) in site_biz_ids]
         any_sig = any(
             _saas_store.list_signatures(s["id"]) for s in sites)
-        # Strongest evidence first: Ventoryn Analytics saw a visit that
-        # arrived through a signed Ventoryn link on one of these sites.
+        # Strongest evidence first: Axionory Analytics saw a visit that
+        # arrived through a signed Axionory link on one of these sites.
         from ventoryn.analytics import analytics_for
         _va = analytics_for(_saas_store)
         signed_visit = any(_va.summary(s["id"])["signed_visits"]
                            for s in sites)
         if signed_visit:
             visit_ok = True
-            visit_note = ("Ventoryn Analytics recorded a visit through a "
-                          "signed Ventoryn link.")
+            visit_note = ("Axionory Analytics recorded a visit through a "
+                          "signed Axionory link.")
         elif check_visitors:
             has_visitors = False
             for s in sites:
@@ -3309,7 +3309,7 @@ id="analyze-submit">Analyze</button>
             ("Customer Approval", bool(decided_here),
              "An approval was decided by this account."),
             ("Signed Campaign Link", any_sig,
-             "A signed Ventoryn link was created."),
+             "A signed Axionory link was created."),
             ("Website Visit", visit_ok, visit_note),
             ("Stripe Payment", any_stripe,
              "A Stripe payment was recorded."),
@@ -3443,7 +3443,7 @@ id="analyze-submit">Analyze</button>
                 f"<input type='hidden' name='return_to' value='{esc(return_to)}'>"
                 f"<label><input type='checkbox' name='revenue_show' "
                 f"{_chk(s.get('revenue_show'))}> Show my revenue on "
-                f"Ventoryn</label>"
+                f"Axionory</label>"
                 f"<label><input type='checkbox' name='count_show' "
                 f"{_chk(s.get('count_show', 1))}> Show my customer "
                 f"count</label>"
@@ -3773,7 +3773,7 @@ id="analyze-submit">Analyze</button>
                           if j["status"] in ("queued", "running"))
         if running >= app.state.analyze_max_running:
             return JSONResponse(
-                {"detail": "Ventoryn is busy analyzing other sites — "
+                {"detail": "Axionory is busy analyzing other sites — "
                            "try again in a minute."},
                 status_code=429, headers={"Retry-After": "60"})
         account = _current_account(request)
@@ -3853,7 +3853,7 @@ id="analyze-submit">Analyze</button>
 <p><span class='pill green'>+{last7} verified customers (7 days)</span></p>
 <p class='muted'>Verified paying customers, counted from signed sales.</p>{count_note}</div>
 <div class='card v-kpi-stack'><h2>Customers</h2>
-<div class='v-kpi-row'><div><strong>Verified</strong><p class='muted'>The Ventoryn signature reached the payment.</p></div><span class='big'>{verified}</span></div>
+<div class='v-kpi-row'><div><strong>Verified</strong><p class='muted'>The Axionory signature reached the payment.</p></div><span class='big'>{verified}</span></div>
 <div class='v-kpi-row'><div><strong>Pending</strong><p class='muted'>Owner-recorded, not yet verified by Stripe.</p></div><span class='big'>{counts['pending']}</span></div>
 <div class='v-kpi-row'><div><strong>Unattributed</strong><p class='muted'>Real Stripe payment, no signature.</p></div><span class='big'>{counts['unattributed']}</span></div>
 </div>
@@ -3943,7 +3943,7 @@ per-sale details are separate settings.</p>{data['privacy_forms']}</div>
 <div class='card'><h2>Conversion breakdown</h2>{data['breakdown_html']}
 <div class='card'><h2>Data source &amp; accuracy</h2><ul>
 <li><strong>Real data</strong> — live, verified events (e.g. Stripe, analytics).</li>
-<li><strong>Estimated data</strong> — Ventoryn does not show estimated data on this report — figures are real or unavailable.</li>
+<li><strong>Estimated data</strong> — Axionory does not show estimated data on this report — figures are real or unavailable.</li>
 <li><strong>Demonstration data</strong> — sample data shown for illustration only — used only on the public landing preview.</li>
 </ul></div></div>
 </div>"""
@@ -4242,22 +4242,30 @@ shows verified conversions only.</p>"""
         scheduled = _saas_store.list_campaigns(account["id"], status="scheduled", limit=10)
         cards = "".join(_camp.proposal_card(_saas_store, _saas_config, c, totp)
                         for c in proposed)
-        out = (f"<style>{_camp.CAMPAIGN_CSS}</style>"
-               f"<h2>Campaign proposals ({len(proposed)})</h2>"
-               + (cards or "<div class='card'><p class='muted'>No campaign waiting. Start one "
-                  "from <a href='/agents#start-campaign'>Agents</a>, or let the autopilot "
-                  "propose one each week.</p></div>"))
+        # Newest agent work first: each section is placed by the date of
+        # its most recent item, so a video made a minute ago is at the
+        # top, not under older proposals and articles.
+        sections: list[tuple[str, str]] = []
+        if proposed:
+            sections.append((max(c["created_at"] for c in proposed),
+                             f"<h2>Campaign proposals ({len(proposed)})</h2>{cards}"))
         if scheduled:
-            out += ("<div class='card'><h2>Approved campaigns</h2><ul>"
-                    + "".join(_camp.scheduled_summary(_saas_store, c) for c in scheduled)
-                    + "</ul></div>")
+            sections.append((max(c["created_at"] for c in scheduled),
+                             "<div class='card'><h2>Approved campaigns</h2><ul>"
+                             + "".join(_camp.scheduled_summary(_saas_store, c) for c in scheduled)
+                             + "</ul></div>"))
         hosts = {s["id"]: s["host"] for s in _saas_store.list_sites(account["id"])}
         from ventoryn.saas_routes import REPORTS_DIR as _reports
-        from ventoryn.videos import review_section as _videos
+        from ventoryn.videos import review_section as _videos, videos_for_review
 
-        out += _videos(_saas_store, account["id"], _reports, hosts)
+        vids = [v for v in videos_for_review(_saas_store, account["id"], _reports)
+                if v["review"] != "rejected"]
+        if vids:
+            sections.append((max(v["created_at"] for v in vids),
+                             _videos(_saas_store, account["id"], _reports, hosts)))
         articles = [j for j in _saas_store.list_jobs(account["id"], limit=60)
                     if j["job_type"] == "seo_article" and j["status"] == "done"][:10]
+        out = f"<style>{_camp.CAMPAIGN_CSS}</style>"
         if articles:
             rows = "".join(
                 f"<tr><td>{esc(hosts.get(j['site_id'], ''))}</td>"
@@ -4265,10 +4273,17 @@ shows verified conversions only.</p>"""
                 f"<td>{esc(str(j['created_at'])[:10])}</td>"
                 f"<td><a href='/websites/sites/{esc(j['site_id'])}/articles/{esc(j['id'])}'>Read</a></td></tr>"
                 for j in articles)
-            out += ("<div class='card'><h2>SEO article drafts</h2><p class='muted'>Written by the "
-                    "agents, never published. Read one, then copy it to your site if you like it.</p>"
-                    "<div class='table-wrap'><table><tr><th>Website</th><th>Draft</th>"
-                    f"<th>Date</th><th></th></tr>{rows}</table></div></div>")
+            sections.append((max(j["created_at"] for j in articles),
+                             "<div class='card'><h2>SEO article drafts</h2><p class='muted'>Written by the "
+                             "agents, never published. Read one, then copy it to your site if you like it.</p>"
+                             "<div class='table-wrap'><table><tr><th>Website</th><th>Draft</th>"
+                             f"<th>Date</th><th></th></tr>{rows}</table></div></div>"))
+        sections.sort(key=lambda s: s[0], reverse=True)
+        out += "".join(html for _ts, html in sections)
+        if not proposed:
+            out += ("<h2>Campaign proposals (0)</h2><div class='card'><p class='muted'>No campaign "
+                    "waiting. Start one from <a href='/agents#start-campaign'>Agents</a>, or let "
+                    "the autopilot propose one each week.</p></div>")
         return out
 
     def _alerts_for(account) -> list:
@@ -4537,7 +4552,7 @@ Signups read unavailable because no signup tracking is connected yet.</p>
         ("stripe_sales", "Stripe sales", "Count real paying customers "
          "from each website's own Stripe account.", "#635bff"),
         ("plausible", "Plausible", "Optional: bring visitor numbers from "
-         "Plausible. Ventoryn Analytics already counts visitors without "
+         "Plausible. Axionory Analytics already counts visitors without "
          "it.", "#5850ec"),
         ("reddit", "Reddit", "Not available: Reddit no longer offers the "
          "free API access this needs.", "#ff4500"),
@@ -4650,14 +4665,14 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     f"Drafts and posting for this website</a></p>")
             elif _saas_config.x_oauth_configured and _saas_config.app_registered("x"):
                 parts.append(
-                    f"<p class='muted'>You will sign in to X and approve Ventoryn's "
+                    f"<p class='muted'>You will sign in to X and approve Axionory's "
                     f"access for this website's account, then come back here.</p>"
                     f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
                     f"/connections/x/start?return_to="
                     f"{esc(urllib.parse.quote(return_to, safe=''))}'>Connect with X</a></p>")
             else:
                 parts.append(
-                    "<p class='muted'>The operator has not set up Ventoryn's X app "
+                    "<p class='muted'>The operator has not set up Axionory's X app "
                     "yet, so this website cannot connect. Nothing is faked.</p>")
         elif kind == "facebook":
             if connected:
@@ -4674,13 +4689,13 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     _saas_config.app_registered("facebook"):
                 parts.append(
                     f"<p class='muted'>You will sign in to Facebook and "
-                    f"approve Ventoryn's access for this website's Page, "
+                    f"approve Axionory's access for this website's Page, "
                     f"then come back here.</p>"
                     f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
                     f"/connections/facebook/start'>Connect with Facebook</a></p>")
             else:
                 parts.append(
-                    "<p class='muted'>The operator has not set up Ventoryn's "
+                    "<p class='muted'>The operator has not set up Axionory's "
                     "Meta app yet, so this website cannot connect. Nothing "
                     "is faked.</p>")
         elif kind == "instagram":
@@ -4695,13 +4710,13 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     _saas_config.app_registered("instagram"):
                 parts.append(
                     f"<p class='muted'>You will sign in to Facebook and "
-                    f"approve Ventoryn's access for this website's "
+                    f"approve Axionory's access for this website's "
                     f"Instagram Business account, then come back here.</p>"
                     f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
                     f"/connections/instagram/start'>Connect with Instagram</a></p>")
             else:
                 parts.append(
-                    "<p class='muted'>The operator has not set up Ventoryn's "
+                    "<p class='muted'>The operator has not set up Axionory's "
                     "Meta app yet, so this website cannot connect. Nothing "
                     "is faked.</p>")
         else:
@@ -4885,7 +4900,7 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
 <div class="table-wrap"><table>
 <tr><th>Website</th><th>Amount</th><th>Source</th><th>Status</th>
 <th>Signature</th><th>Date</th></tr>{rows}</table></div>
-<p class='muted'>Verified — the Ventoryn signature reached the payment.
+<p class='muted'>Verified — the Axionory signature reached the payment.
 Pending — owner-recorded, not yet verified by Stripe. Unattributed —
 a real Stripe payment, no signature.</p>"""
         return _operator_page(
@@ -5061,7 +5076,7 @@ a real Stripe payment, no signature.</p>"""
         button — just the password field."""
         return ui.page(f"{title} (admin)",
                        f"<div class='v-auth-card'>"
-                       f"<div class='v-auth-brand'>Ventoryn</div>"
+                       f"<div class='v-auth-brand'>Axionory</div>"
                        f"<h1>{esc(title)}</h1>{inner}</div>",
                        extra_css=_ADMIN_CSS, body_class="v-admin")
 
@@ -5078,7 +5093,7 @@ a real Stripe payment, no signature.</p>"""
             "<p class='muted'>Two-factor is not enabled yet — the code "
             "field can stay empty. Set it up under /admin once you are "
             "in.</p>")
-        inner = ("<p>Enter the admin password to open the Ventoryn "
+        inner = ("<p>Enter the admin password to open the Axionory "
                  "admin.</p>"
                  + ("<p class='v-error'>Incorrect admin password or "
                     "code.</p>" if error else "")
@@ -5169,7 +5184,7 @@ a real Stripe payment, no signature.</p>"""
         if not secret:
             secret = _saas_store.begin_admin_totp_setup()["secret"]
         uri = provisioning_uri(secret, "admin@ventoryn.app",
-                               issuer="Ventoryn")
+                               issuer="Axionory")
         inner = ("<div class='v-admin-card'><h2>Set up two-factor</h2>"
                  "<p>Two-factor is required for the admin once it is "
                  "enabled. Scan this QR code with your authenticator "
@@ -5430,7 +5445,7 @@ a real Stripe payment, no signature.</p>"""
                  f"{problem_rows}</table></div></div>")
         return _admin_page("Agents", inner, "admin-agents")
 
-    # -- Ventoryn SaaS shell (customer accounts, billing, credits) --------
+    # -- Axionory SaaS shell (customer accounts, billing, credits) --------
     # The store/config were resolved at the top of create_app (so the
     # routes above close over the same store); plain create_app()
     # stays hermetic (tests, module import) and never creates a file.
@@ -5569,7 +5584,7 @@ a real Stripe payment, no signature.</p>"""
     async def _server_error_handler(request: Request, exc):
         return await _shell_error_page(
             request, 500, "Something went wrong",
-            "Ventoryn hit an unexpected error. Try again, or go back "
+            "Axionory hit an unexpected error. Try again, or go back "
             "to Overview.")
 
     # Outermost layer, registered last: security headers on every

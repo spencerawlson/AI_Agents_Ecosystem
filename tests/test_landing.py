@@ -1,7 +1,7 @@
-"""Ventoryn landing page + the customer/admin split (ShipItAyiti flow).
+"""Axionory landing page + the customer/admin split (ShipItAyiti flow).
 
 The model under test:
-  - GET / is the public landing page: what Ventoryn is, the URL box
+  - GET / is the public landing page: what Axionory is, the URL box
     + free preview, $20/month, sign-in with Google — no internal
     data, no links to operator pages.
   - After sign-in EVERYONE goes to Live Ops (/ops), scoped to the
@@ -91,7 +91,7 @@ def test_landing_page_public():
     assert 'id="landing-cta"' in r.text or "id='landing-cta'" in r.text
     assert "Sign in with Google" in r.text
     # Reference image 1: the How It Works heading names the product.
-    assert "How" in r.text and "Ventoryn" in r.text and "Works" in r.text
+    assert "How" in r.text and "Axionory" in r.text and "Works" in r.text
     assert "From your website to verified paying customers" in r.text
     # The preview reuses the analyze pipeline in-process.
     assert 'fetch("/api/analyze"' in r.text
@@ -226,7 +226,7 @@ def test_ops_serves_for_a_signed_in_customer():
     client, _account = _customer_client(app, store, CUSTOMER_A)
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Overview — Ventoryn" in r.text
+    assert "Overview — Axionory" in r.text
     # The customer sidebar, not the old operator link paragraph.
     assert "Overview" in r.text
     assert "My account" in r.text

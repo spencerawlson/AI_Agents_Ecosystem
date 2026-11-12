@@ -1,4 +1,4 @@
-"""Ventoryn's own robots.txt, sitemap.xml and llms.txt."""
+"""Axionory's own robots.txt, sitemap.xml and llms.txt."""
 
 import sys
 from dataclasses import replace
@@ -37,7 +37,7 @@ def test_sitemap_lists_only_the_public_home_page():
 def test_llms_txt_is_public_plain_text():
     r = _client().get("/llms.txt")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
-    assert r.text.startswith("# Ventoryn\n")
+    assert r.text.startswith("# Axionory\n")
     assert "$20/month" in r.text and "https://ventoryn.app/" in r.text
     assert "{base}" not in r.text
 

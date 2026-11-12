@@ -1,6 +1,6 @@
 """Autopilot: the agents work on every website by default.
 
-Every website on Ventoryn gets its agent work on a cadence, without
+Every website on Axionory gets its agent work on a cadence, without
 anyone pressing "Run job":
 
     Job          Cadence   Why

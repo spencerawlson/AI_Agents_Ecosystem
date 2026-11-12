@@ -9,7 +9,7 @@ verified the summary reads verified 0, remaining 100.
   an identity; the owner-typed manual fallback never counts).
 * "paying" — all recorded paying customers
   (SaasStore.paying_customer_count, funnel count, unchanged).
-* "attributed" — recorded sales carrying Ventoryn's signature.
+* "attributed" — recorded sales carrying Axionory's signature.
 * "unattributed" — real Stripe sales with no signature (never
   guessed into attribution). Owner-recorded manual sales are in
   neither bucket — they are pending, not attributed either way.

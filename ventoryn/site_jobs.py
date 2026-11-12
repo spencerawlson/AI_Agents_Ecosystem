@@ -46,9 +46,9 @@ JOB_HINTS = {
                            "(all of Reddit by default).",
     "social_report": "Needs a CSV or JSON export from your social "
                      "platform.",
-    "seo_article": "Optional keywords to target; otherwise Ventoryn "
+    "seo_article": "Optional keywords to target; otherwise Axionory "
                    "maps them from your site.",
-    "video_render": "Ventoryn drafts the script from your site, then "
+    "video_render": "Axionory drafts the script from your site, then "
                     "renders it — with an ElevenLabs voiceover, or a HeyGen "
                     "presenter, when the server has those keys.",
     "x_campaign": "30 days, one post a day, each linking to a page of your "
@@ -298,7 +298,7 @@ def _run_seo(site, inputs, ctx):
 
 def _make_video(site, script, videos, stem, inputs, ctx):
     """Render the video. With a HeyGen presenter requested, HeyGen makes
-    it; otherwise Ventoryn renders the slides, with an ElevenLabs
+    it; otherwise Axionory renders the slides, with an ElevenLabs
     voiceover when the server has it (and the owner did not turn it
     off). Paid usage is recorded for the website's Costs."""
     from core import media_providers as mp

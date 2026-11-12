@@ -393,7 +393,7 @@ def test_websites_page_operator_businesses_group():
     registry.assign_owner(biz.id, "operator@example.com")
     r = op.get("/portfolio")
     assert r.status_code == 200
-    assert "<title>Websites — Ventoryn</title>" in r.text
+    assert "<title>Websites — Axionory</title>" in r.text
     assert "Your websites" in r.text
     assert "Operator businesses" in r.text
     assert "href='/businesses'" in r.text

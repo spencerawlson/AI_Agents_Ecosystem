@@ -1,4 +1,4 @@
-"""Ventoryn Analytics: cookieless first-party analytics for customer sites."""
+"""Axionory Analytics: cookieless first-party analytics for customer sites."""
 
 import sys
 from datetime import datetime, timedelta, timezone
@@ -154,7 +154,7 @@ def test_only_tags_ventoryn_issued_count_as_signed_visits(env):
 def test_site_page_shows_snippet_and_status(env):
     _app, client, _store, _account, site = env
     html = client.get(f"/websites/sites/{site['id']}").text
-    assert "Ventoryn Analytics" in html and "Not installed" in html
+    assert "Axionory Analytics" in html and "Not installed" in html
     assert f'data-site=&quot;{site["id"]}&quot;' in html
     assert "/v.js" in html
     _collect(client, site)
@@ -169,9 +169,9 @@ def test_funnel_uses_analytics_then_plausible(env):
     _collect(client, site)
     _collect(client, site, name="signup")
     html = client.get(f"/websites/sites/{site['id']}").text
-    assert "(Ventoryn Analytics)" in html
+    assert "(Axionory Analytics)" in html
     analytics = client.get("/analytics").text
-    assert "(Ventoryn Analytics)" in analytics
+    assert "(Axionory Analytics)" in analytics
 
 
 def test_signed_visit_is_attribution_evidence(env):
@@ -181,7 +181,7 @@ def test_signed_visit_is_attribution_evidence(env):
     _collect(client, site,
              url="https://shop.example.com/?utm_content=vtn_act-9.def456")
     html = client.get("/report").text
-    assert "Ventoryn Analytics recorded a visit through a signed" in html
+    assert "Axionory Analytics recorded a visit through a signed" in html
 
 
 def test_check_installation(env, monkeypatch):

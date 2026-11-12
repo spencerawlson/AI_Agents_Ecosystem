@@ -1,4 +1,4 @@
-"""Authenticated encryption for OAuth / API tokens held by Ventoryn.
+"""Authenticated encryption for OAuth / API tokens held by Axionory.
 
 Standard library only — there is no AES in the stdlib, so this is a
 stream cipher built from HMAC-SHA256 (keystream = HMAC(key, nonce ||

@@ -65,7 +65,7 @@ def _site_with_evidence(app, store, client, account, gate):
     appr = gate.request("ad_spend_increase", amount_usd=10.0,
                         business_id=f"site:{site['id']}")
     gate.decide(appr.id, True, "ada@example.com")
-    # A signed Ventoryn link was created. (The key is passed
+    # A signed Axionory link was created. (The key is passed
     # explicitly here — in production it comes from
     # VENTORYN_TOKEN_KEY in the server environment.)
     signed, tag = sign_agent_link(
@@ -154,7 +154,7 @@ def test_report_structure_per_reference():
     assert "ada.example.com" in text  # the signed campaign's target
     assert tag in text  # the signature next to the attributed sale
     # The three privacy toggles, per site.
-    assert "Show my revenue on Ventoryn" in text
+    assert "Show my revenue on Axionory" in text
     assert "Show my customer count" in text
     assert "Show conversion details" in text
     # The trend, the breakdown, and the data-source legend.

@@ -163,7 +163,7 @@ def test_game_redirects_to_live_ops():
     assert r.headers["location"] == "/ops"
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Overview — Ventoryn" in r.text
+    assert "Overview — Axionory" in r.text
     assert "Live game view" not in r.text
     assert "Your crew" not in r.text
     assert "What the team is doing" not in r.text
@@ -289,7 +289,7 @@ if __name__ == "__main__":
 
 
 def test_live_ops_is_ventoryn_and_professional():
-    """The live-ops page is Ventoryn now (not Ecosystem Tycoon), and
+    """The live-ops page is Axionory now (not Ecosystem Tycoon), and
     the professional Overview is thumb-friendly through the platform
     shell: the analyze fields keep 44px+ tap targets, the sidebar
     collapses behind a 44px toggle on a phone, and there is no crew
@@ -301,7 +301,7 @@ def test_live_ops_is_ventoryn_and_professional():
         registry=BusinessRegistry(), ledger=Ledger())
     r = client.get("/ops")
     assert r.status_code == 200
-    assert "Overview — Ventoryn" in r.text
+    assert "Overview — Axionory" in r.text
     assert "Ecosystem Tycoon" not in r.text
     assert "Your crew" not in r.text
     assert 'id="crew-prev"' not in r.text
@@ -312,4 +312,4 @@ def test_live_ops_is_ventoryn_and_professional():
     root = Path(__file__).resolve().parent.parent
     doc = root / "docs" / "ventoryn-live-ops.md"
     assert doc.exists()
-    assert doc.read_text(encoding="utf-8").splitlines()[0] == "# Ventoryn — Live Ops"
+    assert doc.read_text(encoding="utf-8").splitlines()[0] == "# Axionory — Live Ops"

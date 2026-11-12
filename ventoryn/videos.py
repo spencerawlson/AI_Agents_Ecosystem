@@ -58,7 +58,7 @@ def review_section(store, account_id: str, reports_dir: Path, hosts: dict) -> st
     vids = [v for v in videos_for_review(store, account_id, reports_dir) if v["review"] != "rejected"]
     if not vids:
         return ""
-    vids.sort(key=lambda v: (v["review"] != "pending", v["created_at"]), reverse=False)
+    vids.sort(key=lambda v: v["created_at"], reverse=True)  # newest first
     cards = ""
     for v in vids:
         sid, jid = _esc(v["site_id"]), _esc(v["id"])

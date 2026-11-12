@@ -1,17 +1,17 @@
-"""Website snapshot: what Ventoryn can see about a site the moment it is added.
+"""Website snapshot: what Axionory can see about a site the moment it is added.
 
 Four sections, each built only from real, public sources — a value that
 cannot be measured reads "unavailable" or "not connected", never a guess.
 Flagged rows carry a short "how to fix it" tip, and rows whose fix is
 draftable content carry a generated draft the owner can copy and apply
-themselves — Ventoryn never writes to the site.
+themselves — Axionory never writes to the site.
 
 - Preview  — title, description, and (when the browser sandbox is
              available) a screenshot of the home page.
 - Specs    — platform, hosting/CDN, HTTPS, speed, page weight, mobile
              readiness, SEO basics, structured data, sitemap, llms.txt,
              analytics already installed, social profiles linked.
-- Traffic  — Ventoryn Analytics (real numbers, once installed); the
+- Traffic  — Axionory Analytics (real numbers, once installed); the
              Tranco top-sites rank (free); Google's Chrome UX Report
              (whether real Chrome visitors are measurable; needs
              GOOGLE_CRUX_API_KEY). Nobody can see a site's real visitor
@@ -80,7 +80,7 @@ _SOCIAL = (
     ("Reddit", r"reddit\.com/(?:r|user)/[A-Za-z0-9_]{2,}"),
 )
 _ANALYTICS = (
-    ("Ventoryn Analytics", "/v.js"), ("Google Analytics", "googletagmanager.com"),
+    ("Axionory Analytics", "/v.js"), ("Google Analytics", "googletagmanager.com"),
     ("Google Analytics", "google-analytics.com"), ("Plausible", "plausible.io"),
     ("Cloudflare Web Analytics", "cloudflareinsights.com"),
     ("Vercel Analytics", "/_vercel/insights"), ("Microsoft Clarity", "clarity.ms"),
@@ -366,10 +366,10 @@ def collect(site: dict, *, env=None, page_fetch=fetch_page, json_get=http_json,
     traffic = []
     va = analytics(site["id"]) if analytics else None
     if va and va.get("installed"):
-        traffic.append(_item("Visitors, last 30 days (Ventoryn Analytics)",
+        traffic.append(_item("Visitors, last 30 days (Axionory Analytics)",
                              f"{va['visitors']:,} visitors · {va['pageviews']:,} page views"))
     else:
-        traffic.append(_item("Visitors (real numbers)", "Install Ventoryn Analytics to see them",
+        traffic.append(_item("Visitors (real numbers)", "Install Axionory Analytics to see them",
                              "not_connected"))
     tranco_rank = None
     st, data = json_get(f"https://tranco-list.eu/api/ranks/domain/{urllib.parse.quote(bare)}")
@@ -552,10 +552,10 @@ def start(saas_store, site: dict, reports_dir, *, collector=None, force: bool = 
 # Flagged rows carry a short tip: what to do and where to go. The tip is
 # static copy keyed by the row label, resolved at render time (so snapshots
 # stored before this feature still get tips). Rows whose fix is content
-# Ventoryn can draft carry a "generated" draft as well, built at collect
+# Axionory can draft carry a "generated" draft as well, built at collect
 # time from the site's real collected data only — never invented pages,
 # URLs or claims. The owner copies the draft and applies it themselves;
-# Ventoryn never writes to the site. Refreshing the snapshot re-collects
+# Axionory never writes to the site. Refreshing the snapshot re-collects
 # and re-drafts, so a fixed row clears.
 #
 # Wording rules: 1-3 short sentences, what to DO and WHERE to go. Never
@@ -899,7 +899,7 @@ def render_card(site: dict, snap: dict | None) -> str:
     p = data["preview"]
     shot = ""
     if p.get("screenshot"):
-        # The ONE bitmap Ventoryn shows: the owner's own site, on their own
+        # The ONE bitmap Axionory shows: the owner's own site, on their own
         # site page (see tests/test_vector_only.py).
         shot = (f"<img class='v-snap-shot' src='/websites/sites/{sid}/snapshot-image' "
                 f"alt='Screenshot of {html.escape(site['host'])}' width='1280' height='800'>")
@@ -917,7 +917,7 @@ def render_card(site: dict, snap: dict | None) -> str:
             f"<div class='card'><h2>Specs</h2>{_list(data['specs'])}</div>"
             f"<div class='card'><h2>Traffic</h2>{_list(data['traffic'])}"
             f"<p class='muted' style='margin-top:10px'>Nobody can see a site's real visitor count "
-            f"from outside — this is a size band from public data. Ventoryn Analytics shows the "
+            f"from outside — this is a size band from public data. Axionory Analytics shows the "
             f"real numbers.</p></div>"
             f"<div class='card'><h2>Where it appears online</h2>{_list(data['presence'])}</div>"
             f"</div></div>")

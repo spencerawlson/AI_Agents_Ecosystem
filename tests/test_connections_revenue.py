@@ -1,4 +1,4 @@
-"""Connections + revenue + attribution (Ventoryn).
+"""Connections + revenue + attribution (Axionory).
 
 - The site page has a Connections section: Reddit, X, Plausible,
   Stripe sales — each with its status and a Connect / Disconnect
@@ -7,7 +7,7 @@
 - Agents may only post/reply on accounts that are actually
   connected (the posting gate).
 - Revenue: the customer plugs their site's Stripe sales in and
-  chooses, with THREE separate settings, what Ventoryn shows —
+  chooses, with THREE separate settings, what Axionory shows —
   revenue (dollars, off by default), customer count (on by
   default), conversion details (on by default). Off hides the
   figures everywhere; the paying-customer count still increments.

@@ -1,4 +1,4 @@
-"""IndexNow: tell Bing (and, through it, Brave Search) about Ventoryn's
+"""IndexNow: tell Bing (and, through it, Brave Search) about Axionory's
 own public pages instead of waiting for organic crawling.
 
 Setup: set VENTORYN_INDEXNOW_KEY to any random hex string (e.g.
@@ -8,7 +8,7 @@ redeploy — the verification file is then served automatically at
 
     python -m ventoryn.indexnow
 
-Only Ventoryn's own sitemap URLs are ever submitted — never a
+Only Axionory's own sitemap URLs are ever submitted — never a
 customer's site.
 """
 
@@ -33,7 +33,7 @@ def register_indexnow(app, config) -> None:
 
 
 def submit(config, urls: list[str], urlopen=None) -> tuple[bool, str]:
-    """Submit ``urls`` (full URLs, Ventoryn's own) to IndexNow. Returns
+    """Submit ``urls`` (full URLs, Axionory's own) to IndexNow. Returns
     (ok, message) — never raises; a missing key or network failure is
     reported, not fatal."""
     if not config.indexnow_key:

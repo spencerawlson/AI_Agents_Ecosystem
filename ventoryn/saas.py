@@ -1,8 +1,8 @@
-"""Ventoryn SaaS shell — accounts, Stripe billing, credits, sites.
+"""Axionory SaaS shell — accounts, Stripe billing, credits, sites.
 
-This is what turns the internal Ventoryn dashboard into a product a
+This is what turns the internal Axionory dashboard into a product a
 website owner can buy: a stranger signs in with Google, subscribes for
-$20/month, adds their website, and Ventoryn works to bring that site
+$20/month, adds their website, and Axionory works to bring that site
 new paying customers.
 
 Design rules (from the brief, do not weaken):
@@ -37,7 +37,7 @@ Design rules (from the brief, do not weaken):
   a session whose account has not finished TOTP setup is limited to
   the setup page. The same TOTP module (ventoryn/totp.py) serves the
   admin login and the customer sign-in — one implementation.
-- ATTRIBUTION: a sale is Ventoryn's only where the Ventoryn
+- ATTRIBUTION: a sale is Axionory's only where the Axionory
   signature (ventoryn/signature.py — UTM + signed vtn_ tag) reaches the
   payment. Otherwise it is unattributed revenue, never guessed.
 - REVENUE PRIVACY: the per-site "show my revenue" toggle is
@@ -83,7 +83,7 @@ from ventoryn.totp import (
 # Configuration (environment only)
 # ---------------------------------------------------------------------------
 
-PLAN_NAME = "Ventoryn Growth"
+PLAN_NAME = "Axionory Growth"
 PLAN_PRICE_USD = 20  # $20/month — Spencer's decision (2026-11-08).
 PLAN_PRICE_LABEL = "$20/month"
 
@@ -233,7 +233,7 @@ class SaasConfig:
     social_daily_cap_usd: float = 10.00
     social_account_monthly_cap_usd: float = 50.00
     social_site_monthly_cap_usd: float = 25.00
-    #: IndexNow key (VENTORYN_INDEXNOW_KEY) for submitting Ventoryn's
+    #: IndexNow key (VENTORYN_INDEXNOW_KEY) for submitting Axionory's
     #: own public pages to search engines that support the protocol
     #: (Bing, and by extension Brave Search). Empty means the key
     #: verification route and submission are both unavailable.
@@ -833,16 +833,16 @@ LIVE_WINDOW_MINUTES = 5
 DEFAULT_CONNECTIONS = (
     ("reddit", "not_connected",
      "Not connected — a Reddit app registration is needed before "
-     "Ventoryn can post or reply as you."),
+     "Axionory can post or reply as you."),
     ("x", "not_connected",
      "Not connected — an X app registration is needed before "
-     "Ventoryn can post or reply as you."),
+     "Axionory can post or reply as you."),
     ("facebook", "not_connected",
      "Not connected — a Meta app registration is needed before "
-     "Ventoryn can post to your Page."),
+     "Axionory can post to your Page."),
     ("instagram", "not_connected",
      "Not connected — a Meta app registration is needed before "
-     "Ventoryn can post to your Business account."),
+     "Axionory can post to your Business account."),
     ("plausible", "not_connected",
      "Not connected — add your Plausible site domain and API key to "
      "see real visitors here."),
@@ -864,52 +864,52 @@ CONNECTION_SCOPES: dict[str, str] = {
     # out under. Never DMs, never account settings.
     "reddit": "submit read identity",
     # X OAuth 2.0: post + read. Never DMs (X has no DM scope in the
-    # free tier and Ventoryn never asks for it).
+    # free tier and Axionory never asks for it).
     "x": "tweet.read tweet.write users.read offline.access",
     # Facebook: list Pages, read engagement, publish to a Page.
     # No comment/reply permission — the pilot posts only.
     "facebook": "pages_show_list pages_read_engagement pages_manage_posts",
     # Instagram: read the Business account, publish to it. No DM or
-    # messaging scope — Ventoryn never asks for it.
+    # messaging scope — Axionory never asks for it.
     "instagram": "instagram_business_basic instagram_business_content_publish",
     # Plausible API key: read-only stats for the site.
     "plausible": "stats:read",
     # Stripe sales: the customer's own webhook — read payments only.
-    # Ventoryn never charges or refunds through it.
+    # Axionory never charges or refunds through it.
     "stripe_sales": "read payments",
 }
 
 #: Plain-words consent text shown on each Connect screen: exactly
-#: what Ventoryn can do as the customer, and what it cannot do.
+#: what Axionory can do as the customer, and what it cannot do.
 CONNECTION_CONSENT: dict[str, str] = {
-    "reddit": ("Ventoryn can post and reply on Reddit as you, and read "
+    "reddit": ("Axionory can post and reply on Reddit as you, and read "
                "your Reddit identity so replies go out under your name. "
                "It cannot send direct messages, change your account "
                "settings, or do anything else on Reddit. Nothing is "
                "published without your approval first."),
-    "x": ("Ventoryn can post and reply on X as you. It cannot send "
+    "x": ("Axionory can post and reply on X as you. It cannot send "
           "direct messages, change your account settings, or do "
           "anything else on X. Nothing is published without your "
           "approval first. X's API is paid and rate-limited, so "
           "posting on X is slower and may cost extra."),
-    "facebook": ("Ventoryn can publish posts to your Facebook Page "
+    "facebook": ("Axionory can publish posts to your Facebook Page "
                  "as you. It cannot send direct messages, change your "
                  "Page settings, or do anything else on Facebook. "
                  "Nothing is published without your approval first. "
                  "Posting to a customer's Page needs Meta's Business "
                  "Verification + App Review first — until that clears, "
                  "connecting works only for the operator's own Pages."),
-    "instagram": ("Ventoryn can publish posts to your Instagram "
+    "instagram": ("Axionory can publish posts to your Instagram "
                   "Business account as you. It cannot send direct "
                   "messages or do anything else on Instagram. Nothing "
                   "is published without your approval first. Caption "
                   "links are plain text, not clickable — the link in "
                   "a post is not tappable. Posting needs Meta's "
                   "Business Verification + App Review first."),
-    "plausible": ("Ventoryn can read visitor counts for your site from "
+    "plausible": ("Axionory can read visitor counts for your site from "
                   "Plausible. It cannot change your Plausible account "
                   "or see any other site on it."),
-    "stripe_sales": ("Ventoryn can read payments on your Stripe account "
+    "stripe_sales": ("Axionory can read payments on your Stripe account "
                      "so it can count paying customers. It cannot charge "
                      "a card, refund a payment, or change anything in "
                      "your Stripe account."),
@@ -929,10 +929,10 @@ CONNECTION_REVOKE_NOTE: dict[str, str] = {
     "reddit": "The Reddit token is revoked at Reddit when you disconnect.",
     "x": "The X token is revoked at X when you disconnect.",
     "facebook": ("Meta has no API to revoke a Page token — remove "
-                 "Ventoryn in your Facebook Settings > Business "
+                 "Axionory in your Facebook Settings > Business "
                  "integrations after disconnecting."),
     "instagram": ("Meta has no API to revoke an Instagram token — "
-                  "remove Ventoryn in your Facebook Settings > Business "
+                  "remove Axionory in your Facebook Settings > Business "
                   "integrations after disconnecting."),
     "plausible": ("Plausible has no API to delete a key — remove this "
                   "key in your Plausible dashboard after disconnecting."),
@@ -1958,7 +1958,7 @@ class SaasStore:
 
     def set_revenue_show(self, site_id: str, show: bool) -> None:
         """The customer's revenue-AMOUNT display choice ("Show my
-        revenue on Ventoryn"). OFF hides every dollar figure for the
+        revenue on Axionory"). OFF hides every dollar figure for the
         site — report, funnel and admin totals — while the
         paying-customer count still increments as verified sales land.
         The count display is a separate setting (set_count_show)."""
@@ -1969,7 +1969,7 @@ class SaasStore:
 
     def set_count_show(self, site_id: str, show: bool) -> None:
         """The customer's paying-customer COUNT display choice
-        ("Show my customer count on Ventoryn"). OFF hides the count
+        ("Show my customer count on Axionory"). OFF hides the count
         from the report, the funnel and the admin totals — the sales
         are still recorded and still count as verified customers
         internally. Separate from the revenue-amount setting."""
@@ -1980,7 +1980,7 @@ class SaasStore:
 
     def set_details_show(self, site_id: str, show: bool) -> None:
         """The customer's conversion-DETAILS display choice ("Show
-        conversion details on Ventoryn"). OFF hides the per-sale
+        conversion details on Axionory"). OFF hides the per-sale
         rows (which campaign, when, attribution state) from the site
         page and the report. Separate from the revenue-amount and
         count settings."""
@@ -1996,7 +1996,7 @@ class SaasStore:
         return _row_dict(row) if row else None
 
     def all_sites(self) -> list[dict]:
-        """Every website on Ventoryn, oldest first (autopilot)."""
+        """Every website on Axionory, oldest first (autopilot)."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM saas_sites ORDER BY created_at").fetchall()
@@ -2111,7 +2111,7 @@ class SaasStore:
                           payment_intent_id: str = "") -> dict | None:
         """Record one paying customer. Returns None when the same Stripe
         event was already recorded (webhooks redeliver).
-        `attribution` is "ventoryn" only when the Ventoryn signature
+        `attribution` is "ventoryn" only when the Axionory signature
         reached the payment (see handle_customer_sale_webhook);
         otherwise "unattributed" — never guessed. `livemode=False`
         (a Stripe TEST MODE event) is still recorded — never silently
@@ -2295,7 +2295,7 @@ class SaasStore:
     def conversion_status_counts(self, site_ids: list[str]) -> dict:
         """Verified / pending / unattributed paying customers across
         the given sites — the Conversion Status breakdown.
-        Verified = the Ventoryn signature reached the payment
+        Verified = the Axionory signature reached the payment
         (attribution "ventoryn"). Pending = owner-recorded sales
         (source "manual") that no Stripe event has verified yet.
         Unattributed = a real Stripe payment with no signature.
@@ -2380,7 +2380,7 @@ class SaasStore:
         connected); the paying-customer count includes ONLY sites
         whose count toggle is ON. A site with either toggle OFF
         contributes nothing to that figure — no dollar figure and no
-        count from it appears anywhere on Ventoryn."""
+        count from it appears anywhere on Axionory."""
         total_cents = 0
         currency = "usd"
         paying = 0
@@ -2404,7 +2404,7 @@ class SaasStore:
         return {"total_cents": total_cents, "currency": currency,
                 "paying_customers": paying}
 
-    # -- Ventoryn signature records ----------------------------------------
+    # -- Axionory signature records ----------------------------------------
     def record_signature(self, site_id: str, tag: str, action_id: str,
                          agent: str, job_id: str, target_url: str) -> dict:
         """Record a signed link when it is created: what it points
@@ -3219,7 +3219,7 @@ def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
     if draft["status"] not in ("pending", "scheduled"):
         return False, f"This draft was already {draft['status']}."
     # Every post costs something on X's pay-per-use API: $0.20 with a
-    # link (every Ventoryn link post), $0.015 without (reported rates,
+    # link (every Axionory link post), $0.015 without (reported rates,
     # ventoryn/campaign_cost.py). Recorded in whole cents, rounded up.
     from ventoryn.campaign_cost import x_post_cost_cents
 
@@ -3389,7 +3389,7 @@ def verify_webhook_signature(payload: bytes, header: str, secret: str,
 
 def handle_platform_webhook(store: SaasStore, config: SaasConfig,
                             event: dict) -> str:
-    """Apply one Ventoryn-subscription webhook event. Returns "ok",
+    """Apply one Axionory-subscription webhook event. Returns "ok",
     "duplicate" (redelivery — already processed), or "ignored"
     (an event this shell does not act on). Grants the monthly credit
     allowance exactly once per checkout and once per renewal invoice."""
@@ -3512,9 +3512,9 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
     """Apply one customer-site sale event (the customer's own Stripe
     account, verified against that site's stored webhook secret).
     The sale is attributed only when the event carries
-    metadata.ventoryn_site_id matching the site AND the Ventoryn
+    metadata.ventoryn_site_id matching the site AND the Axionory
     signature tag (metadata.ventoryn_tag, or utm_content) matches a
-    link Ventoryn recorded for this site. A payment without the tag
+    link Axionory recorded for this site. A payment without the tag
     is recorded as unattributed revenue — never assigned to a post
     by guesswork. A Stripe TEST MODE event (``livemode`` false) is
     still recorded, but excluded from every real count and revenue
@@ -3607,7 +3607,7 @@ def check_posting_allowed(store: SaasStore, account: dict, site_id: str,
         if kind in APP_REGISTRATION_KINDS and not config.app_registered(kind):
             return False, (
                 f"Not connected — a {kind.capitalize()} app registration "
-                "is needed before Ventoryn can post or reply as you.")
+                "is needed before Axionory can post or reply as you.")
         return False, "Not connected — connect this account first."
     return True, "Connected — posting is allowed (drafts first, your approval before anything ships)."
 

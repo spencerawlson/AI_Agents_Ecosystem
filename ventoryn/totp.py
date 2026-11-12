@@ -70,7 +70,7 @@ def verify_code(secret: str, code: str, when: float | None = None) -> bool:
     return False
 
 
-def provisioning_uri(secret: str, account: str, issuer: str = "Ventoryn") -> str:
+def provisioning_uri(secret: str, account: str, issuer: str = "Axionory") -> str:
     """otpauth:// URI for the authenticator app (label + issuer)."""
     label = f"{issuer}:{account}".replace(" ", "%20")
     return (

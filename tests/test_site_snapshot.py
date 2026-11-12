@@ -129,7 +129,7 @@ def test_traffic_uses_ventoryn_analytics_when_installed():
         SITE, env={}, page_fetch=fake_pages, json_get=lambda *a, **k: (0, None),
         analytics=lambda sid: {"installed": True, "visitors": 321, "pageviews": 900})
     t = _by_label(data["traffic"])
-    assert "321 visitors" in t["Visitors, last 30 days (Ventoryn Analytics)"]["value"]
+    assert "321 visitors" in t["Visitors, last 30 days (Axionory Analytics)"]["value"]
 
 
 @pytest.mark.parametrize("url", ["http://127.0.0.1/", "http://169.254.169.254/",

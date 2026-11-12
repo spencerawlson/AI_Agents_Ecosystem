@@ -1,4 +1,4 @@
-"""Inline SVG icons for the Ventoryn platform shell.
+"""Inline SVG icons for the Axionory platform shell.
 
 Every icon is a hand-drawn 24x24 stroke icon (``stroke="currentColor"``,
 ``fill="none"``, stroke-width 2, round caps/joins). No emoji, no font

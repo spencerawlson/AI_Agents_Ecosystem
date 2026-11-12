@@ -1,4 +1,4 @@
-"""Background site-analysis jobs for the Ventoryn dashboard.
+"""Background site-analysis jobs for the Axionory dashboard.
 
 The /ops page's "Analyze a site" panel and the landing page's free
 preview start a job here; the same ``ecosystem.analyze`` pipeline

@@ -1,4 +1,4 @@
-"""Platform sidebar pages (Ventoryn UI integration).
+"""Platform sidebar pages (Axionory UI integration).
 
 The five new sidebar pages — /campaigns, /agents, /analytics,
 /integrations, /customers — plus the sidebar contract on every
@@ -277,7 +277,7 @@ def test_integrations_states_plainly_reddit_x_need_app_registration():
     assert "Not available" in r.text  # Reddit
     # The X app page: the not-registered state is stated plainly.
     x = client.get("/integrations/x")
-    assert "has not set up Ventoryn" in x.text
+    assert "has not set up Axionory" in x.text
 
 
 # ---------------------------------------------------------------------------

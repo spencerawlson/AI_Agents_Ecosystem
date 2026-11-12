@@ -1,4 +1,4 @@
-"""Ventoryn professional unification (2026-11-08).
+"""Axionory professional unification (2026-11-08).
 
 One consistent look across the whole platform, like Aegis — the
 same shell, sidebar and header on every signed-in page — and no

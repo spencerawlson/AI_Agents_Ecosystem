@@ -1,6 +1,6 @@
 """Public legal pages: /privacy and /terms.
 
-Written from what Ventoryn actually does (see ventoryn/analytics.py,
+Written from what Axionory actually does (see ventoryn/analytics.py,
 saas.py, saas_routes.py, campaigns.py, core/media_providers.py) — update
 them whenever a new provider or a new kind of data is added. Operator:
 Spencer Rawlson, Quebec, Canada; Quebec's Law 25 requires naming the
