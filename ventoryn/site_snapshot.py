@@ -150,13 +150,21 @@ class _Head(HTMLParser):
         self.links: list[str] = []
         self._in_title = False
         self._in_h1 = False
+        # Depth inside <svg>: a <title> there is the accessible name of a
+        # graphic element (e.g. a map labelling each region), not the page
+        # title — it must not be counted (ShipItAyiti's Haiti map labels
+        # every department this way, which once read as a 163-char title).
+        self._svg_depth = 0
 
     def handle_starttag(self, tag, attrs):
         a = {k.lower(): (v or "") for k, v in attrs}
-        if tag == "html":
+        if tag == "svg":
+            self._svg_depth += 1
+        elif tag == "html":
             self.lang = a.get("lang", "")
         elif tag == "title":
-            self._in_title = True
+            if self._svg_depth == 0:
+                self._in_title = True
         elif tag == "meta":
             key = (a.get("name") or a.get("property") or "").lower()
             if key and key not in self.meta:
@@ -171,7 +179,9 @@ class _Head(HTMLParser):
             self.links.append(a["href"])
 
     def handle_endtag(self, tag):
-        if tag == "title":
+        if tag == "svg":
+            self._svg_depth = max(0, self._svg_depth - 1)
+        elif tag == "title":
             self._in_title = False
         elif tag == "h1":
             self._in_h1 = False

@@ -313,6 +313,38 @@ def test_tip_badge_is_round_green_info():
     assert ">?</button>" not in html
 
 
+def test_title_ignores_svg_titles():
+    # Regression: <title> elements inside an inline SVG (a map labelling
+    # each region) are accessible names, not the page title. The parser
+    # used to concatenate them onto the real title — ShipItAyiti's Haiti
+    # map read as a 163-character title for a 47-character one.
+    svg_home = """<!doctype html><html lang="en"><head>
+<title>ShipItAyiti — The reliable way to ship to Haiti</title>
+<meta name="description" content="Boxes, barrels, orders from any online store, and freight from Montreal to every town in Haiti.">
+</head><body><h1>The reliable way to ship to Haiti.</h1>
+<svg viewBox="0 0 100 100" role="img" aria-label="Map of Haiti">
+<g><title>Montreal</title><path d="M1 1"/></g>
+<g><title>Miami (soon)</title><path d="M2 2"/></g>
+<g><title>Cap-Haïtien</title><path d="M3 3"/></g>
+<g><title>Nippes</title><path d="M4 4"/></g>
+</svg></body></html>"""
+
+    def fake_svg_pages(url):
+        if url.endswith(("/robots.txt", "/sitemap.xml", "/llms.txt")):
+            return {"status": 404, "body": "", "headers": {}, "bytes": 0, "ms": 5}
+        return {"status": 200, "final_url": "http://svg.example.com/", "body": svg_home,
+                "headers": {}, "bytes": len(svg_home), "ms": 100}
+
+    data = site_snapshot.collect(
+        {"id": "svg1", "url": "http://svg.example.com", "host": "svg.example.com"},
+        env={"BRAVE_SEARCH_API_KEY": "brave-k"},
+        page_fetch=fake_svg_pages, json_get=fake_bad_json)
+    specs = _by_label(data["specs"])
+    assert specs["Title"]["value"] == "47 characters"
+    assert specs["Title"]["status"] == "ok"
+    assert data["preview"]["title"] == "ShipItAyiti — The reliable way to ship to Haiti"
+
+
 def test_good_site_has_only_two_tips():
     calls = []
     data = site_snapshot.collect(SITE, env={}, page_fetch=fake_pages,
