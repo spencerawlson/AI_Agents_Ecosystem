@@ -1,4 +1,4 @@
-"""HTTP hardening for the Ventoryn app.
+"""HTTP hardening for the Axionory app.
 
 install(app, config) adds, for every response:
 

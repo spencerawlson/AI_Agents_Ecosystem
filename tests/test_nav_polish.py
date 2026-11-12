@@ -1,4 +1,4 @@
-"""Nav polish + admin refinement (Ventoryn).
+"""Nav polish + admin refinement (Axionory).
 
 - One shared platform shell on every signed-in page: a purple
   sidebar (9 items, in order: Overview, Campaigns, Agents,
@@ -330,7 +330,7 @@ def test_customer_my_account_plan_only_no_pitch():
     r = client_a.get("/account/dashboard")
     assert r.status_code == 200
     assert "My account" in r.text
-    assert "Ventoryn Growth" in r.text  # the plan name
+    assert "Axionory Growth" in r.text  # the plan name
     # Websites + Recent jobs moved to the Websites page (/portfolio).
     assert "Your websites" not in r.text
     assert "Recent jobs" not in r.text

@@ -3,7 +3,7 @@
 - Tokens are stored ENCRYPTED at rest, server-side only, with the
   minimum scopes. Disconnect REVOKES at the provider, not just
   locally. Per-account "pause all posting" switch.
-- Consent text states plainly what Ventoryn can and cannot do.
+- Consent text states plainly what Axionory can and cannot do.
 - Revenue privacy: per-account scoped; the display toggle is
   respected everywhere including admin totals (off = no dollar
   figure anywhere; the sale still counts as a verified customer);
@@ -17,7 +17,7 @@
 - Deletion: disconnecting or deleting an account deletes its tokens
   and revenue data and revokes access at the provider.
 - Attribution honesty: a sale is attributed only where the Stripe
-  metadata carries the Ventoryn tag; otherwise unattributed.
+  metadata carries the Axionory tag; otherwise unattributed.
 - X's API is paid and rate-limited — the X connection page says so.
 """
 

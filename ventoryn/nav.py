@@ -1,4 +1,4 @@
-"""The Ventoryn platform shell: purple sidebar + app header.
+"""The Axionory platform shell: purple sidebar + app header.
 
 This replaces the old hamburger header. Every signed-in page renders
 inside the platform shell (``ventoryn.ui.page`` with ``sidebar=`` +
@@ -86,7 +86,7 @@ def esc(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 SIDEBAR_CSS = """
-/* Ventoryn platform shell: navy sidebar + tinted workspace — the same
+/* Axionory platform shell: navy sidebar + tinted workspace — the same
    navy / violet as the landing page and its product preview. */
 .app-layout { display: grid; grid-template-columns: 252px minmax(0, 1fr);
   min-height: 100vh; width: 100%; background: var(--v-bg, #f6f5fb); }
@@ -386,7 +386,7 @@ def sidebar_html(current: str | None, is_operator: bool, *,
     return (
         f"<aside class='app-sidebar' id='app-sidebar'>"
         f"<a class='sidebar-brand' href='/ops'>"
-        f"<span class='brand-mark'>V</span> Ventoryn</a>"
+        f"<span class='brand-mark'>A</span> Axionory</a>"
         f"<nav class='app-nav' aria-label='Platform'>{items}{admin}</nav>"
         f"<div class='growth-plan'>"
         f"<div class='growth-title'>Growth Plan</div>"
@@ -495,7 +495,7 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"{_bell_html(alerts, badge_html)}"
         f"<div class='avatar-menu'>"
         f"<button class='avatar' type='button' aria-haspopup='true' "
-        f"aria-expanded='false' aria-label='Account menu'>V</button>"
+        f"aria-expanded='false' aria-label='Account menu'>A</button>"
         f"<div class='avatar-dropdown' hidden>"
         f"<a href='/account/dashboard'>My account</a>"
         f"<a href='/account/subscribe'>Subscribe</a>"

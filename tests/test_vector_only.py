@@ -1,6 +1,6 @@
-"""Vector only — no bitmap images anywhere on Ventoryn.
+"""Vector only — no bitmap images anywhere on Axionory.
 
-Every graphic on Ventoryn (landing, signed-in pages, admin) is
+Every graphic on Axionory (landing, signed-in pages, admin) is
 vector (inline SVG). No PNG, JPG, WebP, or GIF is rendered on any
 page. The og-image is intentionally ABSENT (it would be a bitmap,
 used only by external link previews, never rendered on a page) —
@@ -10,7 +10,7 @@ ONE deliberate exception (Spencer, 2026-11-09): the website snapshot's
 screenshot of the customer's OWN site, shown only on that owner's site
 page and served by the owner-only route
 /websites/sites/<id>/snapshot-image. It is customer content, not a
-Ventoryn graphic. The template scan below allows exactly that <img>
+Axionory graphic. The template scan below allows exactly that <img>
 and nothing else.
 """
 
@@ -100,7 +100,7 @@ def test_no_bitmap_in_any_rendered_page():
 
 
 def test_no_bitmap_reference_in_page_templates():
-    # The templates/routes that render Ventoryn pages must not
+    # The templates/routes that render Axionory pages must not
     # reference a bitmap file at all. (core/video_render.py's .png
     # intermediates for MP4s and the analyzer's reads of OTHER sites'
     # og:image are not page templates and are out of scope.)

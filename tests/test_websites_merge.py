@@ -26,7 +26,7 @@ def test_site_card_carries_the_funnel_and_link():
     html = client.get("/portfolio").text
     # One row per website: key numbers here, full funnel on its page.
     assert "Visitors (30 days)" in html and "Paying customers" in html
-    # Open goes to the website's page in Ventoryn, never off-site.
+    # Open goes to the website's page in Axionory, never off-site.
     assert f"<td><a href='/websites/sites/{site['id']}'>Open</a></td>" in html
     assert "href='https://shop.example.com' target='_blank'" not in html
     assert (f"<a class='v-site-name' href='/websites/sites/{site['id']}'>"

@@ -1,4 +1,4 @@
-"""The Ventoryn signature — how agent work is followed to checkout.
+"""The Axionory signature — how agent work is followed to checkout.
 
 Every agent output that contains a link (post, reply, article,
 recommendation) carries the signature:
@@ -9,7 +9,7 @@ recommendation) carries the signature:
   per site + per agent action and RECORDED when the link is created
   (what it points to, which agent, which job, when)
 
-On the revenue side a payment is attributed to Ventoryn work ONLY
+On the revenue side a payment is attributed to Axionory work ONLY
 where the signature reaches the payment (the tag in Stripe metadata
 / the webhook match). A payment without it is reported as
 unattributed revenue — never assigned to a post by guesswork.
@@ -75,7 +75,7 @@ def parse_tag(tag: str) -> tuple[str, str] | None:
 
 
 def sign_url(url: str, site_slug: str, agent: str, tag: str) -> str:
-    """Add the Ventoryn signature to a link: UTM parameters plus
+    """Add the Axionory signature to a link: UTM parameters plus
     the signed tag as ``utm_content``. Existing query parameters
     are kept; a pre-existing utm_* is overwritten (the signature
     is authoritative)."""

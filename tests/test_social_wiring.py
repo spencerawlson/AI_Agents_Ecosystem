@@ -83,7 +83,7 @@ def _seed_site(store, account, url="https://ada.example.com"):
 
 
 def _make_draft(client, store, site_id, provider="facebook",
-                text="Hello from Ventoryn",
+                text="Hello from Axionory",
                 target_url="https://ada.example.com/welcome"):
     r = client.post(
         f"/websites/sites/{site_id}/social/{provider}/drafts",
@@ -295,7 +295,7 @@ def test_site_page_shows_founding_customer_zero_and_social_sections():
     # while the apps are unregistered.
     assert "Connect with Facebook" not in r.text
     assert "Connect with Instagram" not in r.text
-    assert "registers Ventoryn's Meta app" in r.text
+    assert "registers Axionory's Meta app" in r.text
     # No First-100 branding anywhere customer-facing.
     assert "First 100" not in r.text
     assert "first 100" not in r.text
@@ -356,9 +356,9 @@ def test_first100_counts_verified_only():
     # Main's paying count is live-mode only (paying_customer_count
     # excludes livemode=0), so the manual sale is recorded but not
     # counted as paying — 1 paying, not 2. The Stripe sale is the
-    # one verified customer and the one Ventoryn-attributed sale.
+    # one verified customer and the one Axionory-attributed sale.
     assert "1 paying customers recorded" in r.text
-    assert "1 Ventoryn-attributed" in r.text
+    assert "1 Axionory-attributed" in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ def test_draft_approve_shows_on_approvals_and_ops():
     r = client.get("/approvals")
     assert r.status_code == 200
     assert "Pending (1)" in r.text
-    assert "Hello from Ventoryn" in r.text
+    assert "Hello from Axionory" in r.text
     assert "Cost if published" in r.text
     assert "do not quote $0 to a customer" in r.text
     assert "$0.00" not in r.text
@@ -388,7 +388,7 @@ def test_draft_approve_shows_on_approvals_and_ops():
     r = client.get("/ops")
     assert r.status_code == 200
     assert "Needs your decision" in r.text
-    assert "Hello from Ventoryn" in r.text
+    assert "Hello from Axionory" in r.text
     assert "Cost if published" in r.text
 
     _reject_draft(client, site["id"], "facebook", draft["id"])
@@ -460,7 +460,7 @@ def test_publish_with_fake_client_records_post_and_spend(monkeypatch):
     # The link is signed at approval — UTM + the vtn_ tag, never a
     # bare destination — and it travels to the provider exactly once.
     text, link = fake.calls[0]
-    assert text == "Hello from Ventoryn"
+    assert text == "Hello from Axionory"
     assert "utm_source=ventoryn" in (link or "")
     assert "vtn_" in (link or "")
     # Spend is recorded only on a confirmed publish. Facebook has no

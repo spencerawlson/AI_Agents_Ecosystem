@@ -1,4 +1,4 @@
-"""Ventoryn UI: one set of design tokens and one page shell.
+"""Axionory UI: one set of design tokens and one page shell.
 
 Every server-rendered page (signed-in app pages, the SaaS account
 pages, the admin board, the operator tools) is built with ``page()``
@@ -156,7 +156,7 @@ input:focus, select:focus, textarea:focus { outline: none;
   margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 .v-back { display: inline-block; margin-top: 18px; font-weight: 600; }
-/* Copy-paste code (the Ventoryn Analytics snippet): wraps, never
+/* Copy-paste code (the Axionory Analytics snippet): wraps, never
    widens the page. */
 .v-snippet { background: var(--v-navy); color: #e9e4ff; padding: 14px 16px;
   border-radius: var(--v-radius-sm); white-space: pre-wrap;
@@ -187,7 +187,7 @@ DOC_CSS = """
 
 
 def _own_snippet() -> str:
-    """Ventoryn Analytics on Ventoryn's own pages (see analytics.own_snippet)."""
+    """Axionory Analytics on Axionory's own pages (see analytics.own_snippet)."""
     from ventoryn.analytics import own_snippet
 
     return own_snippet()
@@ -263,7 +263,7 @@ def page(title: str, inner: str, *, header: str = "",
          extra_css: str = "", body_class: str = "",
          head_extra: str = "", sidebar: str = "",
          page_head: str = "") -> str:
-    """A complete HTML document in the Ventoryn shell.
+    """A complete HTML document in the Axionory shell.
 
     ``header`` is an app bar (legacy, unused now that every
     signed-in page — admin included — uses the platform shell) or
@@ -288,7 +288,7 @@ def page(title: str, inner: str, *, header: str = "",
 
         return (
             "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-            f"<title>{esc(title)} — Ventoryn</title>"
+            f"<title>{esc(title)} — Axionory</title>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<meta name='theme-color' content='#0b0e1e'>"
             f"<style>{BASE_CSS}{SIDEBAR_CSS}{extra_css}</style>{head_extra}{_own_snippet()}"
@@ -298,7 +298,7 @@ def page(title: str, inner: str, *, header: str = "",
             f"{SIDEBAR_JS}</body></html>")
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        f"<title>{esc(title)} — Ventoryn</title>"
+        f"<title>{esc(title)} — Axionory</title>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta name='theme-color' content='#0b0e1e'>"
         f"<style>{BASE_CSS}{extra_css}</style>{head_extra}{_own_snippet()}"

@@ -296,7 +296,7 @@ def test_dashboard_honest_unavailable_states(client, store):
     # My account shows the plan name only — the Subscribe pitch
     # ($20/month) and the credit table live only on the Subscribe
     # page, never here.
-    assert "Ventoryn Growth" in r.text
+    assert "Axionory Growth" in r.text
     assert "$20/month" not in r.text
     assert "Subscribe — $20/month" not in r.text
     assert "What a credit buys" not in r.text

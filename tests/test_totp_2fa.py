@@ -1,4 +1,4 @@
-"""Forced TOTP two-factor + zero-trust (Ventoryn).
+"""Forced TOTP two-factor + zero-trust (Axionory).
 
 - Two-factor is MANDATORY for every account from the first sign-in:
   a fresh account cannot reach /ops or any product page until 2FA

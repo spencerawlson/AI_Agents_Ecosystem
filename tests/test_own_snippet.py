@@ -1,4 +1,4 @@
-"""Ventoryn tracks itself with Ventoryn Analytics (site 8e7c68c8885a1ef3e072a01c)."""
+"""Axionory tracks itself with Axionory Analytics (site 8e7c68c8885a1ef3e072a01c)."""
 
 import sys
 from pathlib import Path

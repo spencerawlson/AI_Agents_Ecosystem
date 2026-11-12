@@ -28,7 +28,7 @@ itself is exchange_long_lived_token.
 
 Instagram (via Meta login, same Graph endpoints): scopes
 ``instagram_business_basic instagram_business_content_publish``.
-No DM/messaging scope is ever requested — Ventoryn plans no DMs.
+No DM/messaging scope is ever requested — Axionory plans no DMs.
 
 X is deliberately not here: X OAuth stays inline on main
 (ventoryn/saas.py: x_auth_url, exchange_x_code, x_post,

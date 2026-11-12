@@ -90,3 +90,15 @@ def test_weekly_video_only_with_a_presenter_and_one_at_a_time(store, reports, mo
     assert "video_render" not in autopilot.due_jobs(store, store.get_site(site["id"]), later)
     store.set_video_review(job["id"], acct["id"], "approved")
     assert "video_render" in autopilot.due_jobs(store, store.get_site(site["id"]), later)
+
+
+def test_newest_agent_work_is_on_top_of_approvals(client, store, reports):
+    from ventoryn import campaigns
+
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://www.road2cissp.com")
+    campaigns.propose(store, site, [{"text": "Older post", "link": site["url"]}], days=1,
+                      posts_per_day=1, with_link=True, source="autopilot")
+    _video_job(store, acct, site, reports)  # made after the proposal
+    html = client.get("/approvals").text
+    assert html.index("<h2>Videos to review</h2>") < html.index("<h2>Campaign proposals (1)</h2>")

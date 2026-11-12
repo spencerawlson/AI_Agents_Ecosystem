@@ -1,4 +1,4 @@
-# Ventoryn — Live Ops
+# Axionory — Live Ops
 
 The dashboard's professional Overview:
 **http://localhost:8000/ops**. `/game` redirects to it (303) — the

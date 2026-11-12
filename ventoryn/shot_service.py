@@ -3,7 +3,7 @@
     python -m ventoryn.shot_service [--host 127.0.0.1] [--port 8210]
 
 Why a separate container: opening untrusted websites in a browser is the
-riskiest thing Ventoryn does. Chrome's sandbox needs a more permissive
+riskiest thing Axionory does. Chrome's sandbox needs a more permissive
 syscall filter than Docker's default, so the browser runs here instead
 of in the app: no database, no secrets file, no reports folder,
 read-only file system, all Linux capabilities dropped, memory/CPU/process
@@ -87,7 +87,7 @@ def make_handler(token: str, capture_fn):
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Ventoryn screenshot service")
+    parser = argparse.ArgumentParser(description="Axionory screenshot service")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8210)
     args = parser.parse_args(argv)

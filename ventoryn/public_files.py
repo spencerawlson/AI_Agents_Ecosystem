@@ -1,4 +1,4 @@
-"""robots.txt, sitemap.xml and llms.txt for Ventoryn's own public site.
+"""robots.txt, sitemap.xml and llms.txt for Axionory's own public site.
 
 Only the landing page is public; everything else needs a sign-in, so
 the sitemap lists just "/" and robots.txt keeps crawlers out of the
@@ -18,9 +18,9 @@ PRIVATE_PREFIXES = (
 )
 
 LLMS_TXT = """\
-# Ventoryn
+# Axionory
 
-> Ventoryn is an AI customer-acquisition service for websites. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities. You approve every action before anything happens, and progress is measured in verified paying customers, not page views.
+> Axionory is an AI customer-acquisition service for websites. You enter your website and connect your accounts; AI agents discover your audience, prepare campaigns, and identify opportunities. You approve every action before anything happens, and progress is measured in verified paying customers, not page views.
 
 ## What it does
 
@@ -36,7 +36,7 @@ SaaS founders, independent software developers, startup teams, online service bu
 
 ## Connections
 
-Per website: Reddit, X, Plausible (analytics), and Stripe (sales, read-only: Ventoryn can never charge or refund).
+Per website: Reddit, X, Plausible (analytics), and Stripe (sales, read-only: Axionory can never charge or refund).
 
 ## Pricing
 

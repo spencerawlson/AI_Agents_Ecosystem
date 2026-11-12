@@ -1,14 +1,14 @@
-"""Ventoryn Analytics: first-party, cookieless site analytics.
+"""Axionory Analytics: first-party, cookieless site analytics.
 
 A customer adds one line to their site:
 
     <script defer data-site="<site id>" src="https://ventoryn.app/v.js"></script>
 
-and Ventoryn records page views (plus custom events such as
+and Axionory records page views (plus custom events such as
 ``ventoryn('signup')``) for that site. This replaces the need for a
 Plausible account for the funnel, the traffic-source breakdown and —
 the part Plausible cannot do — evidence that a visitor arrived through
-a *signed Ventoryn link* (the ``vtn_`` tag in ``utm_content``).
+a *signed Axionory link* (the ``vtn_`` tag in ``utm_content``).
 
 Privacy (the Plausible model):
 - No cookies, no local storage, nothing stored on the visitor's device.
@@ -89,13 +89,13 @@ window.ventoryn=function(n){if(typeof n==='string'&&/^[a-z0-9_-]{1,40}$/i.test(n
 """
 
 
-#: Ventoryn's own site in Ventoryn Analytics (ventoryn.app tracks itself).
+#: Axionory's own site in Axionory Analytics (ventoryn.app tracks itself).
 #: VENTORYN_OWN_SITE_ID overrides it; "off" turns it off (e.g. dev/test).
 OWN_SITE_ID_DEFAULT = "8e7c68c8885a1ef3e072a01c"
 
 
 def own_site_id() -> str:
-    """Ventoryn's own site id, or "" when turned off / invalid."""
+    """Axionory's own site id, or "" when turned off / invalid."""
     import os
 
     site = os.environ.get("VENTORYN_OWN_SITE_ID", OWN_SITE_ID_DEFAULT).strip()
@@ -103,7 +103,7 @@ def own_site_id() -> str:
 
 
 def own_snippet() -> str:
-    """The analytics tag for Ventoryn's own pages. Same origin as the app,
+    """The analytics tag for Axionory's own pages. Same origin as the app,
     so the platform CSP ('self') already allows the script and beacon."""
     site = own_site_id()
     if not site:
@@ -153,7 +153,7 @@ class SiteAnalytics:
         self._conn.execute("INSERT INTO va_salts (day, salt) VALUES (?, ?)",
                            (day, salt))
         # Older salts are deleted: yesterday's visitors can no longer be
-        # re-identified, even by Ventoryn.
+        # re-identified, even by Axionory.
         self._conn.execute("DELETE FROM va_salts WHERE day < ?", (day,))
         return salt
 
@@ -183,7 +183,7 @@ class SiteAnalytics:
         tag = tag_from_url(url)
         if tag and not (parse_tag(tag) and
                         self._saas.get_signature_by_tag(site["id"], tag)):
-            tag = None  # only tags Ventoryn actually issued for this site
+            tag = None  # only tags Axionory actually issued for this site
         day = now.strftime("%Y-%m-%d")
         with self._lock, self._conn:
             salt = self._salt(day)
@@ -326,7 +326,7 @@ class SiteAnalytics:
 def funnel_cells(saas_store, site: dict, plausible_visitors_fn=None) -> tuple[str, str]:
     """(visitors_html, signups_html) for a site's funnel row.
 
-    Source of truth, in order: Ventoryn Analytics when its snippet has
+    Source of truth, in order: Axionory Analytics when its snippet has
     sent data; Plausible when connected; otherwise "unavailable". Never
     an invented number. ``plausible_visitors_fn(api_key, domain)`` is
     injected so callers keep their existing Plausible client."""
@@ -335,7 +335,7 @@ def funnel_cells(saas_store, site: dict, plausible_visitors_fn=None) -> tuple[st
     va = analytics_for(saas_store).summary(site["id"])
     if va["installed"]:
         visitors = (f"{va['visitors']:,} <span class='muted'>"
-                    f"(Ventoryn Analytics)</span>")
+                    f"(Axionory Analytics)</span>")
         signup = va["events"].get("signup")
         if signup:
             signups = f"{signup['count']:,}"
@@ -357,7 +357,7 @@ def funnel_cells(saas_store, site: dict, plausible_visitors_fn=None) -> tuple[st
     else:
         visitors = (f"<span class='unavailable'>unavailable — install "
                     f"<a href='/websites/sites/{_html.escape(site['id'])}"
-                    f"#ventoryn-analytics'>Ventoryn Analytics</a></span>")
+                    f"#ventoryn-analytics'>Axionory Analytics</a></span>")
     return visitors, signups
 
 
@@ -376,14 +376,14 @@ def check_install(site: dict, fetch=None) -> tuple[bool, str]:
         from core.site_audit import http_fetch as fetch
     status, body = fetch(site["url"])
     if status == 0:
-        return False, "Ventoryn could not reach your site."
+        return False, "Axionory could not reach your site."
     if status >= 400:
         return False, f"Your site answered HTTP {status}."
     if "/v.js" in body and site["id"] in body:
-        return True, ("The Ventoryn Analytics snippet is on your home page. "
+        return True, ("The Axionory Analytics snippet is on your home page. "
                       "Visits appear here as they happen.")
     if "/v.js" in body:
-        return False, ("A Ventoryn snippet is on the page, but with a "
+        return False, ("A Axionory snippet is on the page, but with a "
                        "different site id — copy the snippet above again.")
     return False, ("The snippet is not on your home page yet. Add it "
                    "inside <head> on every page, then check again.")

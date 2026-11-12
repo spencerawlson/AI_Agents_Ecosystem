@@ -1,4 +1,4 @@
-"""The "Analyze a site" panel on the Ventoryn dashboard (/ops) and the
+"""The "Analyze a site" panel on the Axionory dashboard (/ops) and the
 mobile crew carousel.
 
 The panel runs the same pipeline as the `analyze` CLI, in a background

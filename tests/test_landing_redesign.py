@@ -2,12 +2,12 @@
 reference-image reading (2026-11-08).
 
 - Images 1 + 2 are both the landing page: WORDING from image 1
-  ("Become a Ventoryn Founding Customer", "Let AI Find Them. You Approve
+  ("Become a Axionory Founding Customer", "Let AI Find Them. You Approve
   Every Move.", the five steps, the trust statements); DASHBOARD
   PREVIEW VISUAL from image 2 (light, clean dashboard panels with
   charts and tables) — the hero keeps image 1's navy background and
   copy, the preview inside it is rebuilt in image 2's light-panel
-  style with Ventoryn's acquisition content (verified-customer
+  style with Axionory's acquisition content (verified-customer
   summary, funnel, agents, approval queue, attribution), NOT image 2's
   multi-business content.
 - Image 3 is the attribution-first repositioning (report pages).
@@ -33,7 +33,7 @@ def test_hero_copy_exact():
     r = _landing()
     assert r.status_code == 200
     assert "AI-Powered Customer Acquisition" in r.text
-    assert "Become a Ventoryn" in r.text and "Founding Customer" in r.text
+    assert "Become a Axionory" in r.text and "Founding Customer" in r.text
     # The program name is gradient text (image 1's "100" was).
     assert 'class="grad">Founding Customer</span>' in r.text
     assert "Let AI Find Them. You Approve Every Move." in r.text
@@ -52,7 +52,7 @@ def test_hero_is_two_column_with_preview_inside():
     assert 'class="wrap hero-grid"' in r.text
     # The preview lives inside the hero now (no separate #preview section).
     assert 'id="preview"' not in r.text
-    assert "See what Ventoryn sees" not in r.text
+    assert "See what Axionory sees" not in r.text
     hero = r.text.split('<section class="hero"')[1].split("</section>")[0]
     assert 'class="preview"' in hero
 
@@ -123,7 +123,7 @@ def test_preview_agents_queue_attribution():
 
 def test_how_it_works_image1():
     r = _landing()
-    assert "Ventoryn" in r.text and "Works" in r.text
+    assert "Axionory" in r.text and "Works" in r.text
     assert "From your website to verified paying customers" in r.text
     assert "in 5 simple steps." in r.text
     for step in ("Enter Your Website", "Connect Your Accounts",
@@ -186,13 +186,13 @@ def test_pricing_from_verified_stripe_data():
 def test_faq_ten_items_with_2fa_in_ten():
     r = _landing()
     assert r.text.count("<details>") == 10
-    for q in ("What does Ventoryn do?",
-              "Will Ventoryn post without my approval?",
+    for q in ("What does Axionory do?",
+              "Will Axionory post without my approval?",
               "Which accounts can I connect?",
-              "How does Ventoryn verify paying customers?",
+              "How does Axionory verify paying customers?",
               "Do I need Stripe?",
               "Can I hide my revenue?",
-              "Does Ventoryn guarantee new customers?",
+              "Does Axionory guarantee new customers?",
               "Can I disconnect my accounts?",
               "How is my information protected?"):
         assert q in r.text

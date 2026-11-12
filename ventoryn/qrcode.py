@@ -14,7 +14,7 @@ from the ISO/IEC 18004 rules:
   computed at runtime
 
 Output is a matrix (list of rows of 0/1) plus an SVG renderer —
-Ventoryn is vector-only, so the QR code is drawn as SVG rects,
+Axionory is vector-only, so the QR code is drawn as SVG rects,
 never as a bitmap.
 """
 

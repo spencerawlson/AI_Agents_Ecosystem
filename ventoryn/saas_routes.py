@@ -1,4 +1,4 @@
-"""Customer-facing SaaS routes for Ventoryn (/account/...).
+"""Customer-facing SaaS routes for Axionory (/account/...).
 
 Registered by ventoryn.app.create_app() — the shell lives on the same
 dashboard process, so a customer signs in and manages their sites next
@@ -273,7 +273,7 @@ def _funnel_rows(store: SaasStore, site: dict,
     chose to hide. Nothing here is invented."""
     from ventoryn.analytics import funnel_cells
 
-    # Ventoryn Analytics first, Plausible as the fallback (plausible_key
+    # Axionory Analytics first, Plausible as the fallback (plausible_key
     # is kept in the signature for callers; funnel_cells reads the
     # connection itself).
     visitors_html, signups_html = funnel_cells(store, site,
@@ -547,11 +547,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         secret = store.get_totp_pending_secret(account["id"])
         if not secret:
             secret = store.begin_totp_setup(account["id"])["secret"]
-        uri = provisioning_uri(secret, account["email"], issuer="Ventoryn")
+        uri = provisioning_uri(secret, account["email"], issuer="Axionory")
         err = f"<p><strong>{esc(error)}</strong></p>" if error else ""
         inner = (f"<div class='card'><h2>Two-factor authentication — "
                  f"required</h2>{err}"
-                 "<p>Ventoryn requires two-factor authentication on every "
+                 "<p>Axionory requires two-factor authentication on every "
                  "account. It keeps your sites, your connections and your "
                  "revenue safe even if someone learns your Google password.</p>"
                  "<p>Scan this QR code with your authenticator app (Google "
@@ -725,7 +725,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if not config.x_oauth_configured or not config.app_registered("x"):
             return HTMLResponse(
                 _signed_page(site["url"],
-                      "<p>X is not available yet — Ventoryn's own app "
+                      "<p>X is not available yet — Axionory's own app "
                       "registration for it is still needed. No account "
                       "was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
@@ -824,7 +824,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 or not config.app_registered("facebook"):
             return HTMLResponse(
                 _signed_page(site["url"],
-                      "<p>Facebook is not available yet — Ventoryn's own "
+                      "<p>Facebook is not available yet — Axionory's own "
                       "Meta app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
@@ -915,7 +915,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             f"<option value='{esc(p['id'])}'>{esc(p['name'])}</option>"
             for p in pages)
         inner = (f"<div class='card'><h2>Pick your Facebook Page</h2>"
-                 "<p class='muted'>Ventoryn will publish to the Page "
+                 "<p class='muted'>Axionory will publish to the Page "
                  "you pick, only after you approve each post.</p>"
                  "<form method='post' action='/account/auth/facebook/page'>"
                  f"<input type='hidden' name='site_id' value='{esc(site_id)}'>"
@@ -973,7 +973,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 or not config.app_registered("instagram"):
             return HTMLResponse(
                 _signed_page(site["url"],
-                      "<p>Instagram is not available yet — Ventoryn's own "
+                      "<p>Instagram is not available yet — Axionory's own "
                       "Meta app registration for it is still needed. No "
                       "account was connected and nothing was stored.</p>"
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
@@ -1072,7 +1072,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             f"With a link (signed, so sales are counted)</label></div>"
             f"<p id='est-out'>{esc(describe_estimate(est))}</p>"
             f"<p class='muted'>{esc(X_RATE_SOURCE)}. X bills each post to the "
-            f"developer account behind Ventoryn's X app; Ventoryn stops posting "
+            f"developer account behind Axionory's X app; Axionory stops posting "
             f"at this website's monthly X budget.</p>"
             "<style>.v-estimate-inputs{display:flex;flex-wrap:wrap;gap:12px 20px;"
             "align-items:flex-end}.v-estimate-inputs label{margin:0}"
@@ -1369,7 +1369,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             twofa = ("<p>Two-factor authentication: "
                      "<strong>Not set up</strong> — "
                      "<a href='/account/two-factor/setup'>Set up "
-                     "two-factor</a>. You cannot use Ventoryn until it "
+                     "two-factor</a>. You cannot use Axionory until it "
                      "is set up.</p>")
         paused = bool(account.get("posting_paused"))
         pause = (f"<div class='card'><h2>Posting</h2><p>"
@@ -1473,7 +1473,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             totp_line = ("<p>Two-factor authentication: "
                          "<strong>Not set up</strong> — "
                          "<a href='/account/security'>Set up "
-                         "two-factor</a>. You cannot use Ventoryn until "
+                         "two-factor</a>. You cannot use Axionory until "
                          "it is set up.</p>")
         # The plan card: name + status + credit balance only. The
         # Subscribe pitch ($20/month) and the credit table ("what a
@@ -1571,7 +1571,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      f"<div class='card'><h2>{esc(PLAN_NAME)} — "
                      f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                      f"<ul><li>{config.monthly_credits:,} credits every "
-                     f"month</li><li>Your websites on Ventoryn, working "
+                     f"month</li><li>Your websites on Axionory, working "
                      f"to find new paying customers</li>"
                      f"<li>Growth reports per site</li></ul>"
                      f"<p><strong>Payments are not set up yet.</strong> "
@@ -1585,7 +1585,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  f"<div class='card'><h2>{esc(PLAN_NAME)} — "
                  f"{esc(PLAN_PRICE_LABEL)}</h2><p>What it includes:</p>"
                  f"<ul><li>{config.monthly_credits:,} credits every month"
-                 f"</li><li>Your websites on Ventoryn, working to find "
+                 f"</li><li>Your websites on Axionory, working to find "
                  f"new paying customers</li>"
                  f"<li>Growth reports per site</li></ul>"
                  f"{pending_note}"
@@ -1594,7 +1594,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  f"<button class='btn btn-primary' type='submit'>"
                  f"Subscribe — $20/month</button></form>"
                  f"<p class='muted'>Checkout is handled by Stripe. "
-                 f"Ventoryn never sees your card.</p></div>"
+                 f"Axionory never sees your card.</p></div>"
                  f"<h2>What a credit buys</h2>{_credit_table()}")
         return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
@@ -1646,7 +1646,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
-        inner = ("<div class='card'><p>Add the website Ventoryn will "
+        inner = ("<div class='card'><p>Add the website Axionory will "
                  "work on — it works to bring this site new paying "
                  "customers.</p>"
                  "<form method='post' action='/websites/sites'>"
@@ -1827,7 +1827,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 else:
                     form = (f"<p class='muted'>{esc(conn['note'])}</p>"
                             "<p class='muted'>To connect, the operator "
-                            "first registers Ventoryn's app in X's "
+                            "first registers Axionory's app in X's "
                             "developer console and sets the app "
                             "credentials — that step is not built here "
                             "and nothing is faked.</p>")
@@ -1887,7 +1887,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 else:
                     form = (f"<p class='muted'>{esc(conn['note'])}</p>"
                             "<p class='muted'>To connect, the operator "
-                            "first registers Ventoryn's Meta app in the "
+                            "first registers Axionory's Meta app in the "
                             "provider's developer console and sets the app "
                             "credentials — that step is not built here "
                             "and nothing is faked.</p>")
@@ -1946,7 +1946,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 else:
                     form = (f"<p class='muted'>{esc(conn['note'])}</p>"
                             "<p class='muted'>To connect, the operator "
-                            "first registers Ventoryn's Meta app in the "
+                            "first registers Axionory's Meta app in the "
                             "provider's developer console and sets the app "
                             "credentials — that step is not built here "
                             "and nothing is faked.</p>")
@@ -2022,7 +2022,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         f"'/websites/sites/{esc(site_id)}'>"
                         f"<label><input type='checkbox' name='revenue_show' "
                         f"{_chk(site.get('revenue_show'))}> Show my revenue "
-                        f"on Ventoryn</label>"
+                        f"on Axionory</label>"
                         f"<label><input type='checkbox' name='count_show' "
                         f"{_chk(site.get('count_show', 1))}> Show my "
                         f"customer count</label>"
@@ -2034,15 +2034,15 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                         "settings</button></p></form></div>")
         signature_card = ("<div class='card'><h2>How attribution "
                           "works</h2>"
-                          "<p>Every link Ventoryn creates for this site "
-                          "carries the Ventoryn signature: "
+                          "<p>Every link Axionory creates for this site "
+                          "carries the Axionory signature: "
                           "<code>utm_source=ventoryn</code> plus a signed "
                           "tag (e.g. <code>vtn_…</code>) that is recorded "
                           "when the link is created — which agent, which "
                           "job, when.</p>"
-                          "<p>A sale counts as Ventoryn-attributed only "
+                          "<p>A sale counts as Axionory-attributed only "
                           "when that tag reaches your checkout (it must be "
-                          "in the Stripe metadata). Use the Ventoryn links "
+                          "in the Stripe metadata). Use the Axionory links "
                           "and the tag follows to checkout. A sale without "
                           "the tag is reported as unattributed — never "
                           "guessed.</p></div>")
@@ -2068,7 +2068,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 f"<p><strong>{f100['verified']} / 100</strong> verified "
                 f"customers — {f100['remaining']} to go.</p>"
                 f"<p class='muted'>{f100['paying']} paying customers "
-                f"recorded · {f100['attributed']} Ventoryn-attributed · "
+                f"recorded · {f100['attributed']} Axionory-attributed · "
                 f"{f100['unattributed']} unattributed.</p>"
                 "<p class='muted'>Verified means a distinct customer "
                 "with a real Stripe payment. Owner-recorded manual "
@@ -2633,7 +2633,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     def _va_card(site: dict, check: str) -> str:
-        """Ventoryn Analytics: the snippet, live status, install check."""
+        """Axionory Analytics: the snippet, live status, install check."""
         from ventoryn.analytics import analytics_for, snippet
 
         va = analytics_for(store).summary(site["id"])
@@ -2643,7 +2643,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"{va['visitors']:,} visitors and {va['pageviews']:,} "
                       f"page views in the last 30 days"
                       + (f" · {va['signed_visits']:,} through signed "
-                         f"Ventoryn links" if va["signed_visits"] else "")
+                         f"Axionory links" if va["signed_visits"] else "")
                       + "</p>")
             top = "".join(f"<tr><td>{esc(src)}</td><td>{v:,}</td></tr>"
                           for src, v in va["sources"][:8])
@@ -2678,7 +2678,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"/analytics/check'><button class='btn' type='submit'>"
                 f"Check my installation</button></form>")
         return (f"<div class='card' id='ventoryn-analytics'>"
-                f"<h2>Ventoryn Analytics</h2>{notice}{status}{install}</div>")
+                f"<h2>Axionory Analytics</h2>{notice}{status}{install}</div>")
 
     @app.post("/websites/sites/{site_id}/snapshot")
     def snapshot_refresh(request: Request, site_id: str):
@@ -2760,9 +2760,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
     def _count_own_sale(event: dict) -> None:
-        """A Ventoryn subscription is also a paying customer of
+        """A Axionory subscription is also a paying customer of
         ventoryn.app itself. Its events are signed with the platform
-        secret (Ventoryn's own Stripe account), so they never reach the
+        secret (Axionory's own Stripe account), so they never reach the
         per-site sales secrets — count them for the own site here. Only
         the own site id is honoured, and only from a platform-verified
         event; the derived event id keeps redeliveries counted once."""
