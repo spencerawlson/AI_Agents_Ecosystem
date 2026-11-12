@@ -1019,7 +1019,7 @@ body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
   sans-serif; margin: 0; overflow-x: hidden; color: var(--ink);
   background: var(--bg); line-height: 1.55; }
 a { color: var(--violet-deep); }
-.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 20px; }
 .muted { color: var(--muted); font-size: 14px; }
 .btn { display: inline-block; min-height: 44px; line-height: 44px;
   padding: 0 22px; margin: 4px 4px 4px 0; border-radius: 10px;
@@ -1036,11 +1036,17 @@ a { color: var(--violet-deep); }
 .site-nav { position: sticky; top: 0; z-index: 50; background: var(--navy);
   color: #fff; }
 .site-nav .wrap { display: flex; align-items: center; gap: 16px;
-  min-height: 60px; }
+  min-height: 60px; max-width: none; padding: 0 24px; }
+/* The header spans the full viewport width (not the page container),
+   so the brand logo sits at the far left edge of the screen. */
 .brand { display: inline-flex; align-items: center; text-decoration: none; }
 .brand img { height: 52px; width: auto; display: block; }
-.nav-links { display: flex; gap: 4px; margin: 0 auto; list-style: none;
-  padding: 0; }
+.nav-links { display: flex; gap: 4px; margin: 0; list-style: none;
+  padding: 0; flex: 1; justify-content: center; }
+/* The <nav> wrapper is the flex item in the header (the <ul> sits
+   inside it): it takes the free space and centres the links, so the
+   nav stays centred between the far-left brand and the actions. */
+.site-nav nav { flex: 1; display: flex; justify-content: center; }
 .nav-links a { color: #d9d4f5; text-decoration: none; font-size: 15px;
   padding: 10px 12px; border-radius: 8px; min-height: 44px;
   display: inline-flex; align-items: center; }
@@ -1070,9 +1076,12 @@ a { color: var(--violet-deep); }
   transparent 60%), radial-gradient(900px 480px at 10% 110%, rgba(59,130,246,.35),
   transparent 55%), linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
   color: #fff; padding: 56px 0 64px; }
-.hero .wrap { max-width: 1280px; }
-.hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+.hero .wrap { max-width: 1680px; }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
   gap: 44px; align-items: start; }
+/* The preview takes the larger share (Spencer, 2026-11-12: the dashboard
+   screenshot should read bigger): at the 1680px hero wrap the image
+   renders ~1064px wide, just under its 1102px source, so it stays crisp. */
 .hero-copy { min-width: 0; text-align: left; }
 .hero h2.sub { text-align: left; }
 .hero p.lede { text-align: left; }
@@ -1130,82 +1139,22 @@ section.alt { background: var(--bg-tint); }
   box-shadow: 0 2px 10px rgba(109, 40, 217, 0.06); }
 .card h2 { margin-top: 0; font-size: 22px; color: var(--ink); }
 .big { font-size: 36px; font-weight: bold; color: var(--violet-deep); }
-/* -- dashboard preview (§5) — reference images 1 + 2: the hero keeps
-   image 1's navy background and copy; the preview inside it is rebuilt
-   in image 2's clean light-panel dashboard style (dark mini sidebar +
-   white cards on a pale background), carrying Axionory's acquisition
-   content — NOT image 2's multi-business content. -- */
-.preview { border: 1px solid #d9d2f2; border-radius: 20px; overflow: hidden;
-  background: #fff; box-shadow: 0 24px 60px rgba(11,14,30,.18);
-  text-align: left; min-width: 0; }
-.preview-bar { display: flex; align-items: center; gap: 8px;
-  background: var(--navy); color: #fff; padding: 12px 16px; }
-.preview-bar .dot { width: 12px; height: 12px; border-radius: 50%; }
-.preview-bar .title { margin-left: 8px; font-weight: 700; font-size: 15px; }
-.preview-bar .meta { margin-left: auto; display: flex; align-items: center;
-  gap: 10px; font-size: 13px; color: #d9d4f5; }
-.preview-bar .demo-tag { background: rgba(196,181,253,.2);
-  border: 1px solid rgba(196,181,253,.5); color: var(--violet-soft);
-  font-size: 12px; font-weight: bold; border-radius: 999px; padding: 3px 10px; }
-.preview-bar .range { background: rgba(255,255,255,.08);
-  border: 1px solid rgba(255,255,255,.2); border-radius: 8px; padding: 4px 10px;
-  font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
-.preview-bar .avatar { width: 28px; height: 28px; border-radius: 50%;
-  background: var(--violet); color: #fff; display: inline-flex;
-  align-items: center; justify-content: center; font-size: 13px;
-  font-weight: bold; }
-.preview-body { display: flex; align-items: stretch; }
-.preview-side { flex: 0 0 168px; background: var(--navy-2); color: #b9b3dd;
-  padding: 14px 10px; font-size: 13px; }
-.side-item { display: flex; align-items: center; gap: 8px; padding: 9px 10px;
-  border-radius: 8px; margin: 2px 0; }
-.side-item.active { background: rgba(139,92,246,.35); color: #fff;
-  font-weight: 600; }
-.side-item .badge { margin-left: auto; background: var(--violet); color: #fff;
-  border-radius: 999px; font-size: 11px; font-weight: bold; padding: 1px 7px; }
-.side-foot { margin-top: 16px; padding: 10px; border-top: 1px solid
-  rgba(255,255,255,.12); font-size: 12px; color: #8f89b3; }
-.preview-main { flex: 1; min-width: 0; background: #f4f2fb; padding: 16px;
-  /* Dark text on the light panels: the hero sets white text, and
-     without this the funnel numbers, queue titles, agent names and
-     trace labels inherit white and vanish on the light background. */ color: var(--ink); }
-.preview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
-.preview-cell { border: 1px solid #e5e0f5; border-radius: 12px;
-  padding: 16px; background: #fff; box-shadow: 0 1px 4px rgba(11,14,30,.06); min-width: 0; }
-.preview-cell h3 { margin: 0 0 10px; font-size: 15px; color: var(--ink); }
-.preview-cell.wide { grid-column: 1 / -1; }
-.ring-wrap { display: flex; gap: 16px; align-items: center; }
-.ring-num { font-size: 28px; font-weight: 800; color: var(--violet-deep);
-  line-height: 1.1; }
-.ring-num small { display: block; font-size: 13px; color: var(--muted);
-  font-weight: 600; }
-.ring-sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
-.counter { font-size: 34px; font-weight: 800; color: var(--violet-deep); }
-.counter small { font-size: 16px; color: var(--muted); font-weight: 600; }
-.funnel-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0;
-  font-size: 13px; }
-.funnel-bar .flabel { flex: 0 1 150px; min-width: 0; color: #333; }
-.funnel-bar .ftrack { flex: 1; height: 12px; background: #e9e4fb;
-  border-radius: 999px; overflow: hidden; }
-.funnel-bar .ffill { height: 100%; background: linear-gradient(90deg,
-  var(--violet), var(--blue)); border-radius: 999px; }
-.funnel-bar .fnum { flex: 0 0 44px; text-align: right; font-weight: 700; }
-.agent-row { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0;
-  font-size: 14px; }
-.agent-row svg { flex: 0 0 28px; }
-.agent-row b { display: block; font-size: 14px; }
-.agent-row span { color: var(--muted); font-size: 13px; }
-.queue-row { display: flex; gap: 10px; align-items: center; margin: 8px 0;
-  font-size: 14px; background: #fff; border: 1px solid var(--line);
-  border-radius: 10px; padding: 10px 12px; }
-.queue-row .pill { margin-left: auto; flex: 0 0 auto; }
+/* -- dashboard preview (§5) — a real screenshot of the Axionory
+   dashboard (Spencer, 2026-11-12): the HTML mockup is gone; the hero
+   shows the live overview with real numbers. -- */
+.preview-shot { display: block; max-width: 100%; height: auto;
+  border: 1px solid #d9d2f2; border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(11,14,30,.18); min-width: 0;
+  /* Top edge level with the subheadline (Spencer, 2026-11-12): measured
+     on the 1920px render, the subheadline's first glyph sits 183px below
+     the hero content top (subheadline y 299, image top y 116), so the
+     preview drops by exactly that. Reset to 0 under 900px (stacked). */
+  margin-top: 183px; }
 .pill { display: inline-block; font-size: 12px; font-weight: bold;
   border-radius: 999px; padding: 3px 10px; background: #ede9fe;
   color: var(--violet-deep); white-space: nowrap; }
 .pill.green { background: #dcfce7; color: #166534; }
 .pill.amber { background: #fef3c7; color: #92400e; }
-.demo-note { background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
-  border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 16px 0 0; }
 /* -- steps (§6) -- */
 .steps { list-style: none; padding: 0; margin: 0; display: grid;
   grid-template-columns: repeat(5, 1fr); gap: 28px; }
@@ -1315,10 +1264,10 @@ section.alt { background: var(--bg-tint); }
 .findings li { margin: 6px 0; }
 @media (max-width: 900px) {
   .hero-grid { grid-template-columns: 1fr; }
+  .preview-shot { margin-top: 0; }
   .steps { grid-template-columns: repeat(2, 1fr); }
   .steps li:not(:last-child)::after { display: none; }
   .features, .principles, .who-grid { grid-template-columns: 1fr 1fr; }
-  .preview-grid { grid-template-columns: 1fr; }
   .rules { columns: 1; }
 }
 @media (max-width: 560px) {
@@ -1348,10 +1297,6 @@ section.alt { background: var(--bg-tint); }
   .steps, .features, .principles, .who-grid { grid-template-columns: 1fr; }
   .url-card { padding: 18px 16px; }
   .url-card input[type=text], .url-card select { font-size: 16px; }
-  .preview-side { flex-basis: 96px; font-size: 11px; padding: 10px 6px; }
-  .side-foot { font-size: 10px; }
-  .preview-grid { padding: 12px; }
-  .funnel-bar .flabel { flex-basis: 110px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -1502,72 +1447,7 @@ to fix. Nothing is published.</p>
 <div id="landing-cta" hidden></div>
 </div>
 </div>
-<div class="preview" role="img" aria-label="Illustrative preview of the Axionory dashboard: verified customers, revenue and profit, acquisition funnel, agent activity, and approval queue. All numbers are example data.">
-<div class="preview-bar">
-<span class="dot" style="background:#ff5f57"></span>
-<span class="dot" style="background:#febc2e"></span>
-<span class="dot" style="background:#28c840"></span>
-<span class="title">Axionory — Live Ops</span>
-<span class="meta">
-<span class="demo-tag">ILLUSTRATIVE DEMO DATA</span>
-<span class="range">Last 30 Days <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2 2 0 002-2h-4a2 2 0 002 2zM6 9a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9z" fill="none" stroke="#d9d4f5" stroke-width="2"/></svg>
-<span class="avatar">V</span>
-</span>
-</div>
-<div class="preview-body">
-<div class="preview-side" aria-hidden="true">
-<div class="side-item active">Overview</div>
-<div class="side-item">Campaigns</div>
-<div class="side-item">Agents</div>
-<div class="side-item">Approvals <span class="badge">3</span></div>
-<div class="side-item">Attribution</div>
-<div class="side-item">Integrations</div>
-<div class="side-item">Settings</div>
-<div class="side-foot">Growth Plan<br>Founding Customer Program</div>
-</div>
-<div class="preview-main">
-<div class="preview-grid">
-<div class="preview-cell">
-<h3>Verified customers</h3>
-<div class="ring-wrap">
-<svg width="120" height="120" viewBox="0 0 140 140" role="img" aria-label="1,000 verified customers"><circle cx="70" cy="70" r="54" fill="none" stroke="#e9e4fb" stroke-width="22"/><circle cx="70" cy="70" r="54" fill="none" stroke="#16a34a" stroke-width="22" stroke-dasharray="339.3 0" transform="rotate(-90 70 70)"/><text x="70" y="66" text-anchor="middle" font-size="26" font-weight="800" fill="#1a1a2e">1,000</text><text x="70" y="84" text-anchor="middle" font-size="12" fill="#666">verified</text></svg>
-<div><div class="ring-num">$25,896.07<small>Revenue</small></div>
-<div class="ring-sub">Costs $3,006.87 &middot; Net profit <strong style="color:#16a34a">$22,889.20</strong></div></div>
-</div>
-<p class="muted" style="margin:10px 0 0">Each one traced from an approved action to a Stripe checkout.</p>
-</div>
-<div class="preview-cell">
-<h3>Acquisition funnel</h3>
-<div class="funnel-bar"><span class="flabel">Audience Opportunities</span><span class="ftrack"><span class="ffill" style="display:block;width:81%"></span></span><span class="fnum">2,840</span></div>
-<div class="funnel-bar"><span class="flabel">Approved Actions</span><span class="ftrack"><span class="ffill" style="display:block;width:21%"></span></span><span class="fnum">186</span></div>
-<div class="funnel-bar"><span class="flabel">Published Actions</span><span class="ftrack"><span class="ffill" style="display:block;width:19%"></span></span><span class="fnum">154</span></div>
-<div class="funnel-bar"><span class="flabel">Attributed Visits</span><span class="ftrack"><span class="ffill" style="display:block;width:100%"></span></span><span class="fnum">4,320</span></div>
-<div class="funnel-bar"><span class="flabel">Signups</span><span class="ftrack"><span class="ffill" style="display:block;width:27%"></span></span><span class="fnum">312</span></div>
-<div class="funnel-bar"><span class="flabel">Verified Customers</span><span class="ftrack"><span class="ffill" style="display:block;width:7%"></span></span><span class="fnum">24</span></div>
-</div>
-<div class="preview-cell">
-<h3>Agent activity</h3>
-<div class="agent-row"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="#6d28d9" stroke-width="2"/><line x1="17" y1="17" x2="24" y2="24" stroke="#6d28d9" stroke-width="2"/></svg><div><b>Audience Research Agent</b><span>Identifying relevant communities</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
-<div class="agent-row"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M4 14h4l3-7 4 14 3-7h6" fill="none" stroke="#3b82f6" stroke-width="2"/></svg><div><b>Social Listening Agent</b><span>Monitoring conversations</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
-<div class="agent-row"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="4" width="18" height="14" rx="2" fill="none" stroke="#8b5cf6" stroke-width="2"/><line x1="9" y1="9" x2="19" y2="9" stroke="#8b5cf6" stroke-width="2"/><line x1="9" y1="13" x2="16" y2="13" stroke="#8b5cf6" stroke-width="2"/></svg><div><b>Content Agent</b><span>Preparing engagement proposals</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
-<div class="agent-row"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 3l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11V7z" fill="none" stroke="#166534" stroke-width="2"/><path d="M10 14l3 3 5-6" fill="none" stroke="#166534" stroke-width="2"/></svg><div><b>Attribution Agent</b><span>Verifying conversions</span></div><span class="pill green" style="margin-left:auto">Running</span></div>
-</div>
-<div class="preview-cell">
-<h3>Approval queue</h3>
-<div class="queue-row">Review proposed Reddit post <span class="pill">Review</span></div>
-<div class="queue-row">Approve X engagement draft <span class="pill green">Approve</span></div>
-<div class="queue-row">Review community outreach opportunity <span class="pill">Review</span></div>
-<p class="muted" style="margin:8px 0 0">Proposed actions — nothing is
-published until you approve it.</p>
-</div>
-</div>
-<p class="demo-note"><strong>Illustrative product preview — not live customer data.</strong> Every
-number in this preview is an example to show how the dashboard reads —
-not real customer data, not a result Axionory promises.</p>
-</div>
-</div>
-</div>
+<img class="preview-shot" src="/static/dashboard-preview.png" alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified customers, and your websites.">
 </section>
 <section id="how-it-works" class="alt">
 <div class="wrap">

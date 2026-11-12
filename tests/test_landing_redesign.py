@@ -11,7 +11,8 @@ reference-image reading (2026-11-08).
   summary, funnel, agents, approval queue, attribution), NOT image 2's
   multi-business content.
 - Image 3 is the attribution-first repositioning (report pages).
-- Vector only: no bitmap references anywhere in the rendered page.
+- Vector only: no bitmap references anywhere in the rendered page,
+  except the real dashboard screenshot (Spencer, 2026-11-12).
 """
 
 import sys
@@ -54,7 +55,7 @@ def test_hero_is_two_column_with_preview_inside():
     assert 'id="preview"' not in r.text
     assert "See what Axionory sees" not in r.text
     hero = r.text.split('<section class="hero"')[1].split("</section>")[0]
-    assert 'class="preview"' in hero
+    assert 'class="preview-shot"' in hero
 
 
 def test_public_nav_with_product_dropdown():
@@ -75,50 +76,38 @@ def test_public_nav_with_product_dropdown():
             < r.text.index('class="brand"'))
 
 
-def test_preview_light_panels_image2_style():
+def test_preview_is_real_dashboard_screenshot():
+    # Spencer 2026-11-12: the HTML mockup is gone; the hero shows a
+    # real screenshot of the Axionory dashboard (real numbers), so the
+    # illustrative-demo labels are gone with it.
     r = _landing()
-    # Dark mini sidebar + light main area (image 2's dashboard language).
-    assert 'class="preview-side"' in r.text
-    assert 'class="preview-main"' in r.text
-    for item in ("Overview", "Campaigns", "Agents", "Approvals",
-                 "Attribution", "Integrations", "Settings"):
-        assert item in r.text
-    assert "Last 30 Days" in r.text
-    # Verified-customers cell: a donut (not a graph), plus revenue/profit —
-    # matching how the real platform shows these, not a fake line chart.
-    assert "1,000" in r.text and "verified" in r.text
-    assert "$25,896.07" in r.text and "Revenue" in r.text
-    assert "$3,006.87" in r.text and "Costs" in r.text
-    assert "$22,889.20" in r.text and "Net profit" in r.text
-    assert "Each one traced from an approved action to a Stripe checkout." in r.text
-    assert "24 of 100" not in r.text
-    assert "24 / 100" not in r.text
-    assert "Goal: First 100" not in r.text
-    assert "Progress ring: 24 of 100" not in r.text
-    # Illustrative label, everywhere the numbers appear.
-    assert "ILLUSTRATIVE DEMO DATA" in r.text
-    assert "Illustrative product preview — not live customer data." in r.text
-
-
-def test_preview_funnel_image1_numbers():
-    r = _landing()
-    for n in ("2,840", "186", "154", "4,320", "312"):
-        assert n in r.text
-    for label in ("Audience Opportunities", "Approved Actions",
-                  "Published Actions", "Attributed Visits", "Signups",
-                  "Verified Customers"):
-        assert label in r.text
-
-
-def test_preview_agents_queue_attribution():
-    r = _landing()
-    for agent in ("Audience Research Agent", "Social Listening Agent",
-                  "Content Agent", "Attribution Agent"):
-        assert agent in r.text
-    assert r.text.count("Running") >= 4
-    assert "Review proposed Reddit post" in r.text
-    assert "Approve X engagement draft" in r.text
-    assert "Review community outreach opportunity" in r.text
+    hero = r.text.split('<section class="hero"')[1].split("</section>")[0]
+    assert 'class="preview-shot"' in hero
+    assert 'src="/static/dashboard-preview.png"' in hero
+    assert ('alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified '
+            'customers, and your websites."' in hero)
+    assert "ILLUSTRATIVE DEMO DATA" not in r.text
+    assert "Illustrative product preview" not in r.text
+    assert "not live customer data" not in r.text
+    assert "not real customer data" not in r.text
+    # No mockup markup survives anywhere on the page.
+    for gone in ('class="preview-side"', 'class="preview-main"',
+                 'class="preview-grid"', 'class="preview-cell"',
+                 'class="demo-note"', 'class="preview-bar"',
+                 'class="preview-body"'):
+        assert gone not in r.text
+    # The screenshot is served by the static route.
+    app, _store = _app_with()
+    assert (TestClient(app).get("/static/dashboard-preview.png").status_code
+            == 200)
+    # Top edge level with the subheadline (Spencer 2026-11-12): measured
+    # on the 1920px render, the subheadline's first glyph sits 183px
+    # below the hero content top (subheadline y 299, image top y 116),
+    # so the preview drops by exactly that. The offset is reset where
+    # the hero stacks (max-width 900px) so the image sits cleanly below
+    # the analyze card with no stray gap.
+    assert "margin-top: 183px;" in r.text
+    assert ".preview-shot { margin-top: 0; }" in r.text
 
 
 def test_how_it_works_image1():
@@ -138,18 +127,9 @@ def test_how_it_works_image1():
     # desktop and are hidden where the cards stack.
     assert ".steps li:not(:last-child)::after" in r.text
     assert "data:image/svg+xml" in r.text
-    # The preview grid must not blow out past the preview shell:
-    # its tracks shrink below content width and its cells too.
-    assert ("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)"
-            in r.text)
-    assert ".preview-cell {" in r.text and "min-width: 0" in r.text
-    # The light preview panels sit inside the dark hero (white
-    # text): the preview-main sets dark text, or the funnel
-    # numbers, queue titles, agent names and trace labels inherit
-    # white and are invisible on the light background.
-    assert (".preview-main { flex: 1; min-width: 0; background: #f4f2fb;"
-            " padding: 16px;" in r.text)
-    assert "color: var(--ink); }" in r.text
+    # The screenshot must not blow out past the hero: it shrinks
+    # below content width (max-width 100% + min-width 0).
+    assert ".preview-shot {" in r.text and "min-width: 0" in r.text
 
 
 def test_features_attribution_differentiation_who():
@@ -201,6 +181,39 @@ def test_faq_ten_items_with_2fa_in_ten():
     assert "zero-trust" in r.text.lower()
 
 
+def test_landing_is_wide_logo_far_left():
+    # Spencer 2026-11-12 (wide monitor): the page was a narrow centered
+    # column with big empty margins on both ends, the hero preview a
+    # tall narrow box, and the logo inset with the container. The page
+    # container is wide now, the hero wider still, and the header spans
+    # the full viewport so the brand sits at the far left edge.
+    r = _landing()
+    assert ".wrap { max-width: 1440px; margin: 0 auto; padding: 0 20px; }" in r.text
+    assert ".hero .wrap { max-width: 1680px; }" in r.text
+    # The dashboard screenshot gets the larger share of the hero
+    # (Spencer 2026-11-12: make it a bit larger): 4fr copy / 8fr preview,
+    # so the image renders ~1064px wide at the 1680px wrap — just under
+    # its 1102px source, so it stays crisp.
+    assert ("grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);" in r.text)
+    assert (".site-nav .wrap { display: flex; align-items: center; gap: 16px;\n"
+            "  min-height: 60px; max-width: none; padding: 0 24px; }" in r.text)
+    # The nav links stay centred in the wide header: the <nav> wrapper
+    # takes the free space between the far-left brand and the right-hand
+    # actions, and the links centre inside it.
+    assert (".nav-links { display: flex; gap: 4px; margin: 0; list-style: none;\n"
+            "  padding: 0; flex: 1; justify-content: center; }" in r.text)
+    assert (".site-nav nav { flex: 1; display: flex; justify-content: center; }"
+            in r.text)
+    # The brand is the first header item after the (mobile-only)
+    # hamburger: far left, ahead of the nav links and the actions.
+    assert (r.text.index('class="brand"')
+            < r.text.index('class="nav-links"'))
+    assert (r.text.index('class="brand"')
+            < r.text.index('class="nav-actions"'))
+    # The preview still lives inside the two-column hero.
+    assert 'class="wrap hero-grid"' in r.text
+
+
 def test_final_cta_footer_seo_vector_only():
     r = _landing()
     assert "Your Next Customer Is Out There." in r.text
@@ -213,10 +226,12 @@ def test_final_cta_footer_seo_vector_only():
     assert 'property="og:image"' not in r.text
     assert "application/ld+json" in r.text
     assert '"price": "20"' in r.text
-    # Vector only, except the brand logo/favicon (Spencer, 2026-11-12):
-    # no OTHER bitmap reference, no other <img> on the page.
+    # Vector only, except the brand logo/favicon and the real dashboard
+    # screenshot (Spencer, 2026-11-12): no OTHER bitmap reference, no
+    # other <img> on the page.
     text = r.text.replace('<img src="/static/logo.png" alt="Axionory">', ""
-                          ).replace('<link rel="icon" type="image/png" href="/favicon.png">', "")
+                          ).replace('<link rel="icon" type="image/png" href="/favicon.png">', ""
+                          ).replace('<img class="preview-shot" src="/static/dashboard-preview.png" alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified customers, and your websites.">', "")
     for ext in (".jpg", ".jpeg", ".webp", ".gif"):
         assert ext not in text
     assert ".png" not in text
