@@ -38,3 +38,12 @@ def test_linked_from_landing_and_sitemap():
     assert "Privacy Policy — coming soon" not in home
     sm = c.get("/sitemap.xml").text
     assert "/privacy</loc>" in sm and "/terms</loc>" in sm
+
+
+def test_public_pages_answer_head_requests():
+    # Link checkers (TikTok's app review among them) send HEAD first; a
+    # 405 there reads as "page could not be verified".
+    c = _client()
+    for path in ("/", "/privacy", "/terms", "/robots.txt", "/sitemap.xml", "/llms.txt"):
+        r = c.head(path)
+        assert r.status_code == 200, path

@@ -177,10 +177,10 @@ def _render(title: str, body: str) -> str:
 def register_legal_pages(app) -> None:
     from fastapi.responses import HTMLResponse
 
-    @app.get("/privacy", response_class=HTMLResponse)
+    @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():
         return _render("Privacy Policy", PRIVACY)
 
-    @app.get("/terms", response_class=HTMLResponse)
+    @app.api_route("/terms", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def terms_page():
         return _render("Terms of Service", TERMS)

@@ -1895,7 +1895,7 @@ if (demoToggle && demoValue) {{
 
         return own_snippet()
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def landing_page(request: Request):
         """Public front door — no sign-in, no internal data."""
         return _landing_page(_current_account(request))
