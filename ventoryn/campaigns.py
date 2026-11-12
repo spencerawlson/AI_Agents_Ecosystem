@@ -215,19 +215,26 @@ def proposal_card(store, config, campaign: dict, totp_field: str) -> str:
     cid = _esc(campaign["id"])
     rows = "".join(post_preview_html(site, d, i, cid) for i, d in enumerate(drafts, 1))
     who = "Proposed by the autopilot" if campaign["source"] == "autopilot" else "Started by you"
+    # One compact row per proposal; the details open on click. The post
+    # previews sit in their own scrolling box, so a 100-post campaign
+    # never stretches the page.
+    host = _esc(site.get('host') or site.get('url', ''))
+    flag = "" if x_conn else " <span class='v-camp-flag'>X not connected</span>"
     return (
-        f"<div class='card v-camp' id='campaign-{cid}'>"
-        f"<h3>X campaign — {_esc(site.get('host') or site.get('url', ''))}</h3>"
-        f"<p class='muted'>{who} on {_esc(str(campaign['created_at'])[:10])} — "
-        f"{campaign['days']} days, {len(drafts)} posts.</p>"
+        f"<details class='card v-camp' id='campaign-{cid}'>"
+        f"<summary class='v-camp-sum'><span class='v-camp-site'>X campaign — {host}</span>"
+        f"<span class='muted'>{who} — {_esc(str(campaign['created_at'])[:10])} — "
+        f"{len(drafts)} posts over {campaign['days']} days — about ${est['total_usd']:.2f}</span>"
+        f"{flag}<span class='v-camp-open'>Preview</span></summary>"
         f"<p class='v-camp-cost'><strong>Cost:</strong> {_esc(describe(est))}</p>{connect}"
         f"<h4>Preview — how each post will look</h4>"
-        f"<div class='v-camp-grid'>{rows}</div>"
+        f"<div class='v-camp-scroll' tabindex='0' aria-label='Post previews'>"
+        f"<div class='v-camp-grid'>{rows}</div></div>"
         f"<form method='post' action='/campaigns/{cid}/approve'>{totp_field}"
         f"<p><button class='btn btn-primary' type='submit'>Approve campaign</button> "
         f"<button class='btn' type='submit' formaction='/campaigns/{cid}/reject'>Reject</button></p>"
         f"<p class='muted'>Approving schedules the posts over {campaign['days']} days; each is "
-        f"posted on its date within this website's monthly X budget.</p></form></div>")
+        f"posted on its date within this website's monthly X budget.</p></form></details>")
 
 
 def scheduled_summary(store, campaign: dict) -> str:
@@ -242,6 +249,20 @@ def scheduled_summary(store, campaign: dict) -> str:
 
 
 CAMPAIGN_CSS = """
+details.v-camp { padding: 0; }
+.v-camp > *:not(summary) { margin-left: 20px; margin-right: 20px; }
+.v-camp-sum { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 6px 14px; padding: 16px 20px; }
+.v-camp-sum::-webkit-details-marker { display: none; }
+.v-camp-site { font-weight: 700; }
+.v-camp-flag { font-size: 12px; font-weight: 700; color: #92400e; background: #fef3c7;
+  border-radius: 999px; padding: 2px 8px; }
+.v-camp-open { margin-left: auto; font-weight: 700; color: var(--v-violet-deep, #6d28d9); }
+details[open] > .v-camp-sum .v-camp-open::after { content: " — close"; }
+.v-camp-scroll { max-height: min(70vh, 720px); overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--v-line); border-radius: var(--v-radius-sm, 10px); padding: 12px;
+  margin-bottom: 12px; }
+.v-camp-scroll:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; }
 .v-camp-warn { color: #92400e; }
 .btn-small { padding: 4px 10px; font-size: 12px; min-height: 0; }
 .v-camp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }

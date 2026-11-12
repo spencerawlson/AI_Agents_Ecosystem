@@ -186,3 +186,19 @@ def test_campaign_posts_are_not_listed_as_single_drafts(client, store):
     html = client.get("/approvals").text
     for d in store.campaign_drafts(c["id"]):
         assert f"/social/x/drafts/{d['id']}/approve" not in html
+
+
+def test_proposals_are_compact_rows_that_open_with_a_scrolling_preview(client, store):
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://shop.example.com")
+    many = [{"text": f"Post {i}", "link": site["url"]} for i in range(100)]
+    old = campaigns.propose(store, site, many[:3], days=3, posts_per_day=1,
+                            with_link=True, source="autopilot")
+    new = campaigns.propose(store, site, many, days=100, posts_per_day=1,
+                            with_link=True, source="manual")
+    html = client.get("/approvals").text
+    assert f"<details class='card v-camp' id='campaign-{new['id']}'>" in html
+    assert "100 posts over 100 days" in html and "<span class='v-camp-open'>Preview</span>" in html
+    assert "<div class='v-camp-scroll'" in html
+    assert html.index(f"campaign-{new['id']}") < html.index(f"campaign-{old['id']}")  # newest on top
+    assert "location.hash" in html  # /approvals#campaign-<id> opens it
