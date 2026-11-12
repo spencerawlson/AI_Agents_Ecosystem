@@ -2,8 +2,11 @@
 and approval-first posting. All X/Stripe HTTP is mocked — no live
 keys, no live posts, ever (see tests/conftest.py's network guard).
 """
+import io
 import json
 import sys
+import urllib.error
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -87,6 +90,7 @@ def _fake_x_urlopen(request, **kwargs):
     if url.startswith(saas.X_TOKEN_URL):
         return _FakeResponse({"access_token": "x-tok-123",
                               "refresh_token": "x-refresh-123",
+                              "expires_in": 7200,
                               "token_type": "bearer"})
     if url.startswith(saas.X_USERINFO_URL):
         return _FakeResponse(_X_USERINFO_PAYLOAD)
@@ -175,7 +179,12 @@ def test_x_connect_flow(client, store, config, monkeypatch):
     # stored column.
     assert "x-tok-123" not in conn["detail"]
     assert conn["_detail_raw"]["access_token"] == "x-tok-123"
-    assert conn["_detail_raw"]["username"] == "ada_x"
+    # The refresh token and the expiry are stored too, so the publish
+    # path can renew the ~2-hour access token without re-prompting.
+    assert conn["_detail_raw"]["refresh_token"] == "x-refresh-123"
+    expires_at = conn["_detail_raw"]["expires_at"]
+    assert expires_at
+    assert datetime.fromisoformat(expires_at) > datetime.now(timezone.utc)
 
 
 def test_x_connect_rejects_bad_state(client, store, config, monkeypatch):
@@ -363,6 +372,124 @@ def test_post_to_x_refuses_already_decided_draft(store, monkeypatch):
                                      draft["id"])
     assert posted is False
     assert "already rejected" in message
+
+
+# ---------------------------------------------------------------------------
+# X token refresh — access tokens live ~2 hours; the stored refresh
+# token renews them so a post days after connecting still works.
+# ---------------------------------------------------------------------------
+
+def _connect_x_expired(store, site_id):
+    past = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    store.update_connection(site_id, "x", "connected", "Connected as @ada_x.",
+                            {"access_token": "x-tok-old",
+                             "refresh_token": "x-refresh-old",
+                             "username": "ada_x", "expires_at": past})
+
+
+def test_post_to_x_refreshes_expired_token(store, config):
+    account = _account(store)
+    site = store.create_site(account["id"], "https://example.com")
+    _connect_x_expired(store, site["id"])
+    draft = store.create_social_draft(site["id"], "x", "Just a note, no link")
+    posted_with = []
+
+    def _urlopen(request, **kwargs):
+        if request.full_url.startswith(saas.X_TOKEN_URL):
+            return _FakeResponse({"access_token": "x-tok-new",
+                                  "refresh_token": "x-refresh-new",
+                                  "expires_in": 7200,
+                                  "token_type": "bearer"})
+        if request.full_url.startswith(saas.X_POST_URL):
+            posted_with.append(request.get_header("Authorization"))
+            return _FakeResponse({"data": {"id": "tweet-9", "text": "posted"}})
+        raise AssertionError(f"unexpected X call: {request.full_url}")
+
+    posted, message = saas.post_to_x(store, config, account, site["id"],
+                                     draft["id"], urlopen=_urlopen)
+    assert posted is True
+    assert "tweet-9" in message
+    # The post went out on the FRESH token, not the expired one.
+    assert posted_with == ["Bearer x-tok-new"]
+    raw = store.get_connection(site["id"], "x")["_detail_raw"]
+    assert raw["access_token"] == "x-tok-new"
+    # The ROTATED refresh token was persisted before the new access
+    # token was used — the old one is single-use.
+    assert raw["refresh_token"] == "x-refresh-new"
+    assert datetime.fromisoformat(raw["expires_at"]) > datetime.now(timezone.utc)
+
+
+def test_post_to_x_401_refreshes_once_and_retries(store, config):
+    account = _account(store)
+    site = store.create_site(account["id"], "https://example.com")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    store.update_connection(site["id"], "x", "connected", "Connected as @ada_x.",
+                            {"access_token": "x-tok-fresh",
+                             "refresh_token": "x-refresh-old",
+                             "username": "ada_x", "expires_at": future})
+    draft = store.create_social_draft(site["id"], "x", "Just a note, no link")
+    calls = {"token": 0, "post": 0}
+    posted_with = []
+
+    def _urlopen(request, **kwargs):
+        if request.full_url.startswith(saas.X_TOKEN_URL):
+            calls["token"] += 1
+            return _FakeResponse({"access_token": "x-tok-new",
+                                  "refresh_token": "x-refresh-new",
+                                  "expires_in": 7200,
+                                  "token_type": "bearer"})
+        if request.full_url.startswith(saas.X_POST_URL):
+            calls["post"] += 1
+            posted_with.append(request.get_header("Authorization"))
+            if calls["post"] == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url, 401, "Unauthorized", {},
+                    io.BytesIO(b""))
+            return _FakeResponse({"data": {"id": "tweet-2", "text": "posted"}})
+        raise AssertionError(f"unexpected X call: {request.full_url}")
+
+    posted, message = saas.post_to_x(store, config, account, site["id"],
+                                     draft["id"], urlopen=_urlopen)
+    assert posted is True
+    assert "tweet-2" in message
+    # Exactly one refresh and one retry — no infinite loop, no second
+    # refresh after the retry.
+    assert calls == {"token": 1, "post": 2}
+    assert posted_with == ["Bearer x-tok-fresh", "Bearer x-tok-new"]
+    raw = store.get_connection(site["id"], "x")["_detail_raw"]
+    assert raw["refresh_token"] == "x-refresh-new"
+
+
+def test_fresh_x_access_token_returns_stored_token_when_fresh(store, config):
+    account = _account(store)
+    site = store.create_site(account["id"], "https://example.com")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    store.update_connection(site["id"], "x", "connected", "Connected as @ada_x.",
+                            {"access_token": "x-tok-fresh",
+                             "refresh_token": "x-refresh-old",
+                             "username": "ada_x", "expires_at": future})
+
+    def _no_http(request, **kwargs):
+        raise AssertionError("no HTTP call expected for a fresh token")
+
+    token, refreshed = saas.fresh_x_access_token(
+        store, config, site["id"], urlopen=_no_http)
+    assert token == "x-tok-fresh"
+    assert refreshed is False
+
+
+def test_fresh_x_access_token_raises_when_refresh_rejected(store, config):
+    account = _account(store)
+    site = store.create_site(account["id"], "https://example.com")
+    _connect_x_expired(store, site["id"])
+
+    def _urlopen(request, **kwargs):
+        if request.full_url.startswith(saas.X_TOKEN_URL):
+            return _FakeResponse({"error": "invalid_grant"})
+        raise AssertionError(f"unexpected X call: {request.full_url}")
+
+    with pytest.raises(saas.SaasError, match="Reconnect X"):
+        saas.fresh_x_access_token(store, config, site["id"], urlopen=_urlopen)
 
 
 # ---------------------------------------------------------------------------

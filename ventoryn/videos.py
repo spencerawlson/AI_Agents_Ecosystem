@@ -66,12 +66,23 @@ def review_section(store, account_id: str, reports_dir: Path, hosts: dict) -> st
         summary = (v.get("result") or "").replace("Automatic — ", "").split(" · report")[0]
         state = ("<span class='badge badge-ok'>Approved</span>" if v["review"] == "approved"
                  else "<span class='badge'>Waiting for review</span>")
-        actions = (f"<form method='post' action='{src}/review' class='v-video-actions'>"
-                   f"<button class='btn btn-primary' name='decision' value='approve'>Approve</button> "
-                   f"<button class='btn' name='decision' value='reject'>Reject</button></form>"
-                   if v["review"] == "pending" else
-                   f"<p class='v-video-actions'><a class='btn btn-primary' href='{src}/tiktok'>"
-                   f"Post to TikTok</a></p>" if v["review"] == "approved" else "")
+        if v["review"] == "pending":
+            actions = (f"<form method='post' action='{src}/review' class='v-video-actions'>"
+                       f"<button class='btn btn-primary' name='decision' value='approve'>Approve</button> "
+                       f"<button class='btn' name='decision' value='reject'>Reject</button></form>")
+        elif v["review"] == "approved":
+            # The Post link is only live when TikTok is actually
+            # connected for this site — otherwise it is a dead end
+            # (the post form answers "not connected").
+            tiktok = store.get_connection(v["site_id"], "tiktok") or {}
+            if tiktok.get("status") == "connected":
+                actions = (f"<p class='v-video-actions'><a class='btn btn-primary' href='{src}/tiktok'>"
+                           f"Post to TikTok</a></p>")
+            else:
+                actions = ("<p class='v-video-actions muted'>"
+                           "Connect TikTok for this site to post it.</p>")
+        else:
+            actions = ""
         cards += (f"<div class='card v-video' id='video-{jid}'>"
                   f"<video controls preload='metadata' playsinline src='{src}'></video>"
                   f"<div><h3>{_esc(hosts.get(v['site_id'], ''))} {state}</h3>"

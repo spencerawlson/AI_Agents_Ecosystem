@@ -523,7 +523,10 @@ def create_app(
         """(credits left, what it is measured against). A customer's
         balance goes down as jobs charge it. The owner is never charged,
         so his card counts this month's allowance minus the list price
-        of the jobs that ran — it goes down as the agents work, too."""
+        of the jobs that ran — it goes down as the agents work, too.
+        The note says so in allowance terms ("1,000-credit allowance ·
+        180 used this month") rather than reading as a depleting
+        balance; My account states the entitlement (Unlimited)."""
         from datetime import datetime, timezone
         from ventoryn.saas import CREDIT_COSTS
 
@@ -535,7 +538,8 @@ def create_app(
         used = sum(CREDIT_COSTS.get(j["job_type"], 0)
                    for j in _saas_store.jobs_since(account["id"], start)
                    if j["status"] == "done")
-        return max(0, allowance - used), f"of {allowance:,} this month"
+        return max(0, allowance - used), (
+            f"{allowance:,}-credit allowance · {used:,} used this month")
 
     def _money_stats_html(account, *, first: str = "") -> str:
         """Revenue / Costs / Net profit for the account — the same
