@@ -3239,6 +3239,13 @@ id="analyze-submit">Analyze</button>
         decided_here = [
             a for a in gate.decided(limit=100)
             if getattr(a, "business_id", None) in site_biz_ids]
+        # A campaign proposal's approve/reject never goes through the
+        # gate above — it is its own saas_campaigns.status column
+        # (ventoryn/campaigns.py schedule()/reject()) — so that is
+        # checked here too; either kind of decision counts as evidence.
+        decided_campaigns = [
+            c for c in _saas_store.list_campaigns(account["id"], limit=100)
+            if c["status"] in ("scheduled", "rejected")]
         any_sig = any(
             _saas_store.list_signatures(s["id"]) for s in sites)
         # Strongest evidence first: Axionory Analytics saw a visit that
@@ -3279,7 +3286,7 @@ id="analyze-submit">Analyze</button>
         _flow = [
             ("AI Recommendation", bool(jobs),
              "A job ran for this account."),
-            ("Customer Approval", bool(decided_here),
+            ("Customer Approval", bool(decided_here) or bool(decided_campaigns),
              "An approval was decided by this account."),
             ("Signed Campaign Link", any_sig,
              "A signed Axionory link was created."),

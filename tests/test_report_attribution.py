@@ -238,6 +238,30 @@ def test_report_respects_the_three_toggles():
     assert "Conversion details are hidden" in r.text
 
 
+def test_customer_approval_evidenced_by_a_decided_campaign():
+    """Regression: approving/rejecting a campaign proposal — the
+    approval action real customers actually take — never touches
+    ApprovalGate (it is its own saas_campaigns.status column, see
+    ventoryn/campaigns.py). "Customer Approval" must still show
+    evidence from that alone, with no gate decision at all."""
+    from ventoryn import campaigns as camp
+
+    app, store = _app_with()
+    client = TestClient(app)
+    account = sign_in(client, store, email=CUSTOMER_A[0],
+                      sub="google-sub-ada", name="Ada")
+    site = store.create_site(account["id"], "https://ada.example.com")
+    campaign = camp.propose(
+        store, site, [{"text": "Hello", "link": site["url"]}],
+        days=1, posts_per_day=1, with_link=True, source="autopilot")
+    camp.schedule(store, campaign)
+    r = client.get("/report")
+    assert r.status_code == 200
+    i = r.text.index("Customer Approval")
+    step_html = r.text[max(0, i - 400):i]
+    assert "v-flow-step done" in step_html
+
+
 def test_operator_report_content_unchanged():
     app, store = _app_with()
     client = TestClient(app)
