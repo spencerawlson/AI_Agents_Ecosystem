@@ -624,8 +624,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "<p>Sign-in with Google is not set up yet.</p>"),
                 status_code=400)
         state = store.create_oauth_state()
-        response = RedirectResponse(google_auth_url(config, state),
-                                    status_code=303)
+        # Back to the domain the visitor is on (axionory.com or, during
+        # the move, ventoryn.app) — so the session lands where they are.
+        response = RedirectResponse(
+            google_auth_url(config, state,
+                            config.google_redirect_uri_for(request.headers.get("host"))),
+            status_code=303)
         # Carry the website the visitor typed on the landing page
         # across the Google round-trip. An invalid URL is ignored —
         # the visitor simply signs in without one.
@@ -659,7 +663,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "<a href='/account/login'>Start again</a>.</p>"),
                 status_code=400)
         try:
-            tokens = exchange_google_code(config, code)
+            tokens = exchange_google_code(
+                config, code,
+                redirect_uri=config.google_redirect_uri_for(request.headers.get("host")))
             profile = google_userinfo(tokens["access_token"])
         except SaasError as exc:
             return HTMLResponse(

@@ -179,6 +179,9 @@ class SaasConfig:
     stripe_price_id: str = ""
     monthly_credits: int = MONTHLY_CREDIT_ALLOWANCE_DEFAULT
     base_url: str = "http://localhost:8000"
+    # Other domains the app is still served on (e.g. the old one during
+    # a move): sign-in returns to the domain the visitor started on.
+    extra_base_urls: tuple = ()
     cookie_secure: bool = False
     #: The operator's Google email (Spencer). The operator signs in
     #: with Google like anyone else; this email is what gates the
@@ -267,6 +270,9 @@ class SaasConfig:
             monthly_credits=monthly,
             base_url=env.get("SAAS_BASE_URL", "http://localhost:8000"
                              ).rstrip("/"),
+            extra_base_urls=tuple(u.strip().rstrip("/") for u in
+                                  env.get("SAAS_EXTRA_BASE_URLS", "").split(",")
+                                  if u.strip().startswith("https://")),
             # Secure cookies whenever the site is served over HTTPS;
             # SAAS_COOKIE_SECURE=1/0 overrides.
             cookie_secure=(env.get("SAAS_COOKIE_SECURE") == "1" or (
@@ -347,6 +353,19 @@ class SaasConfig:
             "growth": self.stripe_price_id_growth,
             "pro": self.stripe_price_id_pro,
         }.get(plan, "")
+
+    def base_url_for_host(self, host: str | None) -> str:
+        """The configured base URL whose host matches the request's —
+        never a URL built from the request itself; anything unknown
+        falls back to the main base URL."""
+        host = (host or "").strip().lower()
+        for url in (self.base_url, *self.extra_base_urls):
+            if urllib.parse.urlparse(url).netloc.lower() == host:
+                return url
+        return self.base_url
+
+    def google_redirect_uri_for(self, host: str | None) -> str:
+        return f"{self.base_url_for_host(host)}/account/auth/google/callback"
 
     @property
     def google_redirect_uri(self) -> str:
@@ -3011,10 +3030,10 @@ def _row_dict(row) -> dict:
 # secret come from the environment and are never logged.
 # ---------------------------------------------------------------------------
 
-def google_auth_url(config: SaasConfig, state: str) -> str:
+def google_auth_url(config: SaasConfig, state: str, redirect_uri: str = "") -> str:
     params = urllib.parse.urlencode({
         "client_id": config.google_client_id,
-        "redirect_uri": config.google_redirect_uri,
+        "redirect_uri": redirect_uri or config.google_redirect_uri,
         "response_type": "code",
         "scope": GOOGLE_SCOPES,
         "state": state,
@@ -3049,14 +3068,14 @@ def _http_get_json(url: str, headers: dict | None = None,
 
 
 def exchange_google_code(config: SaasConfig, code: str,
-                         urlopen=None) -> dict:
+                         urlopen=None, redirect_uri: str = "") -> dict:
     """Exchange an authorization code for tokens. Raises SaasError on
     any failure — the caller shows a plain error page, never the detail."""
     body = _http_post_form(GOOGLE_TOKEN_URL, {
         "code": code,
         "client_id": config.google_client_id,
         "client_secret": config.google_client_secret,
-        "redirect_uri": config.google_redirect_uri,
+        "redirect_uri": redirect_uri or config.google_redirect_uri,
         "grant_type": "authorization_code",
     }, urlopen=urlopen)
     if body.get("error") or not body.get("access_token"):
