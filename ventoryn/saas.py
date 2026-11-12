@@ -639,6 +639,12 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
     cost_usd_cents INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_video_reviews (
+    job_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    decided_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS saas_media_spend (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
@@ -2522,6 +2528,20 @@ class SaasStore:
                 " WHERE site_id = ? AND created_at >= ?",
                 (site_id, _iso(month_start))).fetchone()
         return int(row[0]) / 100
+
+    def video_review_status(self, job_id: str) -> str:
+        """pending (no decision yet), approved or rejected."""
+        with self._lock:
+            row = self._conn.execute("SELECT status FROM saas_video_reviews WHERE job_id = ?",
+                                     (job_id,)).fetchone()
+        return row[0] if row else "pending"
+
+    def set_video_review(self, job_id: str, account_id: str, status: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_video_reviews (job_id, account_id, status, decided_at)"
+                " VALUES (?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET status = excluded.status,"
+                " decided_at = excluded.decided_at", (job_id, account_id, status, _iso(_now())))
 
     def record_media_usage(self, account_id: str, site_id: str, provider: str,
                            units: float, unit: str, amount_usd: float | None,

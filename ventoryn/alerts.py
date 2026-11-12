@@ -54,6 +54,20 @@ def account_alerts(store, account: dict, pending_approvals: int = 0) -> list[dic
         alerts.append({"key": f"approvals:{pending_approvals}", "level": "info",
                        "href": "/approvals", "action": "Review",
                        "text": f"{pending_approvals} approval{'s' if pending_approvals != 1 else ''} waiting."})
+    # Agent-made videos waiting for a look.
+    try:
+        from ventoryn.saas_routes import REPORTS_DIR
+        from ventoryn.videos import videos_for_review
+
+        waiting = [v for v in videos_for_review(store, account["id"], REPORTS_DIR)
+                   if v["review"] == "pending"]
+    except Exception:  # noqa: BLE001 - an alert must never break a page
+        waiting = []
+    if waiting:
+        n = len(waiting)
+        alerts.append({"key": f"videos:{n}:{waiting[0]['id']}", "level": "info",
+                       "href": "/approvals", "action": "Watch",
+                       "text": f"{n} video{'s' if n != 1 else ''} waiting for your review."})
     # Approved campaign posts that could not go out.
     for c in store.list_campaigns(account["id"], status="scheduled", limit=20):
         held = [d for d in store.campaign_drafts(c["id"]) if d["status"] == "held"]

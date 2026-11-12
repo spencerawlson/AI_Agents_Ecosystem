@@ -4252,6 +4252,10 @@ shows verified conversions only.</p>"""
                     + "".join(_camp.scheduled_summary(_saas_store, c) for c in scheduled)
                     + "</ul></div>")
         hosts = {s["id"]: s["host"] for s in _saas_store.list_sites(account["id"])}
+        from ventoryn.saas_routes import REPORTS_DIR as _reports
+        from ventoryn.videos import review_section as _videos
+
+        out += _videos(_saas_store, account["id"], _reports, hosts)
         articles = [j for j in _saas_store.list_jobs(account["id"], limit=60)
                     if j["job_type"] == "seo_article" and j["status"] == "done"][:10]
         if articles:

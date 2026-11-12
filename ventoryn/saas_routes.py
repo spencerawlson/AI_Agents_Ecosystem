@@ -2320,6 +2320,44 @@ funnel counts it. This is the owner-recorded fallback.</p>
                    if avatars else "<input type='hidden' name='avatar_id' value=''>")
                 + "<p><button class='btn' type='submit'>Save</button></p></form></div>")
 
+    @app.get("/websites/sites/{site_id}/videos/{job_id}")
+    def video_file(request: Request, site_id: str, job_id: str, download: str = ""):
+        """Play or download an agent-made video. Owner only; the file must
+        sit in the reports' videos folder (ventoryn/videos.py)."""
+        from fastapi.responses import FileResponse
+        from ventoryn.videos import video_path
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        job = store.get_job(job_id)
+        site = store.get_site(site_id)
+        if (job is None or site is None or job["site_id"] != site_id
+                or site["account_id"] != account["id"]):
+            raise HTTPException(404, "video not found")
+        path = video_path(job, REPORTS_DIR)
+        if path is None:
+            raise HTTPException(404, "video not found")
+        return FileResponse(path, media_type="video/mp4",
+                            filename=path.name if download else None,
+                            content_disposition_type="attachment" if download else "inline")
+
+    @app.post("/websites/sites/{site_id}/videos/{job_id}/review")
+    def video_review(request: Request, site_id: str, job_id: str, decision: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        job = store.get_job(job_id)
+        site = store.get_site(site_id)
+        if (job is None or site is None or job["site_id"] != site_id
+                or site["account_id"] != account["id"] or job["job_type"] != "video_render"):
+            raise HTTPException(404, "video not found")
+        if decision not in ("approve", "reject"):
+            raise HTTPException(400, "invalid decision")
+        store.set_video_review(job_id, account["id"],
+                               "approved" if decision == "approve" else "rejected")
+        return RedirectResponse(f"/approvals#video-{job_id}", status_code=303)
+
     @app.post("/websites/sites/{site_id}/video-settings")
     def site_video_settings(request: Request, site_id: str,
                             voice_id: str = Form(""), avatar_id: str = Form("")):
