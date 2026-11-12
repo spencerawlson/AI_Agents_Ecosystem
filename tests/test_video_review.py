@@ -48,6 +48,22 @@ def test_video_in_approvals_plays_and_can_be_approved(client, store, reports):
     assert "badge-ok'>Approved" in client.get("/approvals").text
 
 
+def test_approved_video_offers_tiktok_only_when_connected(client, store, reports):
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://www.road2cissp.com")
+    job = _video_job(store, acct, site, reports)
+    client.post(f"/websites/sites/{site['id']}/videos/{job['id']}/review",
+                data={"decision": "approve"})
+    # TikTok is not connected for this site: no dead-end Post link.
+    html = client.get("/approvals").text
+    assert "Post to TikTok" not in html
+    assert "Connect TikTok for this site to post it." in html
+    store.update_connection(site["id"], "tiktok", "connected",
+                            "Connected as @ada.", {"username": "ada"})
+    html = client.get("/approvals").text
+    assert "Post to TikTok" in html
+
+
 def test_rejected_video_leaves_approvals(client, store, reports):
     acct = _login(client, store)
     site = store.create_site(acct["id"], "https://www.road2cissp.com")

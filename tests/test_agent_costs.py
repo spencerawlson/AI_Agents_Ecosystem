@@ -84,3 +84,21 @@ def test_customer_overview_shows_credits_left_not_platform_ai_spend():
             "<span class='v-stat-sub'>left</span>") in html
     assert "$0.0123" not in html  # the platform's AI spend is the owner's
     assert OPERATOR_EMAIL not in html
+
+
+def test_operator_overview_shows_allowance_framing():
+    # The owner's Credits card is an allowance meter, not a depleting
+    # balance: the allowance, and how much of it this month's jobs
+    # used. (My account states the entitlement: Unlimited.)
+    app, store, audit = _app()
+    client = TestClient(app)
+    owner = sign_in(client, store)
+    site = store.create_site(owner["id"], "https://shop.example.com")
+    job = store.charge_credits(owner["id"], "seo_article", site["id"],
+                               is_operator=True)
+    store.set_job_result(job["id"], "done", "ok")
+    html = client.get("/ops").text
+    assert ("<span class='v-stat-label'>Credits</span>"
+            "<span class='v-stat-value'>990</span>"
+            "<span class='v-stat-sub'>1,000-credit allowance "
+            "· 10 used this month</span>") in html

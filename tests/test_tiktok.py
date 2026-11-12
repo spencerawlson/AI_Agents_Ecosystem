@@ -100,8 +100,8 @@ def test_posting_screen_follows_tiktok_rules(client, store, reports, fake):
     acct = _login(client, store)
     site = store.create_site(acct["id"], "https://www.road2cissp.com")
     job = _approved(store, acct, site, reports)
-    assert f"{job['id']}/tiktok'>Post to TikTok" in client.get("/approvals").text
     _connect(client, store, site)
+    assert f"{job['id']}/tiktok'>Post to TikTok" in client.get("/approvals").text
     html = client.get(f"/websites/sites/{site['id']}/videos/{job['id']}/tiktok").text
     assert "Posting to TikTok as <strong>Road 2 CISSP</strong> (@road2cissp)" in html
     assert "<option value='' selected disabled>Choose who can see it</option>" in html

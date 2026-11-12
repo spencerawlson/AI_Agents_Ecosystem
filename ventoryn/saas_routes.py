@@ -783,12 +783,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         access_token = tokens.get("access_token", "")
         info = x_userinfo(access_token) if access_token else {}
         username = (info.get("data") or {}).get("username", "")
-        store.update_connection(
-            site["id"], "x", "connected",
-            f"Connected as @{username}." if username else "Connected.",
-            {"access_token": access_token,
-             "refresh_token": tokens.get("refresh_token", ""),
-             "username": username})
+        # _save_social_tokens stores expires_at (now + expires_in)
+        # alongside the tokens, so the publish path can refresh the
+        # token before it lapses — X access tokens live ~2 hours.
+        # The handle lives in the note, as before.
+        _save_social_tokens(
+            store, site["id"], "x", tokens,
+            note=(f"Connected as @{username}."
+                  if username else "Connected."))
         back = _integrations_return(urllib.parse.unquote(
             request.cookies.get(X_RETURN_COOKIE, "").strip('"')))
         response = RedirectResponse(back or f"/websites/sites/{site['id']}",

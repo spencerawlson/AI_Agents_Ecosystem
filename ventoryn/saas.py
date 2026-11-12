@@ -3288,6 +3288,97 @@ def exchange_x_code(config: SaasConfig, code: str, code_verifier: str,
     return body
 
 
+def refresh_x_token(config: SaasConfig, refresh_token: str,
+                    urlopen=None) -> dict:
+    """Exchange an X refresh token for new tokens. X rotates the
+    refresh token — the caller must persist the new one BEFORE using
+    the new access token (the old refresh token is single-use;
+    docs/implementation/X_API_VERIFICATION.md §7). Raises SaasError
+    on any failure — the caller tells the customer to reconnect;
+    nothing is posted on a stale token."""
+    auth = base64.b64encode(
+        f"{config.x_client_id}:{config.x_client_secret}".encode("utf-8")
+    ).decode("ascii")
+    body = _http_post_form(X_TOKEN_URL, {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }, headers={"Authorization": f"Basic {auth}"}, urlopen=urlopen)
+    if body.get("error") or not body.get("access_token"):
+        raise SaasError(
+            "X would not renew the connection. Reconnect X to post again.")
+    return body
+
+
+def _x_expiry_iso(expires_in) -> str:
+    """ISO expiry for a fresh X token (now + expires_in), or "" when
+    X did not say how long the token lives."""
+    try:
+        seconds = int(expires_in or 0)
+    except (TypeError, ValueError):
+        seconds = 0
+    if seconds <= 0:
+        return ""
+    return (datetime.now(timezone.utc)
+            + timedelta(seconds=seconds)).isoformat()
+
+
+def _x_token_fresh(detail: dict) -> bool:
+    """True when the stored X access token is good for at least five
+    more minutes. A connection with no expiry stored (connected
+    before expires_at was recorded) counts as stale — refresh once,
+    then the new expiry is stored."""
+    expires_at = detail.get("expires_at") or ""
+    if not expires_at:
+        return False
+    try:
+        expiry = datetime.fromisoformat(str(expires_at))
+    except ValueError:
+        return False
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry - datetime.now(timezone.utc) > timedelta(seconds=300)
+
+
+def fresh_x_access_token(store: SaasStore, config: SaasConfig, site_id: str,
+                         urlopen=None, force: bool = False
+                         ) -> tuple[str, bool]:
+    """A usable X access token for the site, refreshed (and the rotated
+    refresh token saved) when it is about to expire — or when forced.
+    Returns (access_token, was_refreshed). Mirrors
+    tiktok.fresh_access_token. Raises SaasError when X is not
+    connected, when no refresh token is stored, or when the refresh
+    fails — the caller tells the customer to reconnect; nothing is
+    published on a stale token."""
+    connection = store.get_connection(site_id, "x") or {}
+    raw = dict(connection.get("_detail_raw") or {})
+    if connection.get("status") != "connected" or not raw.get("access_token"):
+        raise SaasError("X is not connected for this website.")
+    if not force and _x_token_fresh(raw):
+        return raw["access_token"], False
+    if not raw.get("refresh_token"):
+        # No refresh token was ever stored. When the expiry is unknown
+        # the stored token may still be inside its ~2-hour window, so
+        # return it as-is (best effort); a 401 from it tells the
+        # customer to reconnect. When the token is known-expired —
+        # or this is the retry after a 401 — there is nothing to try.
+        if force or raw.get("expires_at"):
+            raise SaasError(
+                "X needs reconnecting — no refresh token is stored for this site.")
+        return raw["access_token"], False
+    new = refresh_x_token(config, raw["refresh_token"], urlopen=urlopen)
+    # Persist the ROTATED refresh token BEFORE using the new access
+    # token — the old one is single-use.
+    raw.update({
+        "access_token": new["access_token"],
+        "refresh_token": new.get("refresh_token") or raw.get("refresh_token", ""),
+        "expires_in": new.get("expires_in"),
+        "expires_at": _x_expiry_iso(new.get("expires_in")),
+    })
+    store.update_connection(site_id, "x", "connected",
+                            connection.get("note") or "Connected", raw)
+    return raw["access_token"], True
+
+
 def x_userinfo(access_token: str, urlopen=None) -> dict:
     """{"data": {"id": ..., "username": ..., "name": ...}}, or {} on
     any failure — the caller treats {} as "unknown handle", never a
@@ -3365,10 +3456,18 @@ def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
             f" monthly X budget for this site (already ${spent:.2f} spent "
             "this month). Nothing was posted.")
     connection = store.get_connection(site_id, "x")
-    access_token = (connection or {}).get("_detail_raw", {}).get(
-        "access_token", "")
-    if not access_token:
+    if not connection or connection.get("status") != "connected":
         return False, "X is not connected for this site."
+    # X access tokens live ~2 hours: refresh proactively when the
+    # stored one is stale, so a post days after connecting still
+    # works. `refreshed` records whether this call already renewed
+    # the token — a 401 after a fresh token means something else
+    # (revoked, scope), so it is not retried.
+    try:
+        access_token, refreshed = fresh_x_access_token(
+            store, config, site_id, urlopen=urlopen)
+    except SaasError as exc:
+        return False, str(exc)
     text = draft["text"]
     tag = ""
     if draft["link_url"]:
@@ -3379,7 +3478,20 @@ def post_to_x(store: SaasStore, config: SaasConfig, account: dict,
     try:
         result = x_post(access_token, text, urlopen=urlopen)
     except SaasError as exc:
-        return False, str(exc)
+        if "401" in str(exc) and not refreshed:
+            # The token lapsed between the freshness check and the
+            # post — refresh once and retry exactly once.
+            try:
+                access_token, _ = fresh_x_access_token(
+                    store, config, site_id, urlopen=urlopen, force=True)
+            except SaasError as exc2:
+                return False, str(exc2)
+            try:
+                result = x_post(access_token, text, urlopen=urlopen)
+            except SaasError as exc3:
+                return False, str(exc3)
+        else:
+            return False, str(exc)
     tweet_id = (result.get("data") or {}).get("id", "")
     store.decide_social_draft(draft_id, "posted", signature_tag=tag,
                               tweet_id=tweet_id)
