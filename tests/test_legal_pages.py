@@ -21,7 +21,7 @@ def test_pages_are_public_and_complete():
     c = _client()
     p = c.get("/privacy")
     assert p.status_code == 200
-    for must in ("Privacy Policy", "privacy@ventoryn.app", "Spencer Rawlson",
+    for must in ("Privacy Policy", "Axionory", "privacy@axionory.com", "Spencer Rawlson",
                  "Person in charge of personal information", "Law 25",
                  "outside Quebec", "TikTok", "Commission d"):
         assert must in p.text, must
