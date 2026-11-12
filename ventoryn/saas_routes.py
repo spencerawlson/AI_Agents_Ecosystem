@@ -2085,6 +2085,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 {founding_card}
 <h2>Run agent work</h2>
 {_autopilot_card(site)}
+{_video_settings_card(site)}
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
 <form method='post' action='/websites/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
 <label for='job_type'>Job</label>
@@ -2098,7 +2099,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 <div class='v-job-field' data-jobs='social_report'>
 <label for='job_export'>Social export file <span class='muted'>(CSV or JSON, up to 5 MB)</span></label>
 <input id='job_export' name='export' type='file' accept='.csv,.json,text/csv,application/json'></div>
-{_video_fields()}
+{_video_fields(site)}
 <p id='job_hint' class='muted'></p>
 <p><button class='btn btn-primary' type='submit'>Run job</button></p></form>
 <p class='muted'>Nothing is published or posted without your approval.</p></div>
@@ -2291,6 +2292,51 @@ funnel counts it. This is the owner-recorded fallback.</p>
                        f"{esc(label)} — {cost} credits{esc(note)}</option>")
         return "".join(out)
 
+    def _video_settings_card(site: dict) -> str:
+        """This website's voice (ElevenLabs) and presenter (HeyGen) —
+        so each brand has its own face and voice."""
+        from core import media_providers as mp
+
+        voices, avatars = mp.list_voices(), mp.list_avatars()
+        if not voices and not avatars:
+            return ""
+        cur_v, cur_a = site.get("video_voice_id") or "", site.get("video_avatar_id") or ""
+
+        def opt(value, label, cur):
+            sel = " selected" if value == cur else ""
+            return f"<option value='{esc(value)}'{sel}>{esc(label)}</option>"
+        v_opts = opt("", "Server default", cur_v) + "".join(
+            opt(v["id"], v["name"], cur_v) for v in voices)
+        a_opts = (opt("", "Server default", cur_a) + opt("none", "No presenter", cur_a)
+                  + "".join(opt(a["id"], a["name"] + (" (yours)" if a["private"] else ""), cur_a)
+                            for a in avatars))
+        return (f"<div class='card' id='video-settings'><h3>Video presenter and voice</h3>"
+                f"<p class='muted'>Who presents and who speaks in this website's videos. "
+                f"Each brand can have its own.</p>"
+                f"<form method='post' action='/websites/sites/{esc(site['id'])}/video-settings'>"
+                + (f"<label>Voice (ElevenLabs)<select name='voice_id'>{v_opts}</select></label>"
+                   if voices else "<input type='hidden' name='voice_id' value=''>")
+                + (f"<label>Presenter (HeyGen)<select name='avatar_id'>{a_opts}</select></label>"
+                   if avatars else "<input type='hidden' name='avatar_id' value=''>")
+                + "<p><button class='btn' type='submit'>Save</button></p></form></div>")
+
+    @app.post("/websites/sites/{site_id}/video-settings")
+    def site_video_settings(request: Request, site_id: str,
+                            voice_id: str = Form(""), avatar_id: str = Form("")):
+        import re as _re
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            raise HTTPException(404, "website not found")
+        ok = lambda v: v == "" or v == "none" or bool(_re.fullmatch(r"[A-Za-z0-9_-]{1,64}", v))
+        if not (ok(voice_id) and ok(avatar_id)) or voice_id == "none":
+            raise HTTPException(400, "invalid choice")
+        store.set_site_video(site_id, voice_id, avatar_id)
+        return RedirectResponse(f"/websites/sites/{site_id}#video-settings", status_code=303)
+
     def _autopilot_card(site: dict) -> str:
         from ventoryn import autopilot
 
@@ -2416,12 +2462,20 @@ funnel counts it. This is the owner-recorded fallback.</p>
         back = "/portfolio" if return_to == "/portfolio" else f"/websites/sites/{site_id}#autopilot"
         return RedirectResponse(back, status_code=303)
 
-    def _video_fields() -> str:
+    def _video_fields(site: dict) -> str:
         """Video job options: ElevenLabs voiceover and HeyGen presenter,
-        each available only when the server has its keys."""
+        each available only when the server has its keys and the
+        website has a voice / presenter."""
         from core import media_providers as mp
 
         vb, pb = mp.voice_blocker(), mp.presenter_blocker()
+        avatar = site.get("video_avatar_id") or ""
+        if avatar == "none":
+            pb = "no presenter for this website (see Video presenter and voice)"
+        elif avatar and pb == "needs HEYGEN_AVATAR_ID on the server":
+            pb = None
+        if site.get("video_voice_id") and vb == "needs ELEVENLABS_VOICE_ID on the server":
+            vb = None
         voice = (f"<label><input type='checkbox' name='voiceover' value='on' checked> "
                  f"Voiceover (ElevenLabs)</label>" if not vb else
                  f"<p class='muted'>Voiceover (ElevenLabs): {esc(vb)}.</p>")
@@ -2451,6 +2505,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 _signed_page(site["url"], "<p>Unknown job type.</p>", account, current="websites"),
                 status_code=400)
         inputs = {"keywords": keywords[:300], "community": community[:300],
+                  "avatar_id": site.get("video_avatar_id") or "",
                   "voiceover": "on" if voiceover == "on" else "off",
                   "presenter": "heygen" if presenter == "heygen" else ""}
         if export is not None and job_type == "social_report":

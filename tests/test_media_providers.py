@@ -118,8 +118,10 @@ def test_job_form_shows_options_or_what_is_missing(monkeypatch):
     from _signin import operator_store_and_config, sign_in
     from ventoryn.app import create_app
 
+    # Empty, not unset: a developer's own .env (loaded at app start, never
+    # overriding an existing variable) must not leak a real key in here.
     for k in ENV:
-        monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv(k, "")
     store, config = operator_store_and_config()
     client = TestClient(create_app(saas_store=store, saas_config=config))
     acct = sign_in(client, store, email="ada@example.com", sub="s-a", name="Ada")
@@ -188,3 +190,78 @@ def test_video_job_presenter_and_voiceover_off(tmp_path, monkeypatch):
     site_jobs._make_video(site, _script(), tmp_path, "stem2", {"voiceover": "off"},
                           _video_ctx(tmp_path, store))
     assert "voice" not in called  # the owner turned the voiceover off
+
+
+def _client_site():
+    from fastapi.testclient import TestClient
+
+    from _signin import operator_store_and_config, sign_in
+    from ventoryn.app import create_app
+
+    store, config = operator_store_and_config()
+    client = TestClient(create_app(saas_store=store, saas_config=config))
+    acct = sign_in(client, store, email="ada@example.com", sub="s-a", name="Ada")
+    return client, store, acct, store.create_site(acct["id"], "https://shop.example.com")
+
+
+def test_each_website_picks_its_voice_and_presenter(monkeypatch):
+    monkeypatch.setattr(mp, "list_voices", lambda: [{"id": "liam1", "name": "Liam"},
+                                                    {"id": "nura1", "name": "Nura"}])
+    monkeypatch.setattr(mp, "list_avatars", lambda: [{"id": "jerrod1", "name": "Jerrod", "private": True}])
+    client, store, acct, site = _client_site()
+    html = client.get(f"/websites/sites/{site['id']}").text
+    assert "Video presenter and voice" in html and "Jerrod (yours)" in html
+    r = client.post(f"/websites/sites/{site['id']}/video-settings",
+                    data={"voice_id": "nura1", "avatar_id": "none"}, follow_redirects=False)
+    assert r.status_code == 303
+    s = store.get_site(site["id"])
+    assert (s["video_voice_id"], s["video_avatar_id"]) == ("nura1", "none")
+    assert client.post(f"/websites/sites/{site['id']}/video-settings",
+                       data={"voice_id": "<x>", "avatar_id": ""}).status_code == 400
+
+
+def test_cannot_change_someone_elses_video_settings():
+    client, store, acct, site = _client_site()
+    other = store.create_account("s2", "bo@example.com", "Bo")
+    theirs = store.create_site(other["id"], "https://blog.example.org")
+    r = client.post(f"/websites/sites/{theirs['id']}/video-settings",
+                    data={"voice_id": "x", "avatar_id": "y"})
+    assert r.status_code == 404 and store.get_site(theirs["id"])["video_avatar_id"] == ""
+
+
+def test_job_uses_the_websites_own_voice_and_presenter(tmp_path, monkeypatch):
+    from ventoryn import site_jobs
+    from ventoryn.saas import SaasStore
+    import core.video_render as vr
+
+    store = SaasStore(":memory:")
+    acct = store.create_account("s", "a@example.com", "A")
+    site = store.create_site(acct["id"], "https://shop.example.com")
+    store.set_site_video(site["id"], "nura1", "jerrod1")
+    site = store.get_site(site["id"])
+    got = {}
+    monkeypatch.setattr(mp, "heygen_presenter_video", lambda script, out, **k: got.update(k) or {
+        "path": str(out), "video_id": "v", "seconds": 20.0, "cost_usd": None})
+    site_jobs._make_video(site, _script(), tmp_path, "s1", {"presenter": "heygen"},
+                          _video_ctx(tmp_path, store))
+    assert got["avatar_id"] == "jerrod1"
+    monkeypatch.setattr(mp, "voice_ready", lambda env=None: True)
+    monkeypatch.setattr(mp, "elevenlabs_voiceover", lambda text, out, **k: got.update(voice=k.get("voice_id")) or (
+        Path(out).write_bytes(b"ID3"), {"path": str(out), "characters": 5, "cost_usd": None})[1])
+    monkeypatch.setattr(mp, "audio_seconds", lambda p: 0)
+    monkeypatch.setattr(vr, "render_video", lambda script, out, size, audio=None: {
+        "video": str(out), "srt": "", "duration_s": 15, "scenes": 3})
+    site_jobs._make_video(site, _script(), tmp_path, "s2", {"voiceover": "on"}, _video_ctx(tmp_path, store))
+    assert got["voice"] == "nura1"
+
+
+def test_website_without_presenter_is_refused_before_charging(monkeypatch):
+    from ventoryn import site_jobs
+
+    monkeypatch.setattr(site_jobs, "server_blocker", lambda jt: None)  # AI key / ffmpeg not under test
+    monkeypatch.setenv("HEYGEN_API_KEY", "k")
+    monkeypatch.setenv("HEYGEN_AVATAR_ID", "jerrod1")
+    with pytest.raises(site_jobs.JobUnavailable, match="no presenter"):
+        site_jobs.preflight("video_render", {"presenter": "heygen", "avatar_id": "none"})
+    monkeypatch.delenv("HEYGEN_AVATAR_ID")
+    site_jobs.preflight("video_render", {"presenter": "heygen", "avatar_id": "jerrod1"})  # ok

@@ -105,6 +105,11 @@ def preflight(job_type: str, inputs: dict) -> None:
         from core.media_providers import presenter_blocker
 
         why = presenter_blocker()
+        site_avatar = inputs.get("avatar_id") or ""
+        if site_avatar == "none":
+            why = "this website has no presenter (choose one in its video settings)"
+        elif site_avatar and why == "needs HEYGEN_AVATAR_ID on the server":
+            why = None  # the website's own presenter is enough
         if why:
             raise JobUnavailable(f"HeyGen presenter — {why}. Nothing was charged.")
     if job_type == "community_listening" and not parse_list(inputs.get("keywords")):
@@ -312,7 +317,8 @@ def _make_video(site, script, videos, stem, inputs, ctx):
 
     if inputs.get("presenter") == "heygen":
         made = mp.heygen_presenter_video(narration, videos / f"{stem}.mp4",
-                                         title=script["title"])
+                                         title=script["title"],
+                                         avatar_id=site.get("video_avatar_id") or "")
         record("heygen", made["seconds"], "seconds", made["cost_usd"])
         return ({"video": made["path"], "srt": "", "duration_s": round(made["seconds"], 1),
                  "scenes": len(script["scenes"])},
@@ -320,7 +326,8 @@ def _make_video(site, script, videos, stem, inputs, ctx):
     extras = []
     audio = None
     if str(inputs.get("voiceover", "on")) != "off" and mp.voice_ready():
-        voice = mp.elevenlabs_voiceover(narration, videos / f"{stem}.mp3")
+        voice = mp.elevenlabs_voiceover(narration, videos / f"{stem}.mp3",
+                                        voice_id=site.get("video_voice_id") or "")
         record("elevenlabs", voice["characters"], "characters", voice["cost_usd"])
         seconds = mp.audio_seconds(Path(voice["path"]))
         if seconds:
