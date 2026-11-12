@@ -92,7 +92,15 @@ def _call(url: str, *, data: dict | None = None, form: dict | None = None,
                                      CREATOR_URL,) else "GET")
     try:
         with (urlopen or urllib.request.urlopen)(req, timeout=30) as resp:
-            out = json.loads(resp.read() or b"{}")
+            raw = resp.read() or b"{}"
+            try:
+                out = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                status = getattr(resp, "status", "?")
+                snippet = raw[:200].decode("utf-8", "replace")
+                raise TikTokError(
+                    f"TikTok answered HTTP {status} with a non-JSON body: {snippet}"
+                ) from None
     except urllib.error.HTTPError as exc:
         try:
             out = json.loads(exc.read() or b"{}")

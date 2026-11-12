@@ -248,6 +248,54 @@ def test_http_layer_sends_the_documented_requests():
     assert sent[2].get_method() == "POST"
 
 
+def test_non_json_tiktok_answer_raises_tiktok_error():
+    def urlopen(req, timeout=30):
+        return _Resp(b"<html><body>Bad Gateway</body></html>")
+    with pytest.raises(tt.TikTokError, match="non-JSON"):
+        tt.publish("a", "https://x/v.mp4", mode="direct", post_info={}, urlopen=urlopen)
+
+
+def test_publish_without_publish_id_raises_tiktok_error():
+    def urlopen(req, timeout=30):
+        return _Resp(json.dumps({"data": {}, "error": {"code": "ok", "message": ""}}).encode())
+    with pytest.raises(tt.TikTokError, match="did not return a publish id"):
+        tt.publish("a", "https://x/v.mp4", mode="direct", post_info={}, urlopen=urlopen)
+
+
+def test_publish_error_surfaces_at_400_not_502(client, store, reports, fake, monkeypatch):
+    from _signin import fresh_totp_code
+
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://www.road2cissp.com")
+    job = _approved(store, acct, site, reports)
+    _connect(client, store, site)
+    def boom(tok, url, *, mode, post_info=None, **k):
+        raise tt.TikTokError("TikTok: video too long")
+    monkeypatch.setattr(tt, "publish", boom)
+    url = f"/websites/sites/{site['id']}/videos/{job['id']}/tiktok"
+    r = client.post(url, data={"title": "CISSP in 60s", "privacy": "SELF_ONLY",
+                               "allow_comment": "1", "is_aigc": "1", "mode": "direct",
+                               "totp_code": fresh_totp_code(store, acct["id"])})
+    assert r.status_code == 400 and "video too long" in r.text
+    assert not fake["publish"]
+
+
+def test_creator_info_error_surfaces_at_400_not_502(client, store, reports, fake, monkeypatch):
+    from _signin import fresh_totp_code
+
+    acct = _login(client, store)
+    site = store.create_site(acct["id"], "https://www.road2cissp.com")
+    job = _approved(store, acct, site, reports)
+    _connect(client, store, site)
+    def boom(tok, **k):
+        raise tt.TikTokError("TikTok: creator lookup failed")
+    monkeypatch.setattr(tt, "creator_info", boom)
+    url = f"/websites/sites/{site['id']}/videos/{job['id']}/tiktok"
+    r = client.post(url, data={"title": "CISSP in 60s", "privacy": "SELF_ONLY",
+                               "totp_code": fresh_totp_code(store, acct["id"])})
+    assert r.status_code == 400 and "creator lookup failed" in r.text
+
+
 def test_website_added_before_tiktok_existed_can_connect(client, store, reports, fake):
     acct = _login(client, store)
     site = store.create_site(acct["id"], "https://www.road2cissp.com")
