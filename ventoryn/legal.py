@@ -11,24 +11,26 @@ from __future__ import annotations
 
 from ventoryn import ui
 
-CONTACT = "privacy@ventoryn.app"
+BRAND = "Axionory"
+SITE = "www.axionory.com"
+CONTACT = "privacy@axionory.com"
 OPERATOR = "Spencer Rawlson"
 EFFECTIVE = "November 12, 2026"
 
-_NAV = ("<p class='muted'><a href='/'>Ventoryn</a> &mdash; <a href='/privacy'>Privacy Policy</a>"
+_NAV = (f"<p class='muted'><a href='/'>{BRAND}</a> &mdash; <a href='/privacy'>Privacy Policy</a>"
         " &mdash; <a href='/terms'>Terms of Service</a></p>")
 
 PRIVACY = f"""
 <h1>Privacy Policy</h1>
 <p class='muted'>Effective {EFFECTIVE}</p>
-<p>Ventoryn (&ldquo;Ventoryn&rdquo;, &ldquo;we&rdquo;) is an AI customer-acquisition service
+<p>{BRAND} (&ldquo;{BRAND}&rdquo;, &ldquo;we&rdquo;) is an AI customer-acquisition service
 operated by {OPERATOR} in Quebec, Canada. This policy explains what personal information we
 collect, why, who we share it with, and the choices you have. We follow Quebec&rsquo;s
 <em>Act respecting the protection of personal information in the private sector</em> (Law 25)
 and Canada&rsquo;s PIPEDA.</p>
 
 <h2>Person in charge of personal information</h2>
-<p>{OPERATOR} is responsible for the protection of personal information at Ventoryn.
+<p>{OPERATOR} is responsible for the protection of personal information at {BRAND}.
 Contact: <a href='mailto:{CONTACT}'>{CONTACT}</a>.</p>
 
 <h2>What we collect</h2>
@@ -45,11 +47,11 @@ basic profile information (such as your display name and avatar) to show which a
 <li><strong>Sales:</strong> if you connect Stripe sales for a website, we receive payment events
 (amount, currency, payment identifiers, refunds and disputes) to count paying customers. Revenue is
 hidden by default and is never written to logs. We never see card numbers.</li>
-<li><strong>Billing:</strong> your Ventoryn subscription is processed by Stripe; we keep your Stripe
+<li><strong>Billing:</strong> your {BRAND} subscription is processed by Stripe; we keep your Stripe
 customer and subscription identifiers and your credit balance.</li>
 <li><strong>Agent work:</strong> the reports, article drafts, campaign posts and videos our agents
 make for your websites, and what each job used (credits, characters, video seconds).</li>
-<li><strong>Ventoryn Analytics (on websites that install it):</strong> page views and events without
+<li><strong>{BRAND} Analytics (on websites that install it):</strong> page views and events without
 cookies or local storage. A visitor is counted with a one-way hash of a daily secret, the site, the IP
 address and the browser; the secret changes every day and is deleted, IP addresses and browser strings
 are never stored, and raw events are rolled up into daily totals and deleted.</li>
@@ -101,7 +103,7 @@ incident puts your information at risk we will notify you and the authorities as
 connection to another service. No advertising or tracking cookies.</p>
 
 <h2>Children</h2>
-<p>Ventoryn is a business service for people 18 and older.</p>
+<p>{BRAND} is a business service for people 18 and older.</p>
 
 <h2>Changes</h2>
 <p>We will post changes here with a new effective date, and tell account holders about material
@@ -111,11 +113,11 @@ changes.</p>
 TERMS = f"""
 <h1>Terms of Service</h1>
 <p class='muted'>Effective {EFFECTIVE}</p>
-<p>These terms govern your use of Ventoryn, operated by {OPERATOR} in Quebec, Canada (&ldquo;we&rdquo;).
+<p>These terms govern your use of {BRAND}, operated by {OPERATOR} in Quebec, Canada (&ldquo;we&rdquo;).
 By creating an account you agree to them.</p>
 
 <h2>The service</h2>
-<p>Ventoryn&rsquo;s AI agents analyse your websites, research your audience and draft articles,
+<p>{BRAND}&rsquo;s AI agents analyse your websites, research your audience and draft articles,
 social posts, campaigns and videos. You review everything: nothing is published, posted or sent
 without your explicit approval. Verified attribution shows which approved actions led to paying
 customers when you connect the required accounts.</p>
@@ -134,7 +136,7 @@ sales.</p>
 
 <h2>Third-party platforms and costs</h2>
 <p>Posting to X, Facebook, Instagram or TikTok, and voiceovers and videos from ElevenLabs or HeyGen,
-use those services under their own terms. Some charge per use; Ventoryn shows an estimate before you
+use those services under their own terms. Some charge per use; {BRAND} shows an estimate before you
 approve and records what was spent. You are responsible for following each platform&rsquo;s rules,
 including labelling AI-generated content where required.</p>
 
@@ -144,16 +146,16 @@ to provide the service. Drafts produced by the agents are yours once you approve
 responsible for what you approve and publish: check it for accuracy, rights and compliance.</p>
 
 <h2>Acceptable use</h2>
-<p>Do not use Ventoryn for spam, deceptive or illegal content, harassment, impersonation, infringing
+<p>Do not use {BRAND} for spam, deceptive or illegal content, harassment, impersonation, infringing
 material, or to get around a platform&rsquo;s limits, and do not attempt to break or overload the
 service. We may suspend accounts that do.</p>
 
 <h2>Availability and changes</h2>
-<p>We work to keep Ventoryn running but do not promise uninterrupted service. We may change features or
+<p>We work to keep {BRAND} running but do not promise uninterrupted service. We may change features or
 these terms; material changes will be announced to account holders before they take effect.</p>
 
 <h2>Liability</h2>
-<p>To the extent the law allows, Ventoryn is provided &ldquo;as is&rdquo;, and our total liability for
+<p>To the extent the law allows, {BRAND} is provided &ldquo;as is&rdquo;, and our total liability for
 any claim is limited to the amount you paid us in the three months before it. Nothing in these terms
 limits rights you have under the consumer protection laws of Quebec or your place of residence.</p>
 
