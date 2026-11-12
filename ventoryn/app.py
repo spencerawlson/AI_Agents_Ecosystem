@@ -4559,6 +4559,8 @@ Signups read unavailable because no signup tracking is connected yet.</p>
         ("plausible", "Plausible", "Optional: bring visitor numbers from "
          "Plausible. Axionory Analytics already counts visitors without "
          "it.", "#5850ec"),
+        ("tiktok", "TikTok", "Post each website's approved videos to its "
+         "own TikTok account. You set up and confirm every post.", "#010101"),
         ("reddit", "Reddit", "Not available: Reddit no longer offers the "
          "free API access this needs.", "#ff4500"),
     )
@@ -4724,6 +4726,21 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     "<p class='muted'>The operator has not set up Axionory's "
                     "Meta app yet, so this website cannot connect. Nothing "
                     "is faked.</p>")
+        elif kind == "tiktok":
+            from ventoryn import tiktok as _tt
+
+            if connected:
+                parts.append("<p class='muted'>Post this website's approved videos from "
+                             "<a href='/approvals'>Approvals</a> with Post to TikTok.</p>")
+            elif _tt.configured():
+                parts.append(
+                    f"<p class='muted'>You will sign in to TikTok and approve Axionory's "
+                    f"access for this website's account, then come back here.</p>"
+                    f"<p><a class='btn btn-primary' href='/websites/sites/{sid}"
+                    f"/connections/tiktok/start'>Connect with TikTok</a></p>")
+            else:
+                parts.append("<p class='muted'>The operator has not set up Axionory's "
+                             "TikTok app yet, so this website cannot connect.</p>")
         else:
             parts.append("<p class='muted'>Reddit no longer offers the free API "
                          "access this would need, so this connection is not "
