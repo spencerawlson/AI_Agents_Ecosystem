@@ -2,7 +2,7 @@
 reference-image reading (2026-11-08).
 
 - Images 1 + 2 are both the landing page: WORDING from image 1
-  ("Become a Axionory Founding Customer", "Let AI Find Them. You Approve
+  ("Become an Axionory Founding Customer", "Let AI Find Them. You Approve
   Every Move.", the five steps, the trust statements); DASHBOARD
   PREVIEW VISUAL from image 2 (light, clean dashboard panels with
   charts and tables) — the hero keeps image 1's navy background and
@@ -33,7 +33,7 @@ def test_hero_copy_exact():
     r = _landing()
     assert r.status_code == 200
     assert "AI-Powered Customer Acquisition" in r.text
-    assert "Become a Axionory" in r.text and "Founding Customer" in r.text
+    assert "Become an Axionory" in r.text and "Founding Customer" in r.text
     # The program name is gradient text (image 1's "100" was).
     assert 'class="grad">Founding Customer</span>' in r.text
     assert "Let AI Find Them. You Approve Every Move." in r.text

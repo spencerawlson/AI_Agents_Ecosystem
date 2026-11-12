@@ -1472,7 +1472,7 @@ section.alt { background: var(--bg-tint); }
 <div class="wrap hero-grid">
 <div class="hero-copy">
 <span class="eyebrow">AI-Powered Customer Acquisition</span>
-<h1>Become a Axionory <span class="grad">Founding Customer</span>.</h1>
+<h1>Become an Axionory <span class="grad">Founding Customer</span>.</h1>
 <h2 class="sub">Let AI Find Them. You Approve Every Move.</h2>
 <p class="lede">Enter your website, connect your accounts, and let
 Axionory&rsquo;s AI agents discover your audience, prepare campaigns, and
