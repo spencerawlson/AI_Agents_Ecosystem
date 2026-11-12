@@ -84,8 +84,13 @@ def test_preview_light_panels_image2_style():
                  "Attribution", "Integrations", "Settings"):
         assert item in r.text
     assert "Last 30 Days" in r.text
-    # Verified-customers cell: honest text, no counter, no goal.
-    assert "Verified customers appear here as signed sales land" in r.text
+    # Verified-customers cell: a donut (not a graph), plus revenue/profit —
+    # matching how the real platform shows these, not a fake line chart.
+    assert "1,000" in r.text and "verified" in r.text
+    assert "$25,896.07" in r.text and "Revenue" in r.text
+    assert "$3,006.87" in r.text and "Costs" in r.text
+    assert "$22,889.20" in r.text and "Net profit" in r.text
+    assert "Each one traced from an approved action to a Stripe checkout." in r.text
     assert "24 of 100" not in r.text
     assert "24 / 100" not in r.text
     assert "Goal: First 100" not in r.text
@@ -114,11 +119,6 @@ def test_preview_agents_queue_attribution():
     assert "Review proposed Reddit post" in r.text
     assert "Approve X engagement draft" in r.text
     assert "Review community outreach opportunity" in r.text
-    assert "Approved Campaign" in r.text and "Signed Link" in r.text
-    assert "Reddit Campaign #RD-4827" in r.text
-    # Revenue hidden by default in the demo.
-    assert "$••• hidden" in r.text
-    assert "Reveal example revenue" in r.text
 
 
 def test_how_it_works_image1():

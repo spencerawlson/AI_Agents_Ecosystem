@@ -1177,8 +1177,6 @@ section.alt { background: var(--bg-tint); }
 .ring-num small { display: block; font-size: 13px; color: var(--muted);
   font-weight: 600; }
 .ring-sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
-.trend { margin-top: 12px; }
-.trend svg { display: block; width: 100%; height: auto; }
 .counter { font-size: 34px; font-weight: 800; color: var(--violet-deep); }
 .counter small { font-size: 16px; color: var(--muted); font-weight: 600; }
 .funnel-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0;
@@ -1203,17 +1201,8 @@ section.alt { background: var(--bg-tint); }
   color: var(--violet-deep); white-space: nowrap; }
 .pill.green { background: #dcfce7; color: #166534; }
 .pill.amber { background: #fef3c7; color: #92400e; }
-.trace { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  font-size: 13px; }
-.trace .tstep { background: #fff; border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 10px; font-weight: 600; }
-.trace .tarrow { color: var(--violet-deep); display: inline-flex;
-  align-items: center; flex: 0 0 auto; }
-.trace .tarrow svg { display: block; }
 .demo-note { background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
   border-radius: 10px; padding: 10px 14px; font-size: 13px; margin: 16px 0 0; }
-.demo-revenue { font-size: 15px; }
-.demo-revenue .hidden-amt { color: var(--muted); letter-spacing: .1em; }
 /* -- steps (§6) -- */
 .steps { list-style: none; padding: 0; margin: 0; display: grid;
   grid-template-columns: repeat(5, 1fr); gap: 28px; }
@@ -1509,7 +1498,7 @@ to fix. Nothing is published.</p>
 <div id="landing-cta" hidden></div>
 </div>
 </div>
-<div class="preview" role="img" aria-label="Illustrative preview of the Axionory dashboard: verified customers, acquisition funnel, agent activity, approval queue, and a conversion attribution trace. All numbers are example data.">
+<div class="preview" role="img" aria-label="Illustrative preview of the Axionory dashboard: verified customers, revenue and profit, acquisition funnel, agent activity, and approval queue. All numbers are example data.">
 <div class="preview-bar">
 <span class="dot" style="background:#ff5f57"></span>
 <span class="dot" style="background:#febc2e"></span>
@@ -1537,9 +1526,12 @@ to fix. Nothing is published.</p>
 <div class="preview-grid">
 <div class="preview-cell">
 <h3>Verified customers</h3>
-<p>Verified customers appear here as signed sales land — each one
-traced from an approved action to a Stripe checkout.</p>
-<div class="trend"><svg viewBox="0 0 300 64" role="img" aria-label="Illustrative acquisition trend of verified customers over time"><polyline points="0,56 30,54 60,50 90,48 120,44 150,38 180,34 210,28 240,20 270,12 300,8" fill="none" stroke="#8b5cf6" stroke-width="2.5"/></svg></div>
+<div class="ring-wrap">
+<svg width="120" height="120" viewBox="0 0 140 140" role="img" aria-label="1,000 verified customers"><circle cx="70" cy="70" r="54" fill="none" stroke="#e9e4fb" stroke-width="22"/><circle cx="70" cy="70" r="54" fill="none" stroke="#16a34a" stroke-width="22" stroke-dasharray="339.3 0" transform="rotate(-90 70 70)"/><text x="70" y="66" text-anchor="middle" font-size="26" font-weight="800" fill="#1a1a2e">1,000</text><text x="70" y="84" text-anchor="middle" font-size="12" fill="#666">verified</text></svg>
+<div><div class="ring-num">$25,896.07<small>Revenue</small></div>
+<div class="ring-sub">Costs $3,006.87 &middot; Net profit <strong style="color:#16a34a">$22,889.20</strong></div></div>
+</div>
+<p class="muted" style="margin:10px 0 0">Each one traced from an approved action to a Stripe checkout.</p>
 </div>
 <div class="preview-cell">
 <h3>Acquisition funnel</h3>
@@ -1564,15 +1556,6 @@ traced from an approved action to a Stripe checkout.</p>
 <div class="queue-row">Review community outreach opportunity <span class="pill">Review</span></div>
 <p class="muted" style="margin:8px 0 0">Proposed actions — nothing is
 published until you approve it.</p>
-</div>
-<div class="preview-cell wide">
-<h3>Conversion attribution — example trace</h3>
-<div class="trace"><span class="tstep">Approved Campaign</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Signed Link</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Website Visit</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Stripe Checkout</span><span class="tarrow"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4.5L12.5 8 9 11.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="tstep">Verified Customer</span> <span class="pill green">Verified</span></div>
-<p class="muted" style="margin:10px 0 0">Attribution: Reddit Campaign #RD-4827 — <span class="pill green">Verified</span></p>
-<p class="demo-revenue" style="margin:12px 0 0">Revenue for this example
-customer: <span class="hidden-amt" id="demo-revenue-value">$••• hidden</span>
-— revenue is private by default.
-<button class="btn" id="demo-revenue-toggle" type="button" style="min-height:36px;line-height:36px;margin-left:8px">Reveal example revenue</button></p>
 </div>
 </div>
 <p class="demo-note"><strong>Illustrative product preview — not live customer data.</strong> Every
@@ -1876,17 +1859,7 @@ if (dropBtn && dropItem) {{
     }});
   }});
 }}
-// Demo revenue reveal (§5): example figures only, hidden by default.
-const demoToggle = $("demo-revenue-toggle");
-const demoValue = $("demo-revenue-value");
-if (demoToggle && demoValue) {{
-  demoToggle.addEventListener("click", () => {{
-    const hidden = demoValue.textContent.indexOf("hidden") !== -1;
-    demoValue.textContent = hidden ? "$1,240 (example)" : "$••• hidden";
-    demoToggle.textContent = hidden ? "Hide example revenue"
-      : "Reveal example revenue";
-  }});
-}}
+
 </script>
 </body></html>"""
 
