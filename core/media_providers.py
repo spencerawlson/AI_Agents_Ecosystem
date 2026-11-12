@@ -123,15 +123,18 @@ def _request(url: str, *, method: str = "GET", headers: dict, body: dict | None 
 
 # -- ElevenLabs: text -> MP3 ------------------------------------------------
 
-def elevenlabs_voiceover(text: str, out_path: Path, *, env=None, urlopen=None) -> dict:
-    """Write an MP3 voiceover of ``text``. Returns {path, characters, cost_usd}."""
-    blocker = voice_blocker(env)
-    if blocker:
-        raise MediaProviderError(f"Voiceover unavailable — {blocker}")
+def elevenlabs_voiceover(text: str, out_path: Path, *, env=None, urlopen=None,
+                         voice_id: str = "") -> dict:
+    """Write an MP3 voiceover of ``text`` (``voice_id`` overrides the
+    server's default voice). Returns {path, characters, cost_usd}."""
+    if not _env("ELEVENLABS_API_KEY", env):
+        raise MediaProviderError("Voiceover unavailable — needs ELEVENLABS_API_KEY on the server")
+    if not (voice_id or _env("ELEVENLABS_VOICE_ID", env)):
+        raise MediaProviderError("Voiceover unavailable — no voice chosen")
     text = " ".join(str(text).split())
     if not text:
         raise MediaProviderError("nothing to say: the script has no narration")
-    voice = urllib.parse.quote(_env("ELEVENLABS_VOICE_ID", env), safe="")
+    voice = urllib.parse.quote(voice_id or _env("ELEVENLABS_VOICE_ID", env), safe="")
     url = f"{ELEVENLABS_BASE}/v1/text-to-speech/{voice}?output_format=mp3_44100_128"
     status, audio = _request(url, method="POST",
                              headers={"xi-api-key": _env("ELEVENLABS_API_KEY", env),
@@ -151,14 +154,18 @@ def elevenlabs_voiceover(text: str, out_path: Path, *, env=None, urlopen=None) -
 # -- HeyGen v3: script -> presenter MP4 -------------------------------------
 
 def heygen_create(script: str, *, env=None, urlopen=None, aspect_ratio: str = "9:16",
-                  resolution: str = "720p", title: str = "") -> str:
-    blocker = presenter_blocker(env)
-    if blocker:
-        raise MediaProviderError(f"Presenter unavailable — {blocker}")
-    body = {"type": "avatar", "avatar_id": _env("HEYGEN_AVATAR_ID", env),
+                  resolution: str = "720p", title: str = "", avatar_id: str = "") -> str:
+    if not _env("HEYGEN_API_KEY", env):
+        raise MediaProviderError("Presenter unavailable — needs HEYGEN_API_KEY on the server")
+    avatar = avatar_id or _env("HEYGEN_AVATAR_ID", env)
+    if not avatar or avatar == "none":
+        raise MediaProviderError("Presenter unavailable — no presenter chosen for this website")
+    body = {"type": "avatar", "avatar_id": avatar,
             "script": " ".join(str(script).split()), "aspect_ratio": aspect_ratio,
             "resolution": resolution}
-    if _env("HEYGEN_VOICE_ID", env):
+    # The avatar's own voice unless the server sets one — and only for
+    # the server's default avatar (another avatar keeps its own voice).
+    if _env("HEYGEN_VOICE_ID", env) and not avatar_id:
         body["voice_id"] = _env("HEYGEN_VOICE_ID", env)
     if title:
         body["title"] = title[:100]
@@ -181,10 +188,11 @@ def heygen_status(video_id: str, *, env=None, urlopen=None) -> dict:
 
 def heygen_presenter_video(script: str, out_path: Path, *, env=None, urlopen=None,
                            title: str = "", timeout_s: int = 900, poll_s: float = 10,
-                           sleep=time.sleep) -> dict:
+                           sleep=time.sleep, avatar_id: str = "") -> dict:
     """Make a vertical presenter video and download it.
     Returns {path, video_id, seconds, cost_usd}."""
-    video_id = heygen_create(script, env=env, urlopen=urlopen, title=title)
+    video_id = heygen_create(script, env=env, urlopen=urlopen, title=title,
+                             avatar_id=avatar_id)
     waited = 0.0
     while True:
         data = heygen_status(video_id, env=env, urlopen=urlopen)
@@ -210,6 +218,55 @@ def heygen_presenter_video(script: str, out_path: Path, *, env=None, urlopen=Non
     seconds = float(data.get("duration") or 0)
     return {"path": str(out_path), "video_id": video_id, "seconds": seconds,
             "cost_usd": presenter_cost_usd(seconds, env)}
+
+
+# -- choices for the settings form (cached: one listing per hour) ------------
+
+_LIST_CACHE: dict = {}
+
+
+def _cached(name, fetch, ttl=3600):
+    hit = _LIST_CACHE.get(name)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    try:
+        value = fetch()
+    except Exception:  # noqa: BLE001 - a listing failure only empties the menu
+        value = []
+    _LIST_CACHE[name] = (time.time(), value)
+    return value
+
+
+def list_voices(env=None, urlopen=None) -> list[dict]:
+    """[{id, name}] of the ElevenLabs voices on the account ([] without a key)."""
+    if not _env("ELEVENLABS_API_KEY", env):
+        return []
+
+    def fetch():
+        _s, raw = _request(f"{ELEVENLABS_BASE}/v2/voices?page_size=100",
+                           headers={"xi-api-key": _env("ELEVENLABS_API_KEY", env)},
+                           urlopen=urlopen, timeout=20)
+        return [{"id": v["voice_id"], "name": v.get("name", "")}
+                for v in json.loads(raw).get("voices", [])]
+    return _cached("voices", fetch)
+
+
+def list_avatars(env=None, urlopen=None) -> list[dict]:
+    """[{id, name, private}] HeyGen avatar looks: the account's own first,
+    then up to 50 public ones ([] without a key)."""
+    if not _env("HEYGEN_API_KEY", env):
+        return []
+
+    def fetch():
+        out = []
+        for own in ("private", "public"):
+            _s, raw = _request(f"{HEYGEN_BASE}/v3/avatars/looks?ownership={own}&limit=50",
+                               headers={"x-api-key": _env("HEYGEN_API_KEY", env)},
+                               urlopen=urlopen, timeout=20)
+            out += [{"id": a["id"], "name": a.get("name", ""), "private": own == "private"}
+                    for a in json.loads(raw).get("data", [])]
+        return out
+    return _cached("avatars", fetch)
 
 
 # -- fitting scenes to a voiceover -------------------------------------------

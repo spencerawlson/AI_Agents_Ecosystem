@@ -610,6 +610,11 @@ CREATE TABLE IF NOT EXISTS saas_social_spend (
 #: EXISTS cannot add a column to an existing table). Never remove an
 #: entry from this list.
 _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    # Per-website video settings: the ElevenLabs voice and the HeyGen
+    # presenter for that website's videos ("" = server default,
+    # "none" = no presenter for this website).
+    ("saas_sites", "video_voice_id", "TEXT NOT NULL DEFAULT ''"),
+    ("saas_sites", "video_avatar_id", "TEXT NOT NULL DEFAULT ''"),
     # Campaigns: drafts belong to a campaign, get a posting date when
     # the owner approves it, and keep a note when a post is held.
     ("saas_social_drafts", "campaign_id", "TEXT NOT NULL DEFAULT ''"),
@@ -1439,6 +1444,12 @@ class SaasStore:
             rows = self._conn.execute(
                 "SELECT * FROM saas_sites ORDER BY created_at").fetchall()
         return [_row_dict(r) for r in rows]
+
+    def set_site_video(self, site_id: str, voice_id: str, avatar_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_sites SET video_voice_id = ?, video_avatar_id = ? WHERE id = ?",
+                (voice_id[:64], avatar_id[:64], site_id))
 
     def set_site_autopilot(self, site_id: str, on: bool) -> None:
         with self._lock, self._conn:
