@@ -33,7 +33,7 @@ from ventoryn.saas import CREDIT_COSTS, InsufficientCredits
 
 #: (job type, days between runs)
 AUTOPILOT_JOBS: tuple[tuple[str, int], ...] = (
-    ("analyze", 7), ("seo_article", 7), ("x_campaign", 7))
+    ("analyze", 7), ("seo_article", 7), ("x_campaign", 7), ("video_render", 7))
 RETRY_AFTER_FAILURE = timedelta(days=1)
 TICK_SECONDS = 600
 AUTO_PREFIX = "Automatic — "
@@ -64,6 +64,16 @@ def due_jobs(store, site: dict, now: datetime) -> list[str]:
         # has not decided the last one.
         if job_type == "x_campaign" and store.open_campaign_for_site(site["id"]):
             continue
+        # Weekly video only where the owner chose a presenter (HeyGen is a
+        # paid API), and not while the last one still waits for review.
+        if job_type == "video_render":
+            avatar = site.get("video_avatar_id") or ""
+            if not avatar or avatar == "none":
+                continue
+            last_video = store.last_job(site["id"], "video_render")
+            if (last_video and last_video.get("status") == "done"
+                    and store.video_review_status(last_video["id"]) == "pending"):
+                continue
         last = store.last_job(site["id"], job_type)
         if last is None:
             due.append(job_type)
@@ -160,9 +170,13 @@ def run_once(store, config, *, orchestrator, reports_dir: Path,
             if not is_op and store.credit_balance(account["id"]) < CREDIT_COSTS[job_type]:
                 continue
             try:
+                inputs = {"source": "autopilot"}
+                if job_type == "video_render":
+                    inputs.update(presenter="heygen", voiceover="off",
+                                  avatar_id=site.get("video_avatar_id") or "")
                 ran.append(execute(store, config, account, site, job_type,
                                    orchestrator=orchestrator, reports_dir=reports_dir,
-                                   inputs={"source": "autopilot"}))
+                                   inputs=inputs))
             except InsufficientCredits:
                 continue
     return ran
