@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pytest
 
 from test_saas_shell import _account, _login, client, config, store  # noqa: F401
-from ventoryn import autopilot, site_jobs
+from ventoryn import autopilot, saas, site_jobs
 
 NOW = datetime.now(timezone.utc)
 
@@ -27,6 +27,19 @@ def fake_jobs(monkeypatch):
 
     monkeypatch.setattr(site_jobs, "run", fake_run)
     monkeypatch.setattr(site_jobs, "server_blocker", lambda jt: None)
+    # Pin the store's clock to the same fictional NOW the tests below
+    # drive due_jobs() with via _run(now=...). Without this, a job's
+    # created_at is stamped with the REAL wall-clock time (SaasStore
+    # calls datetime.now() directly, independent of the `now` passed
+    # to autopilot.run_once) — in an isolated run that is milliseconds
+    # off from NOW (captured at module import, i.e. pytest collection)
+    # and nothing notices, but in the full suite enough real time can
+    # pass between collection and this test actually running that a
+    # "due after 7 days + 1 second" check loses its only margin and
+    # the test flakes. Pinning it removes the dependency on real time
+    # entirely — these tests only ever read back their own stamps
+    # through the same fictional clock they wrote them with.
+    monkeypatch.setattr(saas, "_now", lambda: NOW)
     return calls
 
 
