@@ -167,6 +167,10 @@ REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 #: URL onward in its form, so the visitor never retypes it.
 PENDING_SITE_COOKIE = "ventoryn_pending_site"
 PENDING_SITE_TTL_SECONDS = 30 * 60
+#: The plan a visitor chose on the landing page ("Choose Growth"),
+#: carried across the Google sign-in + 2FA round-trip so they land on
+#: that plan's checkout page instead of the generic dashboard.
+PENDING_PLAN_COOKIE = "ventoryn_pending_plan"
 
 # Account pages share the platform shell (ventoryn/ui.py); only the
 # 2FA bits below are specific to them.
@@ -303,6 +307,53 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+def _tier_features_html(info: dict) -> str:
+    """One tier's feature list (<li> items), from ventoryn/plans.py."""
+    features = "".join(
+        f"<li>{_plural(info[key], label)}</li>" for key, label in (
+            ("workspaces", "workspace"),
+            ("active_agents", "active agent"),
+            ("active_campaigns", "active campaign"),
+            ("team_seats", "team seat")))
+    posts_to = entitlements.INTEGRATIONS_LABEL[info["premium_integrations"]]
+    analytics = ("Full analytics and reports" if info["advanced_analytics"]
+                 else "Basic analytics (the funnel)")
+    api = entitlements.API_LABEL.get(info["api_access"], "No API access")
+    return features + (f"<li>Posts to {esc(posts_to)}</li>"
+                       f"<li>{esc(analytics)}</li><li>{esc(api)}</li>")
+
+
+def _chosen_plan_html(config: SaasConfig, name: str) -> str:
+    """The checkout step for the plan picked on the landing page: the
+    plan, its monthly price, what it includes, and one button that
+    opens Stripe Checkout for exactly that price."""
+    from ventoryn.plans import STARTER_WALLET_CREDIT_CENTS
+
+    info = PLANS[name]
+    price = info["price_usd"]
+    if config.stripe_secret_key and config.tier_price_id(name):
+        action = (
+            "<form method='post' action='/account/subscribe'>"
+            f"<input type='hidden' name='plan' value='{esc(name)}'>"
+            "<button class='btn btn-primary' type='submit'>"
+            f"Continue to payment — ${price}/month</button></form>"
+            "<p class='muted'>You pay on Stripe's secure checkout page. "
+            "Cancel anytime from your account.</p>")
+    else:
+        action = ("<p><strong>Coming soon.</strong> This plan cannot be "
+                  "bought yet — nothing was charged.</p>")
+    return (f"<div class='card' id='plan-{esc(name)}'>"
+            f"<p class='muted'>Your plan</p><h2>{esc(info['label'])}</h2>"
+            f"<p><span style='font-size:40px;font-weight:800'>${price}</span>"
+            " / month</p>"
+            f"<ul>{_tier_features_html(info)}</ul>"
+            "<p class='muted'>The plan is access; agent work is billed from "
+            "your prepaid wallet at its real cost. Your first plan adds a "
+            f"${STARTER_WALLET_CREDIT_CENTS // 100} wallet credit.</p>"
+            f"{action}"
+            "<p><a href='/account/subscribe'>See all plans</a></p></div>")
+
+
 def _plan_cards_html(config: SaasConfig, pending_field: str,
                      pending_note: str) -> str:
     """The Subscribe page's plan picker: the three Axionory tiers
@@ -316,18 +367,7 @@ def _plan_cards_html(config: SaasConfig, pending_field: str,
     cards = []
     for name in PLAN_NAMES:
         info = PLANS[name]
-        features = "".join(
-            f"<li>{_plural(info[key], label)}</li>" for key, label in (
-                ("workspaces", "workspace"),
-                ("active_agents", "active agent"),
-                ("active_campaigns", "active campaign"),
-                ("team_seats", "team seat")))
-        posts_to = entitlements.INTEGRATIONS_LABEL[info["premium_integrations"]]
-        analytics = ("Full analytics and reports" if info["advanced_analytics"]
-                     else "Basic analytics (the funnel)")
-        api = entitlements.API_LABEL.get(info["api_access"], "No API access")
-        features += (f"<li>Posts to {esc(posts_to)}</li>"
-                     f"<li>{esc(analytics)}</li><li>{esc(api)}</li>")
+        features = _tier_features_html(info)
         body = (f"<p class='muted'>${info['price_usd']}/month — access "
                 "only; every agent action is billed from your prepaid "
                 f"wallet.</p><ul>{features}</ul>")
@@ -758,7 +798,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         return RedirectResponse("/", status_code=303)
 
     @app.get("/account/auth/google/start")
-    def google_start(request: Request, site_url: str = ""):
+    def google_start(request: Request, site_url: str = "", plan: str = ""):
         if not config.google_configured:
             return HTMLResponse(
                 _page("Sign in",
@@ -783,6 +823,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if pending:
             response.set_cookie(
                 PENDING_SITE_COOKIE, pending, httponly=True,
+                samesite="lax", path="/",
+                max_age=PENDING_SITE_TTL_SECONDS,
+                secure=config.cookie_secure)
+        if plan in PLAN_NAMES:
+            response.set_cookie(
+                PENDING_PLAN_COOKIE, plan, httponly=True,
                 samesite="lax", path="/",
                 max_age=PENDING_SITE_TTL_SECONDS,
                 secure=config.cookie_secure)
@@ -850,6 +896,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if pending:
             target += ("?site_url=" +
                        urllib.parse.quote(pending, safe=""))
+        # A plan chosen on the landing page ("Choose Growth"): straight
+        # to that plan's checkout step after 2FA.
+        pending_plan = request.cookies.get(PENDING_PLAN_COOKIE, "")
+        if pending_plan in PLAN_NAMES:
+            target = f"/account/subscribe?plan={pending_plan}"
         # Two-factor is mandatory from the first sign-in: a fresh
         # session has not passed it yet. No 2FA set up -> the setup
         # page; 2FA enabled -> the code page. `next` carries the
@@ -861,6 +912,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             dest = f"/account/two-factor/verify?next={nxt}"
         response = RedirectResponse(dest, status_code=303)
         response.delete_cookie(PENDING_SITE_COOKIE, path="/")
+        response.delete_cookie(PENDING_PLAN_COOKIE, path="/")
         response.set_cookie(SESSION_COOKIE, token, httponly=True,
                             samesite="lax", path="/",
                             max_age=SESSION_TTL_DAYS * 24 * 3600,
@@ -1812,15 +1864,29 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
     # -- subscribe -----------------------------------------------------------
     @app.get("/account/subscribe", response_class=HTMLResponse)
     def subscribe_page(request: Request, cancelled: str = "",
-                       site_url: str = ""):
+                       site_url: str = "", plan: str = ""):
+        if plan not in PLAN_NAMES:
+            plan = ""
         account, redirect = _need_account(request)
         if redirect is not None:
+            if plan and config.google_configured:
+                # "Choose Growth" while signed out: sign in first; the
+                # plan rides along and they come back to its checkout.
+                return RedirectResponse(
+                    f"/account/auth/google/start?plan={plan}", status_code=303)
             return redirect
         # The owner has no $20/month plan: his Subscribe page shows
         # the permanent subscription and no checkout button. Regular
         # customers see the pitch and the credit table below.
         if config.is_operator(account["email"]):
-            inner = (f"{_account_subnav_html('subscribe')}"
+            chosen = ""
+            if plan:
+                chosen = (f"<div class='card'><p>You chose <strong>"
+                          f"{esc(PLANS[plan]['label'])} — ${PLANS[plan]['price_usd']}"
+                          "/month</strong>, but this is the owner's account, which "
+                          "never pays. To try the checkout a customer sees, sign "
+                          "in with a different Google account.</p></div>")
+            inner = (f"{_account_subnav_html('subscribe')}{chosen}"
                      "<div class='card'><p><span class='badge "
                      "badge-ok'>Permanent — owner</span></p>"
                      "<p>The owner's account — no $20/month plan, no "
@@ -1859,6 +1925,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                           f"btn-primary' href='/websites/sites/new?url="
                           f"{esc(urllib.parse.quote(pending_url, safe=''))}'>"
                           f"Add {esc(pending_url)}</a></p></div>")
+            return _signed_page("Subscribe", inner, account,
+                                current="subscribe")
+        if plan:
+            # The plan picked on the landing page: its own checkout step.
+            inner = (f"{_account_subnav_html('subscribe')}{notice}"
+                     f"{_chosen_plan_html(config, plan)}")
             return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
         inner = (f"{_account_subnav_html('subscribe')}{notice}"

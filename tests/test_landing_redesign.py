@@ -166,7 +166,7 @@ def test_pricing_from_verified_stripe_data():
         assert f"<h3>{label}</h3>" in r.text
         assert f'<span class="big">${price}</span> / month' in r.text
     for plan in ("starter", "growth", "pro"):
-        assert f'href="/account/subscribe#plan-{plan}"' in r.text
+        assert f'href="/account/subscribe?plan={plan}"' in r.text
     assert "Posts to X<" in r.text and "Posts to X, Facebook and Instagram<" in r.text
     assert "Most popular" in r.text
     assert "What a credit buys" not in r.text and "1,000 credits" not in r.text
