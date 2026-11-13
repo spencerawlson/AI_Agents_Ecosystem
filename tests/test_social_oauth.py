@@ -107,8 +107,12 @@ def test_facebook_authorize_url_carries_scopes_and_no_verifier():
 
 
 def test_instagram_scopes_never_include_messaging():
-    assert "instagram_business_basic" in SCOPES["instagram"]
-    assert "instagram_business_content_publish" in SCOPES["instagram"]
+    # Instagram API with Facebook Login (the account is found through its
+    # Page): the Facebook-Login permissions, not Instagram Login's
+    # instagram_business_* ones.
+    assert "instagram_basic" in SCOPES["instagram"].split()
+    assert "instagram_content_publish" in SCOPES["instagram"].split()
+    assert "instagram_business_basic" not in SCOPES["instagram"]
     assert "message" not in SCOPES["instagram"].lower()
     assert "manage_messages" not in SCOPES["instagram"]
 

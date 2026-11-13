@@ -30,7 +30,7 @@ separate, later decision (see §4).
    ($10/day global, $50/month per account, $25/month per site)
    bound what one customer can spend, not what X charges.
 3. **Register the redirect URI** in the X app settings, exactly:
-   `https://ventoryn.app/account/auth/x/callback`
+   `https://www.axionory.com/account/auth/x/callback`
 4. **Note the possible Enterprise scale clause.** The verification
    doc flags an open question: a multi-customer SaaS posting on
    behalf of many accounts may fall under an Enterprise term rather
@@ -47,64 +47,114 @@ separate, later decision (see §4).
 Scopes Ventoryn requests (already in the code, nothing to choose):
 `tweet.read tweet.write users.read offline.access`. No DM scope.
 
-## 2. Meta — Facebook + Instagram (one app, the longest clock)
+## 2. Meta: Facebook Pages + Instagram (one app, the longest clock)
 
-One Meta app covers both networks. The code treats them as one
-registration (`app_registered` returns `facebook_configured` for
-both).
+*Updated 2026-11-12 for www.axionory.com.* One Meta app covers both
+networks. Instagram uses **Instagram API with Facebook Login**: the
+customer signs in with Facebook, and Axionory finds the Instagram
+Business or Creator account through the Facebook Page it is linked to.
+Unified Login, which works without a Page, is a possible later change.
 
-1. **Create a Business-type Meta app** in the Meta developer
-   console (App Dashboard → Create App → Business type).
-2. **Register the redirect URIs** (Facebook Login settings),
-   exactly:
-   `https://ventoryn.app/account/auth/facebook/callback`
-   `https://ventoryn.app/account/auth/instagram/callback`
-3. **Business Verification.** Meta verifies the legal entity behind
-   the app (documents for the business — this is a process cost,
-   not a fee). Start this early: it runs on Meta's clock and no
-   official fixed duration was found.
-4. **Per-permission App Review (Advanced Access).** Each permission
-   needs its own submission with a working product demo
-   (screencast) and a privacy policy URL. Until a permission clears,
-   it works only for people with a role on Ventoryn's Meta app
-   (admin/developer/tester) — real customers are blocked.
-   - Facebook: `pages_show_list`, `pages_read_engagement`,
-     `pages_manage_posts`
-   - Instagram: `instagram_business_basic`,
-     `instagram_business_content_publish`
-   - The customer connecting a Page must hold **CREATE_CONTENT**
-     on that Page; the Instagram account must be a Business or
-     Creator account linked to a Page the customer manages.
-5. **Copy the app id + secret** into `.env.ventoryn`:
-   `VENTORYN_FACEBOOK_APP_ID`, `VENTORYN_FACEBOOK_APP_SECRET`.
-6. **Note the Instagram attribution constraint** (already in the
-   code and the consent text): a URL in a caption is **plain text,
-   not clickable**. Ventoryn appends the signed URL to the caption;
-   the customer should also put the link in bio (or use a Story
-   link sticker) for it to be tappable. Do not promise a tappable
-   in-post link on Instagram.
+### 2a. Create the app
+1. At developers.facebook.com, go to **My Apps**, then **Create App**.
+   Choose the use case for managing a Page's content. If the dashboard
+   asks for an app type, choose **Business**.
+2. Add **Instagram** (API with Facebook Login) to the same app.
+3. **Settings, Basic:**
+   - App domains: `axionory.com`
+   - Privacy Policy URL: `https://www.axionory.com/privacy`
+   - Terms of Service URL: `https://www.axionory.com/terms`
+   - User data deletion, **Data Deletion Callback URL**:
+     `https://www.axionory.com/meta/data-deletion`
+   - App icon: `axionory-app-icon-1024.png`
+   - Category: Business and Pages
+4. **Facebook Login settings:**
+   - Valid OAuth Redirect URIs, both, exactly:
+     `https://www.axionory.com/account/auth/facebook/callback`
+     `https://www.axionory.com/account/auth/instagram/callback`
+   - Deauthorize Callback URL: `https://www.axionory.com/meta/deauthorize`
+   - Client OAuth login and Web OAuth login: on. Enforce HTTPS: on.
 
-Scopes Ventoryn requests (already in the code):
-Facebook `pages_show_list pages_read_engagement pages_manage_posts`;
-Instagram `instagram_business_basic instagram_business_content_publish`.
-No DM scope ever.
+Both callbacks verify Meta's `signed_request` with the app secret, then
+delete that person's Facebook and Instagram connections, tokens
+included. The data deletion answer points Meta to
+`/meta/data-deletion/status?code=...` (see `ventoryn/meta_deletion.py`).
+
+### 2b. Permissions Axionory requests (already in the code)
+- **Facebook Page:** `pages_show_list`, `pages_read_engagement`,
+  `pages_manage_posts`
+- **Instagram:** `instagram_basic`, `instagram_content_publish`,
+  `pages_show_list`, `pages_read_engagement`, `business_management`
+
+No messaging or DM permission is ever requested. `business_management`
+is there because most Pages sit in a Business portfolio. Without it,
+`/me/accounts` does not return the Instagram account linked to such a
+Page.
+
+### 2c. Business Verification (start it first)
+In **Business Settings, Security Center**, start Business Verification
+with the business's legal documents. It runs on Meta's schedule, often
+weeks, and App Review for these permissions cannot finish without it.
+
+### 2d. App Review (Advanced Access), one screencast per permission
+Until a permission clears review, it only works for people who have a
+role on the app (admin, developer, tester). To test with your own
+account first, add it under **App Roles**. Then record a screencast for
+each permission, using the flow below:
+
+1. On www.axionory.com, go to **Integrations, Facebook**, choose a
+   website, and click **Connect with Facebook**.
+2. Facebook's login and consent screen: show the permissions it lists,
+   then click **Continue**.
+3. The Page picker in Axionory: pick the Page. It shows
+   **Connected, Facebook Page ... linked** (`pages_show_list`,
+   `pages_read_engagement`).
+4. Write a draft post on that website's page and click
+   **Approve & post**. Show the post on the Facebook Page
+   (`pages_manage_posts`).
+5. Instagram: **Integrations, Instagram, Connect with Instagram**, then
+   Facebook's consent, then **Connected, Instagram Business account
+   linked**. Approve a draft and show the post on Instagram
+   (`instagram_basic`, `instagram_content_publish`,
+   `business_management`).
+6. Optional: **Disconnect**, to show that access is removed.
+
+For each permission, explain in plain words: "Axionory is a marketing
+assistant. The business owner connects their own Page or Instagram
+account, Axionory drafts posts, and nothing is published until the
+owner approves each one in Axionory."
+
+### 2e. Instagram limits to keep in mind
+- A link in a caption is plain text, not clickable. Put the link in the
+  bio or in a Story link sticker.
+- The account must be a Business or Creator account linked to a Page
+  the customer manages. The person connecting must be able to create
+  content on that Page.
 
 ## 3. What the server needs after the consoles
 
-In `.env.ventoryn` on FedServ, after the steps above:
+Add the keys on the server with typing hidden (never paste them into
+chat), and check the lengths before saving:
 
-```text
-VENTORYN_X_APP_REGISTERED=1
-VENTORYN_X_CLIENT_ID=<from the X app>
-VENTORYN_X_CLIENT_SECRET=<from the X app>
-VENTORYN_FACEBOOK_APP_ID=<from the Meta app>
-VENTORYN_FACEBOOK_APP_SECRET=<from the Meta app>
+```bash
+ssh ventoryn
+cd ~/Projects/AI_Agents_Ecosystem
+f=.env.ventoryn
+read -rs -p "Meta App ID: " A; echo; echo "id length: ${#A}"
+read -rs -p "Meta App Secret: " S; echo; echo "secret length: ${#S}"
+# App ID is ~15-16 digits, App Secret is 32 characters. If both look
+# right, in the SAME session:
+printf 'VENTORYN_FACEBOOK_APP_ID=%s
+VENTORYN_FACEBOOK_APP_SECRET=%s
+' "$A" "$S" >> $f
+unset A S; chmod 600 $f
+./deploy/docker/ventoryn.sh deploy
 ```
 
-Then restart (`python launch.py all`). Until these are set, the
-site page honestly says "app registration needed" and the Connect
-buttons do not appear — nothing is faked. The X OAuth start will
-refuse with the same honest message.
+Until these are set, the website page says "app registration needed"
+and the Connect buttons do not appear. The data deletion and
+deauthorize callbacks refuse every request, because without the secret
+nothing can be verified.
 
 ## 4. Turning publishing on (a separate decision — do not do this yet)
 

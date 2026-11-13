@@ -106,6 +106,7 @@ from ventoryn.social_oauth import (
     exchange_for_page_token,
     exchange_long_lived_token,
     find_instagram_account,
+    get_profile,
     list_facebook_pages,
     refresh_access_token_if_needed,
 )
@@ -457,6 +458,9 @@ def _save_social_tokens(store: SaasStore, site_id: str, kind: str,
         "page_id": tokens.get("page_id") or "",
         "page_name": tokens.get("page_name") or "",
         "ig_user_id": tokens.get("ig_user_id") or "",
+        # The Facebook user who connected (app-scoped id): Meta's data
+        # deletion callback names people by it (ventoryn/meta_deletion.py).
+        "fb_user_id": tokens.get("fb_user_id") or "",
     }
     store.update_connection(
         site_id, kind, "connected",
@@ -909,7 +913,9 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         cannot be reached."""
         page = exchange_for_page_token(user_token, config,
                                        page_id=page_id or None)
+        pending = (store.get_connection(site_id, "facebook") or {}).get("_detail_raw") or {}
         tokens = {
+            "fb_user_id": pending.get("fb_user_id") or pending.get("provider_user_id") or "",
             "access_token": page.get("access_token") or "",
             "provider_user_id": page.get("page_id") or "",
             "page_id": page.get("page_id") or "",
@@ -923,6 +929,57 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             "linked.")
         return RedirectResponse(f"/websites/sites/{site_id}",
                                 status_code=303)
+
+    # -- Meta: data deletion + deauthorize callbacks -------------------
+    async def _meta_deletion(request: Request) -> tuple[str, int] | None:
+        from ventoryn import meta_deletion
+
+        form = await request.form()
+        payload = meta_deletion.parse_signed_request(
+            str(form.get("signed_request") or ""), config.facebook_app_secret)
+        if payload is None:
+            return None
+        removed = meta_deletion.delete_for_user(store, str(payload.get("user_id") or ""))
+        return store.record_meta_deletion(removed), removed
+
+    @app.post("/meta/data-deletion")
+    async def meta_data_deletion(request: Request):
+        """Meta's Data Deletion Callback: delete that person's Facebook and
+        Instagram connections, answer with a status URL + code."""
+        done = await _meta_deletion(request)
+        if done is None:
+            return JSONResponse({"error": "invalid signed_request"}, status_code=400)
+        code, _removed = done
+        return JSONResponse({
+            "url": f"{config.base_url.rstrip('/')}/meta/data-deletion/status?code={code}",
+            "confirmation_code": code})
+
+    @app.post("/meta/deauthorize")
+    async def meta_deauthorize(request: Request):
+        """Meta's Deauthorize Callback: the person removed Axionory in
+        Facebook — their tokens are useless now, so they are deleted."""
+        done = await _meta_deletion(request)
+        if done is None:
+            return JSONResponse({"error": "invalid signed_request"}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.api_route("/meta/data-deletion/status", methods=["GET", "HEAD"],
+                   response_class=HTMLResponse)
+    def meta_data_deletion_status(code: str = ""):
+        row = store.get_meta_deletion(code.strip()) if code else None
+        if row is None:
+            body = ("<h1>Data deletion request</h1><p>No request was found for this "
+                    "confirmation code.</p>")
+            return HTMLResponse(_page("Data deletion", body), status_code=404)
+        when = str(row["created_at"])[:16].replace("T", " ")
+        body = (f"<h1>Data deletion request</h1>"
+                f"<p>Confirmation code <code>{esc(row['code'])}</code>, received {esc(when)} UTC.</p>"
+                f"<p><strong>Completed.</strong> The Facebook and Instagram connections made "
+                f"with this Facebook account were removed from Axionory, with their access "
+                f"tokens ({int(row['removed'])} connection"
+                f"{'' if int(row['removed']) == 1 else 's'}). Questions: "
+                f"<a href='mailto:privacy@axionory.com'>privacy@axionory.com</a>.</p>")
+        return HTMLResponse(_page("Data deletion", body))
 
     @app.get("/websites/sites/{site_id}/connections/facebook/start")
     def facebook_connect_start(request: Request, site_id: str):
@@ -994,6 +1051,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             "Pick a Page to finish connecting.",
             {"access_token": user_token,
              "provider_user_id": tokens.get("provider_user_id") or "",
+             "fb_user_id": tokens.get("provider_user_id") or "",
              "scope": tokens.get("scope") or ""})
         try:
             pages = list_facebook_pages(user_token, config)
@@ -1155,6 +1213,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     account, current="websites"),
                 status_code=400)
         ig_tokens = dict(tokens)
+        try:  # who connected, for Meta's data deletion requests
+            ig_tokens["fb_user_id"] = get_profile("facebook", user_token).get(
+                "provider_user_id") or ""
+        except Exception:  # noqa: BLE001 - never blocks connecting
+            ig_tokens["fb_user_id"] = ""
         ig_tokens["access_token"] = user_token
         ig_tokens["ig_user_id"] = ig_user_id
         if long_lived.get("expires_in"):
