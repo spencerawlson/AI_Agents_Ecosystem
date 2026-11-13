@@ -75,7 +75,11 @@ and security);</li>
 <li>AI providers (such as OpenAI) to draft text, ElevenLabs for voiceovers and HeyGen for presenter
 videos &mdash; they receive the scripts and website text needed for the job;</li>
 <li>X, Facebook, Instagram and TikTok &mdash; only the posts you approve, sent to your own account;</li>
-<li>search and web-performance services to analyse your public website.</li>
+<li>search and web-performance services to analyse your public website;</li>
+<li>Meta (ad measurement): when you sign up for {BRAND} or pay us, our server tells Meta that the
+event happened (and the amount), with a one-way hash of your email address and account identifier, so
+Meta can measure and improve ads for {BRAND}. Nothing about your websites, visitors or sales is sent.
+You can opt out at any time under My account, Security, Ad measurement.</li>
 </ul>
 <p>Some of these providers are located outside Quebec and Canada, mainly in the United States, so your
 information may be processed there. We choose providers that protect it, and we share only what each
@@ -100,7 +104,8 @@ incident puts your information at risk we will notify you and the authorities as
 
 <h2>Cookies</h2>
 <p>We use only necessary cookies: your sign-in session and short-lived cookies that complete a
-connection to another service. No advertising or tracking cookies.</p>
+connection to another service. No advertising or tracking cookies: ad measurement (above) is sent
+from our server, not through a cookie or pixel in your browser.</p>
 
 <h2>Children</h2>
 <p>{BRAND} is a business service for people 18 and older.</p>
