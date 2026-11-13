@@ -340,7 +340,7 @@ def _plan_cards_html(config: SaasConfig, pending_field: str,
                 f"— ${info['price_usd']}/month</button></form>")
         else:
             body += "<p class='muted'><strong>Coming soon.</strong></p>"
-        cards.append(f"<div class='card'><h3>{esc(info['label'])}</h3>"
+        cards.append(f"<div class='card' id='plan-{esc(name)}'><h3>{esc(info['label'])}</h3>"
                      f"{body}</div>")
     return ("<div class='card'><h2>Choose a plan</h2>"
             "<p class='muted'>A tier buys access only — workspaces, agent "

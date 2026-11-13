@@ -105,8 +105,7 @@ def test_landing_page_public():
     assert 'class="card url-card"' in r.text or \
         "class='card url-card'" in r.text
     assert 'class="features"' in r.text or "class='features'" in r.text
-    assert 'class="card price-card"' in r.text or \
-        "class='card price-card'" in r.text
+    assert r.text.count('class="card price-card tier-card') == 3
     # A bare domain is enough — the box says so.
     assert "yourwebsite.com" in r.text
     assert "no https:// needed" in r.text

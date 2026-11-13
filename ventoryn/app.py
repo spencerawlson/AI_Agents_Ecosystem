@@ -1214,6 +1214,20 @@ section.alt { background: var(--bg-tint); }
   max-width: 460px; text-align: left; }
 .price-card li { margin: 8px 0; font-size: 16px; }
 .price-card li svg { vertical-align: -3px; margin-right: 6px; }
+.tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px; max-width: 1040px; margin: 0 auto; align-items: stretch; }
+.price-card.tier-card { position: relative; max-width: none; margin: 0;
+  display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); }
+.price-card.tier-card h3 { margin: 4px 0 0; font-size: 20px; }
+.price-card.tier-card ul { margin: 16px 0 20px; flex: 1; }
+.price-card.tier-card li { font-size: 15px; }
+.price-card.tier-card .btn { align-self: center; }
+.price-card.tier-pop { background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  border: 2px solid var(--violet); box-shadow: 0 18px 40px rgba(109, 40, 217, .18); }
+.tier-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  background: var(--violet-deep); color: #fff; font-size: 12px; font-weight: 700;
+  padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+.price-foot { max-width: 720px; margin: 24px auto 0; text-align: center; font-size: 14px; }
 .credit-table { width: 100%; max-width: 460px; margin: 16px auto 0;
   border-collapse: collapse; font-size: 15px; background: #fff;
   border-radius: 10px; overflow: hidden; }
@@ -1308,23 +1322,40 @@ section.alt { background: var(--bg-tint); }
             signed_in and account["subscription_status"] == "active")
         state_json = _json.dumps({"signedIn": signed_in,
                                   "subscribed": subscribed})
-        # The credit table is rendered from the real CREDIT_COSTS —
-        # never hardcoded, so the price page cannot drift from the
-        # product. Labels are display names for the job keys.
-        _credit_labels = {
-            "analyze": "Analyze — site + GEO audit",
-            "geo_audit": "GEO audit",
-            "community_listening": "Community listening",
-            "social_report": "Social report",
-            "seo_article": "SEO article",
-            "video_render": "Video render",
-        }
-        credit_rows = "".join(
-            f"<tr><td>{_credit_labels.get(k, k)}</td>"
-            f"<td>{CREDIT_COSTS[k]} credits</td></tr>"
-            for k in ("analyze", "geo_audit", "community_listening",
-                      "social_report", "seo_article", "video_render")
-            if k in CREDIT_COSTS)
+        # The plan cards are rendered from ventoryn/plans.py — never
+        # hardcoded, so the price page cannot drift from billing.
+        from ventoryn import entitlements
+        from ventoryn.plans import PLANS, STARTER_WALLET_CREDIT_CENTS
+
+        _tick = ('<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">'
+                 '<path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" '
+                 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>')
+
+        def _n(v, one, many):
+            return f"{v} {one if v == 1 else many}"
+
+        tier_cards = ""
+        for _name, _p in PLANS.items():
+            _lines = (
+                f"{_n(_p['active_agents'], 'website', 'websites')} on autopilot",
+                f"{_n(_p['active_campaigns'], 'active campaign', 'active campaigns')}",
+                f"Posts to {entitlements.INTEGRATIONS_LABEL[_p['premium_integrations']]}",
+                ("Full analytics and reports" if _p["advanced_analytics"]
+                 else "Basic analytics (the funnel)"),
+                entitlements.API_LABEL.get(_p["api_access"], "No API access"),
+                f"{_n(_p['workspaces'], 'workspace', 'workspaces')} · "
+                f"{_n(_p['team_seats'], 'team seat', 'team seats')}",
+            )
+            _pop = _name == "growth"
+            tier_cards += (
+                f'<div class="card price-card tier-card{" tier-pop" if _pop else ""}">'
+                + ('<span class="tier-badge">Most popular</span>' if _pop else "")
+                + f'<h3>{esc(_p["label"])}</h3>'
+                f'<p><span class="big">${_p["price_usd"]}</span> / month</p><ul>'
+                + "".join(f"<li>{_tick}{esc(t)}</li>" for t in _lines)
+                + f'</ul><a class="btn {"btn-primary" if _pop else "btn-dark"}" '
+                f'href="/account/subscribe#plan-{_name}">Choose {esc(_p["label"])}</a></div>')
+        tier_cards = f'<div class="tier-grid">{tier_cards}</div>'
         if signed_in:
             signed_banner = (
                 "<div class='signed-banner'><div class='wrap'>You are "
@@ -1363,11 +1394,10 @@ section.alt { background: var(--bg-tint); }
                             "audience and prepare campaigns; you approve "
                             "every action; verified attribution shows "
                             "which efforts turn into paying customers."),
-            "offers": {"@type": "Offer", "price": "20",
-                       "priceCurrency": "USD",
-                       "description": (f"$20/month, "
-                                       f"{_saas_config.monthly_credits:,} "
-                                       f"credits per month")},
+            "offers": [{"@type": "Offer", "name": p["label"],
+                        "price": str(p["price_usd"]), "priceCurrency": "USD",
+                        "description": f"{p['label']}: ${p['price_usd']}/month"}
+                       for p in PLANS.values()],
             "url": _saas_config.base_url,
         })
         return f"""<!DOCTYPE html>
@@ -1539,24 +1569,14 @@ customers.</p>
 <section id="pricing">
 <div class="wrap">
 <h2>Pricing</h2>
-<p class="lede">Start at $20 a month. Growth and Pro add more websites, channels and reports.</p>
-<div class="card price-card">
-<h2>$20/month</h2>
-<p><span class="big">$20</span> / month</p>
-<ul>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Your websites on Axionory</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>{_saas_config.monthly_credits:,} credits every month</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>A growth report per site</li>
-<li><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Agents working daily to find new paying customers</li>
-</ul>
-<table class="credit-table">
-<thead><tr><th>What a credit buys</th><th>Cost</th></tr></thead>
-<tbody>{credit_rows}</tbody>
-</table>
-<p style="margin-top:16px"><a class="btn btn-primary" href="/account/subscribe">Subscribe — $20/month</a></p>
-<p class="muted">No free trial. No guarantees on customer numbers.
-Cancel anytime from your account.</p>
-</div>
+<p class="lede">Three plans. Start at $20 a month; grow into more websites,
+channels and reports.</p>
+{tier_cards}
+<p class="muted price-foot">Every plan: your approval on everything, verified
+customer attribution, revenue privacy. Agent work is billed from a prepaid
+wallet at its real cost; your first plan adds a ${STARTER_WALLET_CREDIT_CENTS // 100}
+wallet credit. No free trial. No guarantees on customer numbers. Cancel
+anytime from your account.</p>
 </div>
 </section>
 <section id="faq" class="alt">
@@ -1601,7 +1621,7 @@ $20/month subscription.</p>
 <a href="#faq">FAQ</a></div>
 <div class="col"><h4>Account</h4>
 <a href="/account/login">Account Login</a>
-<a href="/account/subscribe">Subscribe — $20/month</a></div>
+<a href="/account/subscribe">Plans &amp; subscribe</a></div>
 <div class="col"><h4>Company</h4>
 <span class="soon">Documentation — coming soon</span>
 <span class="soon">Support — coming soon</span>

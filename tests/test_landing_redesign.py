@@ -159,13 +159,17 @@ def test_features_attribution_differentiation_who():
 
 
 def test_pricing_from_verified_stripe_data():
+    # The three plans, straight from ventoryn/plans.py (Spencer, 2026-11-13):
+    # the old $20 credits card is gone (its Stripe price is not sold).
     r = _landing()
-    assert "$20/month" in r.text
-    # The default monthly allowance (SAAS_MONTHLY_CREDITS overrides).
-    assert "1,000 credits" in r.text
-    for row in ("Analyze", "GEO audit", "Community listening",
-                "Social report", "SEO article", "Video render"):
-        assert row in r.text
+    for label, price in (("Starter", 20), ("Growth", 39), ("Pro", 99)):
+        assert f"<h3>{label}</h3>" in r.text
+        assert f'<span class="big">${price}</span> / month' in r.text
+    for plan in ("starter", "growth", "pro"):
+        assert f'href="/account/subscribe#plan-{plan}"' in r.text
+    assert "Posts to X<" in r.text and "Posts to X, Facebook and Instagram<" in r.text
+    assert "Most popular" in r.text
+    assert "What a credit buys" not in r.text and "1,000 credits" not in r.text
     assert "No free trial" in r.text
     assert "No guarantees" in r.text
 
