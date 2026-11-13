@@ -167,6 +167,13 @@ class InsufficientWalletFunds(SaasError):
         self.available_cents = available_cents
 
 
+class PlanLimitExceeded(SaasError):
+    """An action was refused because the account's plan does not
+    allow one more of it (workspace, agent, campaign, seat...).
+    Raised by the store itself, so no route can bypass the cap by
+    calling the store directly."""
+
+
 @dataclass
 class SaasConfig:
     """Everything the shell reads from the environment. Empty values
@@ -1966,6 +1973,22 @@ class SaasStore:
         return self.create_workspace(account_id, "Default")
 
     def create_workspace(self, account_id: str, name: str) -> dict:
+        """Create a workspace, enforcing the plan's workspace cap
+        (ventoryn/entitlements.py). No workspace-creation route
+        exists yet, so the store is the enforcement point — a future
+        route cannot bypass the cap by calling here directly.
+        ``ensure_default_workspace`` is unaffected: it only creates
+        when the account has no workspace at all, and every plan
+        allows at least one. The operator bypass rides on the
+        operator's plan being "" (legacy, never limited) — the store
+        has no config to check the operator email against."""
+        from ventoryn.entitlements import can_create_workspace
+
+        account = self.get_account(account_id)
+        if account is not None:
+            ok, message = can_create_workspace(self, account)
+            if not ok:
+                raise PlanLimitExceeded(message)
         workspace_id = _new_id()
         now = _iso(_now())
         with self._lock, self._conn:
@@ -1975,6 +1998,12 @@ class SaasStore:
                 (workspace_id, account_id, name, now))
         return {"id": workspace_id, "account_id": account_id, "name": name,
                 "created_at": now}
+
+    def list_team_members(self, account_id: str) -> list[dict]:
+        """Teammates on this account. No team table exists yet (the
+        invite flow is not built), so this is always empty — the seat
+        check in ventoryn/entitlements.py passes until invites land."""
+        return []
 
     def get_job(self, job_id: str) -> dict | None:
         with self._lock:

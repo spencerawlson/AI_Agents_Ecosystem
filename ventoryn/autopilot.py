@@ -28,7 +28,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ventoryn import pricing, site_jobs
+from ventoryn import entitlements, pricing, site_jobs
 from ventoryn.plans import is_wallet_account
 from ventoryn.saas import CREDIT_COSTS, InsufficientCredits, InsufficientWalletFunds
 
@@ -184,9 +184,25 @@ def run_once(store, config, *, orchestrator, reports_dir: Path,
             continue
         is_op = config.is_operator(account.get("email"))
         wallet = is_wallet_account(account) and not is_op
+        if int(site.get("autopilot", 1) or 0) and not \
+                entitlements.is_autopilot_site_within_cap(
+                    store, account, site, is_operator=is_op):
+            # Plan gating: this site's autopilot slot is beyond the
+            # account's active-agent cap (a downgrade keeps the
+            # oldest sites working and stops the newest ones). The
+            # toggle refuses new activations; this stops work that
+            # was already on when the plan shrank.
+            continue
         for job_type in due_jobs(store, site, now):
             if len(ran) >= max_jobs:
                 return ran
+            if job_type == "x_campaign":
+                # Starting a campaign spends one active-campaign
+                # slot; the manual start route refuses the same way.
+                ok, _ = entitlements.can_create_campaign(
+                    store, account, is_operator=is_op)
+                if not ok:
+                    continue
             if wallet:
                 if (store.wallet_available_cents(account["id"])
                         < pricing.wallet_reserve_estimate_cents(job_type)):
