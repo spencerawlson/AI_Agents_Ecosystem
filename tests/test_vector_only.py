@@ -3,10 +3,7 @@ deliberate exceptions.
 
 Every graphic on Axionory (landing, signed-in pages, admin) is
 vector (inline SVG). No PNG, JPG, WebP, or GIF is rendered on any
-page, with the exceptions below. The og-image is intentionally
-ABSENT (it would be a bitmap, used only by external link previews,
-never rendered on a page) — that is Spencer's call, flagged in the
-report, not silently changed.
+page, with the exceptions below.
 
 Deliberate exceptions:
 - (Spencer, 2026-11-09) the website snapshot's screenshot of the
@@ -21,6 +18,10 @@ Deliberate exceptions:
   product itself (the live overview with real numbers), not a UI
   graphic — shown once on the landing page as the hero preview,
   served from ventoryn/static/ by ventoryn/public_files.py.
+- (Spencer, 2026-11-13) the link-preview card /static/og-card.jpg,
+  named only in the landing page's og:image / twitter:image meta tags.
+  No page renders it: Facebook, X, LinkedIn and the like fetch it
+  when someone shares an Axionory link.
 The template scan below allows exactly those and nothing else.
 """
 
@@ -51,6 +52,9 @@ BITMAP = re.compile(r"\.(png|jpg|jpeg|webp|gif)\b", re.IGNORECASE)
 BRAND_IMG = re.compile(r"<img src=['\"]/static/logo\.png['\"] alt=['\"]Axionory['\"]>")
 FAVICON_LINK = re.compile(
     r"<link rel=['\"]icon['\"] type=['\"]image/png['\"] href=['\"]/favicon\.png['\"]>")
+OG_CARD_META = re.compile(
+    r"<meta (?:property=['\"]og:image['\"]|name=['\"]twitter:image['\"]) content=['\"].*?"
+    r"/static/og-card\.jpg['\"]>")
 DASHBOARD_IMG = re.compile(
     r"<img class=['\"]preview-shot['\"] src=['\"]/static/dashboard-preview\.webp['\"][^>]*>")
 
@@ -115,9 +119,13 @@ def test_no_bitmap_in_any_rendered_page():
             # screenshot (Spencer, 2026-11-12).
             assert len(DASHBOARD_IMG.findall(text)) == 1, path
             text = DASHBOARD_IMG.sub("", text)
+            # The link-preview card: meta tags only, never an <img>.
+            assert len(OG_CARD_META.findall(text)) == 2, path
+            text = OG_CARD_META.sub("", text)
         assert "<img" not in text.lower(), path
         assert not BITMAP.search(text), (path, BITMAP.search(text))
-        assert "og:image" not in r.text, path  # intentionally absent
+        if path != "/":
+            assert "og:image" not in r.text, path
 
 
 def test_no_bitmap_reference_in_page_templates():
@@ -146,6 +154,7 @@ def test_no_bitmap_reference_in_page_templates():
     brand_counts = {"app.py": 1, "nav.py": 1}
     favicon_counts = {"app.py": 1, "ui.py": 2}
     dashboard_counts = {"app.py": 1}
+    og_card_counts = {"app.py": 2}
     for path in sources:
         text = path.read_text(encoding="utf-8")
         if path.name == "site_snapshot.py":
@@ -161,6 +170,9 @@ def test_no_bitmap_reference_in_page_templates():
         if path.name in dashboard_counts:
             assert len(DASHBOARD_IMG.findall(text)) == dashboard_counts[path.name], path
             text = DASHBOARD_IMG.sub("", text)
+        if path.name in og_card_counts:
+            assert len(OG_CARD_META.findall(text)) == og_card_counts[path.name], path
+            text = OG_CARD_META.sub("", text)
         assert "<img" not in text.lower(), path
         match = BITMAP.search(text)
         assert match is None, (path, match.group(0) if match else "")

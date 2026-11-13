@@ -227,10 +227,11 @@ def test_final_cta_footer_seo_vector_only():
     assert "Explore the Platform" in r.text
     assert "Account Login" in r.text
     assert "coming soon" in r.text.lower()
-    # SEO: OG tags + JSON-LD, no og:image (bitmap — flagged for Spencer).
+    # SEO: OG tags + JSON-LD + the link-preview card (Spencer, 2026-11-13).
     assert 'property="og:title"' in r.text
     assert 'property="og:description"' in r.text
-    assert 'property="og:image"' not in r.text
+    assert re.search(r'property="og:image" content="[^"]*/static/og-card\.jpg"', r.text)
+    assert 'name="twitter:card" content="summary_large_image"' in r.text
     assert "application/ld+json" in r.text
     assert '"price": "20"' in r.text
     # Vector only, except the brand logo/favicon and the real dashboard
@@ -240,6 +241,9 @@ def test_final_cta_footer_seo_vector_only():
                           ).replace('<link rel="icon" type="image/png" href="/favicon.png">', ""
                           )
     text = re.sub(r'<img class="preview-shot" src="/static/dashboard-preview\.webp"[^>]*>', "", text)
+    # ...and the link-preview card, named only in two meta tags.
+    text = re.sub(r'<meta (property="og:image"|name="twitter:image") content="[^"]*/static/og-card\.jpg">',
+                  "", text)
     for ext in (".jpg", ".jpeg", ".webp", ".gif"):
         assert ext not in text
     assert ".png" not in text
@@ -248,3 +252,15 @@ def test_final_cta_footer_seo_vector_only():
     assert "multiple businesses" not in r.text.lower()
     assert "Get Started Free" not in r.text
     assert "revenue/expense" not in r.text.lower()
+
+
+def test_link_preview_card_is_served_at_1200x630():
+    import io
+
+    from PIL import Image
+
+    app, _store = _app_with()
+    r = TestClient(app).get("/static/og-card.jpg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert Image.open(io.BytesIO(r.content)).size == (1200, 630)
+    assert len(r.content) < 300_000  # small enough for every preview crawler
