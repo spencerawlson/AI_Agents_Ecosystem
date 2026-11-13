@@ -37,6 +37,10 @@ stops the host process gracefully, starts the container and waits up to
 two minutes for it to answer. If it does not, it prints the container
 logs and **rolls back automatically**.
 
+Every backup (`cutover` or `deploy`, which also backs up first) prunes
+`~/ventoryn-backups/` down to the most recent 30 afterward, so it never
+grows unbounded. Override with `VENTORYN_BACKUP_KEEP=<n>`.
+
 ## Day-to-day
 
 ```bash

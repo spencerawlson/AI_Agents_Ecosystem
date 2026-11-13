@@ -23,6 +23,7 @@ NAME=ventoryn
 IMAGE=ventoryn
 PORT=8000
 BACKUPS="${VENTORYN_BACKUPS:-$HOME/ventoryn-backups}"
+BACKUP_KEEP="${VENTORYN_BACKUP_KEEP:-30}"  # one subdir per deploy — prune or it grows forever
 HOST_LOG="$HOME/ventoryn-host.log"
 # The screenshot container: same image, separate and locked down.
 SHOT_NAME=ventoryn-shot
@@ -74,6 +75,11 @@ PY
     tar -C "$REPO" -czf "$dest/reports.tgz" reports
     cp -a "$ENV_FILE" "$dest/env.ventoryn" && chmod 600 "$dest/env.ventoryn"
     ls -la "$dest"
+    # Keep the most recent $BACKUP_KEEP backups (named by timestamp, so
+    # a reverse name sort is newest-first); delete anything older.
+    # Without this, a backup accumulates on every deploy, forever.
+    ls -1d "$BACKUPS"/*/ 2>/dev/null | sort -r | tail -n "+$((BACKUP_KEEP + 1))" \
+        | xargs -r rm -rf --
 }
 
 cmd_build() {
