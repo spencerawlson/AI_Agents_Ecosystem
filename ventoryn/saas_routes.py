@@ -308,6 +308,12 @@ def _plan_cards_html(config: SaasConfig, pending_field: str,
                 ("active_agents", "active agent"),
                 ("active_campaigns", "active campaign"),
                 ("team_seats", "team seat")))
+        posts_to = entitlements.INTEGRATIONS_LABEL[info["premium_integrations"]]
+        analytics = ("Full analytics and reports" if info["advanced_analytics"]
+                     else "Basic analytics (the funnel)")
+        api = entitlements.API_LABEL.get(info["api_access"], "No API access")
+        features += (f"<li>Posts to {esc(posts_to)}</li>"
+                     f"<li>{esc(analytics)}</li><li>{esc(api)}</li>")
         body = (f"<p class='muted'>${info['price_usd']}/month — access "
                 "only; every agent action is billed from your prepaid "
                 f"wallet.</p><ul>{features}</ul>")
@@ -1937,6 +1943,13 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       f"<p>{esc(exc)}</p><p><a href='/websites/sites/new'>"
                       "Back</a>.</p>", account, current="websites"),
                 status_code=400)
+        # A new website starts with the agents on, unless that would go
+        # past the plan's active-agent limit: then it starts off, so the
+        # switch never shows "on" for a site the autopilot skips.
+        if not entitlements.is_autopilot_site_within_cap(
+                store, account, site,
+                is_operator=config.is_operator(account.get("email"))):
+            store.set_site_autopilot(site["id"], False)
         # The admin's recent-activity feed: a real website was added.
         store.record_activity_event(account["id"], "site-added",
                                     f"Website added: {site['url']}")
@@ -2348,7 +2361,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
 connection is missing the value reads "unavailable" — never invented.</p></div>
 {founding_card}
 <h2>Run agent work</h2>
-{_autopilot_card(site)}
+{_autopilot_card(site, account)}
 {_video_settings_card(site)}
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
 <form method='post' action='/websites/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
@@ -2879,10 +2892,19 @@ funnel counts it. This is the owner-recorded fallback.</p>
         store.set_site_video(site_id, voice_id, avatar_id)
         return RedirectResponse(f"/websites/sites/{site_id}#video-settings", status_code=303)
 
-    def _autopilot_card(site: dict) -> str:
+    def _autopilot_card(site: dict, account: dict) -> str:
         from ventoryn import autopilot
 
         on = bool(int(site.get("autopilot", 1) or 0))
+        paused = entitlements.autopilot_paused_by_plan(
+            store, account, site,
+            is_operator=config.is_operator(account.get("email")))
+        paused_note = (
+            "<p><strong>Paused by your plan.</strong> Your plan's "
+            "active-agent limit is used by your older websites, so the "
+            "agents are not running here. Turn them off on another "
+            "website, or <a href='/account/subscribe'>upgrade</a>.</p>"
+            if paused else "")
         plan = ", ".join(
             f"{site_jobs.JOB_LABELS[jt].split(' — ')[0]} every {days} days"
             for jt, days in autopilot.AUTOPILOT_JOBS)
@@ -2890,7 +2912,8 @@ funnel counts it. This is the owner-recorded fallback.</p>
 
         return (f"<div class='card' id='autopilot'><div class='v-autopilot-head'>"
                 f"<h3>Agents on autopilot</h3>"
-                f"{autopilot_switch_html(site['id'], on, site['host'] or site['url'])}</div>"
+                f"{autopilot_switch_html(site['id'], on, site['host'] or site['url'], paused=paused)}"
+                f"</div>{paused_note}"
                 f"<p class='muted'>When on, the agents work on this website by themselves: "
                 f"{esc(plan)}. Each run costs the same credits as running it by hand; "
                 f"nothing is published without your approval.</p>"

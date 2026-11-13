@@ -31,7 +31,10 @@ PLANS: dict[str, dict] = {
         "active_campaigns": 2,
         "basic_analytics": True,
         "advanced_analytics": False,
-        "premium_integrations": "none",
+        # Starter posts to X (Spencer, 2026-11-13): a tier that could
+        # not publish anywhere would be worth less than the legacy plan
+        # at the same price. Facebook/Instagram need Growth, TikTok Pro.
+        "premium_integrations": "x",
         "team_seats": 1,
         "api_access": False,
     },
