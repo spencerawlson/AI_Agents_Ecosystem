@@ -85,7 +85,7 @@ from pathlib import Path
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
-from ventoryn import pricing, site_jobs
+from ventoryn import entitlements, pricing, site_jobs
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
@@ -618,6 +618,20 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                      pending_approvals=pending,
                      alerts=account_alerts(store, account, pending))
 
+    def _plan_refused(site_url: str, message: str, account: dict,
+                      site_id: str):
+        """The plan-limit refusal page (403): the entitlement
+        message + a link to Subscribe. Every plan-gated handler in
+        this module refuses through here, so a direct request is
+        refused the same as a blocked button."""
+        return HTMLResponse(
+            _signed_page(site_url,
+                  f"<p>{esc(message)}</p>"
+                  "<p><a href='/account/subscribe'>See plans</a> · "
+                  f"<a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
+                  account, current="websites"),
+            status_code=403)
+
     def _safe_next(value: str) -> str:
         """Where a 2FA page sends the user after: a same-site path
         only, default /ops. An absolute URL is never honoured."""
@@ -858,6 +872,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="websites"),
                 status_code=400)
+        ok, message = entitlements.can_connect_integration(
+            store, account, "x",
+            is_operator=config.is_operator(account.get("email")))
+        if not ok:
+            return _plan_refused(site["url"], message, account, site_id)
         verifier, challenge = pkce_pair()
         state = store.create_connection_oauth_state(site_id, "x", verifier)
         response = RedirectResponse(x_auth_url(config, state, challenge),
@@ -1012,6 +1031,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="websites"),
                 status_code=400)
+        ok, message = entitlements.can_connect_integration(
+            store, account, "facebook",
+            is_operator=config.is_operator(account.get("email")))
+        if not ok:
+            return _plan_refused(site["url"], message, account, site_id)
         state = store.create_connection_oauth_state(site_id, "facebook",
                                                     "")
         url, _ = build_authorize_url(
@@ -1162,6 +1186,11 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       f"<p><a href='/websites/sites/{esc(site_id)}'>"
                       "Back</a>.</p>", account, current="websites"),
                 status_code=400)
+        ok, message = entitlements.can_connect_integration(
+            store, account, "instagram",
+            is_operator=config.is_operator(account.get("email")))
+        if not ok:
+            return _plan_refused(site["url"], message, account, site_id)
         state = store.create_connection_oauth_state(site_id, "instagram",
                                                     "")
         url, _ = build_authorize_url(
@@ -2605,6 +2634,13 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if not tt.configured():
             return _tiktok_page(site, account, "<p>TikTok is not set up on this server yet. "
                                 "Nothing was connected.</p>", 400)
+        ok, message = entitlements.can_connect_integration(
+            store, account, "tiktok",
+            is_operator=config.is_operator(account.get("email")))
+        if not ok:
+            return _tiktok_page(site, account, f"<p>{esc(message)}</p>"
+                                "<p><a href='/account/subscribe'>See plans</a></p>",
+                                403)
         store.ensure_connections(site_id)  # websites added before TikTok existed
         state = store.create_connection_oauth_state(site_id, "tiktok", "")
         return RedirectResponse(tt.authorize_url(base, state), status_code=303)
@@ -2960,6 +2996,16 @@ funnel counts it. This is the owner-recorded fallback.</p>
         if site is None or site["account_id"] != account["id"]:
             return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
                                       account, current="websites"), status_code=404)
+        if on == "1" and not int(site.get("autopilot", 1) or 0):
+            # Turning the agents on spends one active-agent slot.
+            # Turning them off is always allowed.
+            ok, message = entitlements.can_activate_agents(
+                store, account,
+                is_operator=config.is_operator(account.get("email")))
+            if not ok:
+                if "application/json" in request.headers.get("accept", ""):
+                    return JSONResponse({"error": message}, status_code=403)
+                return _plan_refused(site["url"], message, account, site_id)
         store.set_site_autopilot(site_id, on == "1")
         if "application/json" in request.headers.get("accept", ""):
             return JSONResponse({"on": on == "1"})

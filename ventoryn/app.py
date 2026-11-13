@@ -62,7 +62,7 @@ import urllib.parse
 from ventoryn.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
                        CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
 from ventoryn.totp import provisioning_uri
-from ventoryn import site_jobs, ui
+from ventoryn import entitlements, site_jobs, ui
 from ventoryn.icons import icon
 from ventoryn.social_costs import estimate_cost, rate_note
 from ventoryn.ui import money
@@ -3475,6 +3475,15 @@ id="analyze-submit">Analyze</button>
         if redirect is not None:
             return JSONResponse({"detail": "sign-in required"},
                                 status_code=401)
+        # Plan gating: the JSON data APIs are the API surface — a
+        # Starter has no API access (Growth is read-only, Pro full).
+        # The operator bypasses; the first-party pages are
+        # server-rendered and never fetch this endpoint.
+        ok, message = entitlements.can_use_api(
+            _saas_store, account,
+            is_operator=_saas_config.is_operator(account["email"]))
+        if not ok:
+            return JSONResponse({"detail": message}, status_code=403)
         return JSONResponse(_snapshot(account))
 
     @app.get("/api/report")
@@ -3490,6 +3499,13 @@ id="analyze-submit">Analyze</button>
         if redirect is not None:
             return JSONResponse({"detail": "sign-in required"},
                                 status_code=401)
+        # Plan gating: same as /api/snapshot — the JSON data APIs
+        # are the API surface.
+        ok, message = entitlements.can_use_api(
+            _saas_store, account,
+            is_operator=_saas_config.is_operator(account["email"]))
+        if not ok:
+            return JSONResponse({"detail": message}, status_code=403)
         snap = _snapshot(account)
         exp = snap["experiment_001"]
         if _saas_config.is_operator(account["email"]):
@@ -3831,6 +3847,20 @@ per-sale details are separate settings.</p>{data['privacy_forms']}</div>
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
+        if not _saas_config.is_operator(account["email"]):
+            # Plan gating: the full report is advanced analytics
+            # (Growth / Pro). A Starter gets the upgrade note.
+            adv_ok, adv_message = entitlements.can_view_advanced_analytics(
+                _saas_store, account, is_operator=False)
+            if not adv_ok:
+                return HTMLResponse(_operator_page(
+                    "Report",
+                    f"<div class='card'><h2>Advanced analytics</h2>"
+                    f"<p>{esc(adv_message)}</p>"
+                    "<p><a class='btn btn-primary' "
+                    "href='/account/subscribe'>See plans</a></p></div>",
+                    account=account, current="analytics",
+                    is_operator=False), status_code=403)
         from orchestrator.models import utcnow
 
         snap = _snapshot(account)
@@ -4086,6 +4116,12 @@ shows verified conversions only.</p>"""
         except ValueError:
             return _back("Days and posts a day must be numbers. Nothing was charged.")
         is_op = _saas_config.is_operator(account["email"])
+        ok, message = entitlements.can_create_campaign(
+            _saas_store, account, is_operator=is_op)
+        if not ok:
+            # Plan gating, before anything is charged: starting a
+            # campaign spends one active-campaign slot.
+            return _back(f"{message} Nothing was charged.", 403)
         try:
             job = _saas_store.charge_credits(account["id"], "x_campaign", site["id"],
                                              is_operator=is_op)
@@ -4339,6 +4375,13 @@ shows verified conversions only.</p>"""
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
+        # Plan gating: the funnel is basic analytics (every plan);
+        # the trend, the donut and the full report are advanced
+        # (Growth / Pro). A Starter sees the funnel and an upgrade
+        # note where the advanced sections would be.
+        is_op = _saas_config.is_operator(account["email"])
+        adv_ok, adv_message = entitlements.can_view_advanced_analytics(
+            _saas_store, account, is_operator=is_op)
         from ventoryn.saas import plausible_visitors
 
         data = _attribution_data(account, check_visitors=False)
@@ -4357,9 +4400,6 @@ shows verified conversions only.</p>"""
                 f"<td>{s['revenue_html']}</td></tr>")
         rows = rows or ("<tr><td colspan='5'>No websites yet — add one "
                         "to see its funnel.</td></tr>")
-        # Reports live here: the report page itself, plus (operator
-        # only) the generated mission reports — view in the browser
-        # or download the Markdown.
         if _saas_config.is_operator(account["email"]):
             from ventoryn.reports import list_reports
 
@@ -4381,11 +4421,33 @@ shows verified conversions only.</p>"""
                 "<tr><th>Report</th><th>Date</th><th></th><th></th></tr>"
                 f"{report_rows}</table></div></div>")
         else:
-            report_section = (f"<div class='card'><h2>Reports</h2>"
-                "<p><a class='btn btn-primary' href='/report'>View the "
-                "Acquisition &amp; Attribution report</a></p>"
-                "<p class='muted'>Progress, funnel, campaigns and jobs "
-                "for this account.</p></div>")
+            if adv_ok:
+                report_section = (f"<div class='card'><h2>Reports</h2>"
+                    "<p><a class='btn btn-primary' href='/report'>View the "
+                    "Acquisition &amp; Attribution report</a></p>"
+                    "<p class='muted'>Progress, funnel, campaigns and jobs "
+                    "for this account.</p></div>")
+            else:
+                # Reports live here for Growth / Pro; a Starter gets
+                # the upgrade note instead of the report link.
+                report_section = (f"<div class='card'><h2>Reports</h2>"
+                    f"<p>{esc(adv_message)}</p>"
+                    "<p><a class='btn btn-primary' "
+                    "href='/account/subscribe'>See plans</a></p></div>")
+        if adv_ok:
+            trend_card = (f"<div class='card'><h2>Acquisition trend</h2>"
+                          f"{data['trend_svg']}</div>")
+            donut_card = (f"<div class='card'><h2>Conversion status</h2>"
+                "<div class='v-donut-wrap'>"
+                f"{data['donut_svg']}<ul class='v-legend'>{data['legend_html']}"
+                "</ul></div></div>")
+        else:
+            upgrade_note = (f"<div class='card'><h2>Advanced analytics</h2>"
+                            f"<p>{esc(adv_message)}</p>"
+                            "<p><a class='btn btn-primary' "
+                            "href='/account/subscribe'>See plans</a></p></div>")
+            trend_card = upgrade_note
+            donut_card = ""
         inner = f"""<div class='v-stats'>
 <div class='v-stat v-stat-1'><span class='v-stat-label'>Verified</span>
 <span class='v-stat-value'>{counts['verified']}</span></div>
@@ -4400,9 +4462,8 @@ shows verified conversions only.</p>"""
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.
 Signups read unavailable because no signup tracking is connected yet.</p>
-<div class='card'><h2>Acquisition trend</h2>{data['trend_svg']}</div>
-<div class='card'><h2>Conversion status</h2>
-<div class='v-donut-wrap'>{data['donut_svg']}<ul class='v-legend'>{data['legend_html']}</ul></div></div>
+{trend_card}
+{donut_card}
 {report_section}"""
         return _operator_page(
             "Analytics", inner, account=account, current="analytics",
