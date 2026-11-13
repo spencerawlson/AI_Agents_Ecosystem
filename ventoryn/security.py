@@ -32,7 +32,8 @@ from starlette.responses import PlainTextResponse
 # The analytics collector receives page views from customers' own
 # sites (cross-site by design); it changes no account state and has
 # its own host check, bot filter, size cap and rate limit.
-CSRF_EXEMPT_PATHS = ("/account/billing/webhook", "/api/va/collect")
+CSRF_EXEMPT_PATHS = ("/account/billing/webhook", "/api/va/collect",
+                     "/meta/data-deletion", "/meta/deauthorize")
 
 # Where a form submit may lead (POST /account/subscribe redirects to
 # Stripe Checkout; Chrome applies form-action to that redirect).

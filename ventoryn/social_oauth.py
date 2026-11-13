@@ -27,7 +27,9 @@ user token (see exchange_for_page_token); the long-lived exchange
 itself is exchange_long_lived_token.
 
 Instagram (via Meta login, same Graph endpoints): scopes
-``instagram_business_basic instagram_business_content_publish``.
+``instagram_basic instagram_content_publish pages_show_list
+pages_read_engagement business_management`` (Instagram API with
+Facebook Login).
 No DM/messaging scope is ever requested — Axionory plans no DMs.
 
 X is deliberately not here: X OAuth stays inline on main
@@ -68,8 +70,12 @@ FB_PROFILE_URL = f"{GRAPH_BASE}/me"
 
 SCOPES: dict[str, str] = {
     "facebook": "pages_show_list pages_read_engagement pages_manage_posts",
-    "instagram": ("instagram_business_basic "
-                  "instagram_business_content_publish"),
+    # Instagram API with Facebook Login: the Business account is found
+    # through the Page it is linked to (/me/accounts), so the
+    # Facebook-Login permissions apply — instagram_business_* belong to
+    # the separate Instagram Login and would be refused here.
+    "instagram": ("instagram_basic instagram_content_publish "
+                  "pages_show_list pages_read_engagement business_management"),
 }
 
 PROVIDERS = frozenset({"facebook", "instagram"})

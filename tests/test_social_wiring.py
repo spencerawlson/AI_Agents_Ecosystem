@@ -219,6 +219,8 @@ def test_oauth_callback_facebook_single_page_finishes(monkeypatch):
     assert conn["status"] == "connected"
     assert conn["_detail_raw"]["page_id"] == "page-1"
     assert conn["_detail_raw"]["page_name"] == "Ada Shop"
+    # who connected, for Meta's data deletion requests
+    assert conn["_detail_raw"]["fb_user_id"] == "fb-user-1"
     # The stored detail is encrypted — the plaintext Page token is
     # never in the database row.
     row = store._conn.execute(
@@ -265,6 +267,10 @@ def test_oauth_callback_instagram_finds_business_account(monkeypatch):
     monkeypatch.setattr(
         saas_routes, "find_instagram_account",
         lambda token, config, client=None: "ig-99")
+    monkeypatch.setattr(
+        saas_routes, "get_profile",
+        lambda provider, token, client=None, ig_user_id=None: {
+            "provider_user_id": "fb-user-7", "name": "Ada", "username": ""})
     r = client.get(
         f"/account/auth/instagram/callback?code=authcode&state={state}",
         follow_redirects=False)
@@ -273,6 +279,7 @@ def test_oauth_callback_instagram_finds_business_account(monkeypatch):
     conn = store.get_connection(site["id"], "instagram")
     assert conn["status"] == "connected"
     assert conn["_detail_raw"]["ig_user_id"] == "ig-99"
+    assert conn["_detail_raw"]["fb_user_id"] == "fb-user-7"
 
 
 # ---------------------------------------------------------------------------

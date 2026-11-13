@@ -659,6 +659,11 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
     cost_usd_cents INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_meta_deletions (
+    code TEXT PRIMARY KEY,
+    removed INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS saas_tiktok_posts (
     id TEXT PRIMARY KEY,
     site_id TEXT NOT NULL,
@@ -893,7 +898,8 @@ CONNECTION_SCOPES: dict[str, str] = {
     "facebook": "pages_show_list pages_read_engagement pages_manage_posts",
     # Instagram: read the Business account, publish to it. No DM or
     # messaging scope — Axionory never asks for it.
-    "instagram": "instagram_business_basic instagram_business_content_publish",
+    "instagram": ("instagram_basic instagram_content_publish pages_show_list "
+                  "pages_read_engagement business_management"),
     # Plausible API key: read-only stats for the site.
     "plausible": "stats:read",
     # Stripe sales: the customer's own webhook — read payments only.
@@ -2691,6 +2697,29 @@ class SaasStore:
                 " WHERE site_id = ? AND created_at >= ?",
                 (site_id, _iso(month_start))).fetchone()
         return int(row[0]) / 100
+
+    # -- Meta data deletion requests ------------------------------------
+    def site_ids_with_connection(self, kind: str) -> list[str]:
+        """Sites with a stored (non-empty) connection of this kind."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT site_id FROM saas_connections WHERE kind = ?"
+                " AND detail IS NOT NULL AND detail NOT IN ('', '{}')", (kind,)).fetchall()
+        return [r[0] for r in rows]
+
+    def record_meta_deletion(self, removed: int) -> str:
+        code = secrets.token_hex(8)
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_meta_deletions (code, removed, created_at) VALUES (?, ?, ?)",
+                (code, removed, _iso(_now())))
+        return code
+
+    def get_meta_deletion(self, code: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM saas_meta_deletions WHERE code = ?",
+                                     (code,)).fetchone()
+        return _row_dict(row) if row else None
 
     # -- TikTok posts of approved videos --------------------------------
     def add_tiktok_post(self, site_id: str, job_id: str, publish_id: str, mode: str,
