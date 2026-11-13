@@ -775,6 +775,7 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("saas_accounts", "totp_backup_hashes", "TEXT NOT NULL DEFAULT '[]'"),
     ("saas_accounts", "totp_pending_secret", "TEXT NOT NULL DEFAULT ''"),
     ("saas_accounts", "posting_paused", "INTEGER NOT NULL DEFAULT 0"),
+    ("saas_accounts", "ad_measurement_opt_out", "INTEGER NOT NULL DEFAULT 0"),
     # Revenue privacy is THREE SEPARATE settings (consolidated brief
     # §7 + the attribution reference): revenue_show = dollar amounts;
     # count_show = the paying-customer count; details_show = the
@@ -1130,6 +1131,14 @@ class SaasStore:
                 " current_period_end = COALESCE(?, current_period_end)"
                 " WHERE id = ?",
                 (status, subscription_id, current_period_end, account_id))
+
+    def set_ad_measurement_opt_out(self, account_id: str, opt_out: bool) -> None:
+        """Opt out of sending this account's sign-up/payment events to
+        Meta (ventoryn/meta_capi.py)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_accounts SET ad_measurement_opt_out = ? WHERE id = ?",
+                (1 if opt_out else 0, account_id))
 
     def set_plan(self, account_id: str, plan: str) -> None:
         """Set an account's Axionory tier ('starter'/'growth'/'pro').
@@ -3670,6 +3679,17 @@ def verify_webhook_signature(payload: bytes, header: str, secret: str,
     return any(hmac.compare_digest(expected, sig) for sig in signatures)
 
 
+def _meta_track(store, config, account, name, event_id, amount_cents, currency):
+    """Axionory's own payment, to Meta's Conversions API (never raises)."""
+    try:
+        from ventoryn import meta_capi
+
+        meta_capi.track(store, config, account, name, event_id=event_id,
+                        value_cents=amount_cents, currency=currency)
+    except Exception:  # noqa: BLE001 - measurement never breaks billing
+        pass
+
+
 def handle_platform_webhook(store: SaasStore, config: SaasConfig,
                             event: dict) -> str:
     """Apply one Axionory-subscription webhook event. Returns "ok",
@@ -3699,6 +3719,8 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
             store.record_activity_event(
                 account["id"], "wallet_topup",
                 f"${amount / 100:.2f} added to the wallet")
+            _meta_track(store, config, account, "Purchase", event_id,
+                        amount, obj.get("currency") or "usd")
             return "ok"
         account = store.get_account(obj.get("client_reference_id") or "")
         if account is None:
@@ -3708,6 +3730,9 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
             obj.get("subscription"))
         store.set_subscription(account["id"], "active",
                                obj.get("subscription"))
+        if isinstance(obj.get("amount_total"), int):
+            _meta_track(store, config, account, "Subscribe", event_id,
+                        obj["amount_total"], obj.get("currency") or "usd")
         plan = metadata.get("plan") or ""
         if plan in PLAN_NAMES:
             # Axionory tier: access only, zero included credits — all
@@ -3762,6 +3787,9 @@ def handle_platform_webhook(store: SaasStore, config: SaasConfig,
             return "ignored"
         store.grant_credits(account["id"], config.monthly_credits,
                             "Monthly credit allowance — renewal")
+        if isinstance(obj.get("amount_paid"), int) and obj["amount_paid"] > 0:
+            _meta_track(store, config, account, "Purchase", event_id,
+                        obj["amount_paid"], obj.get("currency") or "usd")
         return "ok"
 
     if etype in ("charge.refunded", "charge.dispute.created",

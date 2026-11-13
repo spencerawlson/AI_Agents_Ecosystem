@@ -787,6 +787,17 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         if account is None:
             account = store.create_account(profile["sub"], profile["email"],
                                            profile.get("name", ""))
+            try:  # Axionory's own sign-ups, for Meta ads (ventoryn/meta_capi.py)
+                from ventoryn import meta_capi
+
+                meta_capi.track(
+                    store, config, account, "CompleteRegistration",
+                    event_id=f"reg-{account['id']}", action_source="website",
+                    ip=(request.headers.get("cf-connecting-ip")
+                        or (request.client.host if request.client else "")),
+                    user_agent=request.headers.get("user-agent", ""))
+            except Exception:  # noqa: BLE001 - never blocks sign-in
+                pass
         token = store.create_session(account["id"])
         # The admin's recent-activity feed: a real sign-in just
         # happened.
@@ -1570,10 +1581,31 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                   f"{_totp_field(account)}"
                   "<p><button class='btn' type='submit'>Delete my "
                   "account</button></p></form></div>")
+        opted_out = bool(int(account.get("ad_measurement_opt_out") or 0))
+        measure = (
+            "<div class='card' id='ad-measurement'><h2>Ad measurement</h2><p>"
+            + ("Off: your sign-up and payments are not shared with Meta."
+               if opted_out else
+               "On: when you sign up or pay, Axionory tells Meta (Facebook, "
+               "Instagram) so its ads for Axionory reach people like you. "
+               "Only a one-way hash of your email and account is sent, never "
+               "your websites or their data.")
+            + "</p><form method='post' action='/account/security/ad-measurement'>"
+            f"<input type='hidden' name='opt_out' value='{'0' if opted_out else '1'}'>"
+            f"<button class='btn' type='submit'>"
+            f"{'Turn ad measurement on' if opted_out else 'Opt out'}</button></form></div>")
         inner = (f"{_account_subnav_html('security')}"
                  f"<div class='card'><h2>Two-factor authentication</h2>"
-                 f"{twofa}</div>{pause}{delete}")
+                 f"{twofa}</div>{pause}{measure}{delete}")
         return _signed_page("Security", inner, account, current="account")
+
+    @app.post("/account/security/ad-measurement")
+    def security_ad_measurement(request: Request, opt_out: str = Form("1")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        store.set_ad_measurement_opt_out(account["id"], opt_out == "1")
+        return RedirectResponse("/account/security#ad-measurement", status_code=303)
 
     @app.post("/account/security/pause")
     def security_pause(request: Request, paused: str = Form("0")):
