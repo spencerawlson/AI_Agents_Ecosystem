@@ -101,8 +101,11 @@ def register_public_files(app, config) -> None:
         return FileResponse(STATIC_DIR / "logo.png", media_type="image/png",
                             headers={"Cache-Control": "public, max-age=86400"})
 
-    @app.api_route("/static/dashboard-preview.png", methods=["GET", "HEAD"])
-    def dashboard_preview_png():
-        return FileResponse(STATIC_DIR / "dashboard-preview.png",
-                            media_type="image/png",
+    @app.api_route("/static/{name}.webp", methods=["GET", "HEAD"])
+    def dashboard_preview_webp(name: str):
+        """The landing hero's dashboard image (two fixed sizes only)."""
+        from fastapi import HTTPException
+        if name not in ("dashboard-preview", "dashboard-preview-900"):
+            raise HTTPException(404, "not found")
+        return FileResponse(STATIC_DIR / f"{name}.webp", media_type="image/webp",
                             headers={"Cache-Control": "public, max-age=86400"})

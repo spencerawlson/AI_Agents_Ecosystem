@@ -15,6 +15,7 @@ reference-image reading (2026-11-08).
   except the real dashboard screenshot (Spencer, 2026-11-12).
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -83,7 +84,9 @@ def test_preview_is_real_dashboard_screenshot():
     r = _landing()
     hero = r.text.split('<section class="hero"')[1].split("</section>")[0]
     assert 'class="preview-shot"' in hero
-    assert 'src="/static/dashboard-preview.png"' in hero
+    assert 'src="/static/dashboard-preview.webp"' in hero
+    assert "/static/dashboard-preview-900.webp 900w" in hero    # phones get the small one
+    assert 'width="1528" height="831"' in hero                  # no layout shift
     assert ('alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified '
             'customers, and your websites."' in hero)
     assert "ILLUSTRATIVE DEMO DATA" not in r.text
@@ -98,8 +101,12 @@ def test_preview_is_real_dashboard_screenshot():
         assert gone not in r.text
     # The screenshot is served by the static route.
     app, _store = _app_with()
-    assert (TestClient(app).get("/static/dashboard-preview.png").status_code
-            == 200)
+    c = TestClient(app)
+    for name in ("dashboard-preview", "dashboard-preview-900"):
+        img = c.get(f"/static/{name}.webp")
+        assert img.status_code == 200 and img.headers["content-type"] == "image/webp"
+        assert img.content[8:12] == b"WEBP"
+    assert c.get("/static/other.webp").status_code == 404
     # Top edge level with the subheadline (Spencer 2026-11-12): measured
     # on the 1920px render, the subheadline's first glyph sits 183px
     # below the hero content top (subheadline y 299, image top y 116),
@@ -231,7 +238,8 @@ def test_final_cta_footer_seo_vector_only():
     # other <img> on the page.
     text = r.text.replace('<img src="/static/logo.png" alt="Axionory">', ""
                           ).replace('<link rel="icon" type="image/png" href="/favicon.png">', ""
-                          ).replace('<img class="preview-shot" src="/static/dashboard-preview.png" alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified customers, and your websites.">', "")
+                          )
+    text = re.sub(r'<img class="preview-shot" src="/static/dashboard-preview\.webp"[^>]*>', "", text)
     for ext in (".jpg", ".jpeg", ".webp", ".gif"):
         assert ext not in text
     assert ".png" not in text

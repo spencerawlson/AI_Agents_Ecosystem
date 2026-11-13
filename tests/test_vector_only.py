@@ -52,7 +52,7 @@ BRAND_IMG = re.compile(r"<img src=['\"]/static/logo\.png['\"] alt=['\"]Axionory[
 FAVICON_LINK = re.compile(
     r"<link rel=['\"]icon['\"] type=['\"]image/png['\"] href=['\"]/favicon\.png['\"]>")
 DASHBOARD_IMG = re.compile(
-    r"<img class=['\"]preview-shot['\"] src=['\"]/static/dashboard-preview\.png['\"] alt=['\"][^'\"]*['\"]>")
+    r"<img class=['\"]preview-shot['\"] src=['\"]/static/dashboard-preview\.webp['\"][^>]*>")
 
 
 def _app_with():

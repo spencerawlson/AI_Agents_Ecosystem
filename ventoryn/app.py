@@ -1143,8 +1143,9 @@ section.alt { background: var(--bg-tint); }
    dashboard (Spencer, 2026-11-12): the HTML mockup is gone; the hero
    shows the live overview with real numbers. -- */
 .preview-shot { display: block; max-width: 100%; height: auto;
-  border: 1px solid #d9d2f2; border-radius: 20px;
-  box-shadow: 0 24px 60px rgba(11,14,30,.18); min-width: 0;
+  border: 0; border-radius: 14px; /* the image carries its own window frame */
+  box-shadow: 0 28px 70px rgba(11,14,30,.45), 0 0 0 1px rgba(196,181,253,.25);
+  min-width: 0;
   /* Top edge level with the subheadline (Spencer, 2026-11-12): measured
      on the 1920px render, the subheadline's first glyph sits 183px below
      the hero content top (subheadline y 299, image top y 116), so the
@@ -1447,7 +1448,7 @@ to fix. Nothing is published.</p>
 <div id="landing-cta" hidden></div>
 </div>
 </div>
-<img class="preview-shot" src="/static/dashboard-preview.png" alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified customers, and your websites.">
+<img class="preview-shot" src="/static/dashboard-preview.webp" srcset="/static/dashboard-preview-900.webp 900w, /static/dashboard-preview.webp 1528w" sizes="(max-width: 900px) 100vw, 64vw" width="1528" height="831" fetchpriority="high" alt="The Axionory dashboard: $25,896.07 revenue, 1,004 verified customers, and your websites.">
 </section>
 <section id="how-it-works" class="alt">
 <div class="wrap">
