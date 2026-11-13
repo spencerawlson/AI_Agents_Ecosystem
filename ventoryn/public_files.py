@@ -101,6 +101,14 @@ def register_public_files(app, config) -> None:
         return FileResponse(STATIC_DIR / "logo.png", media_type="image/png",
                             headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.api_route("/static/og-card.jpg", methods=["GET", "HEAD"])
+    def og_card_jpg():
+        """The 1200x630 link-preview card (og:image / twitter:image).
+        Never shown on a page: only Facebook, X, LinkedIn, Slack, iMessage
+        and the like fetch it when someone shares an Axionory link."""
+        return FileResponse(STATIC_DIR / "og-card.jpg", media_type="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
     @app.api_route("/static/{name}.webp", methods=["GET", "HEAD"])
     def dashboard_preview_webp(name: str):
         """The landing hero's dashboard image (two fixed sizes only)."""

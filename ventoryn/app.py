@@ -1385,6 +1385,16 @@ section.alt { background: var(--bg-tint); }
 <meta property="og:description" content="Enter your website, connect your accounts, and let Axionory's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{esc(_saas_config.base_url)}/">
+<meta property="og:site_name" content="Axionory">
+<meta property="og:image" content="{esc(_saas_config.base_url.rstrip('/'))}/static/og-card.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Axionory: let AI find your customers. You approve every move.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Axionory — Become a Founding Customer">
+<meta name="twitter:description" content="AI agents find your audience and prepare campaigns. You approve every action; verified attribution shows what brings paying customers.">
+<meta name="twitter:image" content="{esc(_saas_config.base_url.rstrip('/'))}/static/og-card.jpg">
 <script type="application/ld+json">{json_ld}</script>
 <style>{_LANDING_CSS}</style>{_own_snippet_landing()}</head><body>
 <header class="site-nav"><div class="wrap">
