@@ -136,13 +136,14 @@ def test_new_pages_honest_empty_states_no_demo_numbers():
         r = client.get(path)
         assert r.status_code == 200, path
         assert text in r.text, (path, text)
-    # Nothing on an empty account looks like traction.
+    # Nothing on an empty account looks like traction. The sidebar
+    # still renders its (slim) Growth Plan card on every page.
     for path in NEW_PAGES:
         r = client.get(path)
         assert "24 / 100" not in r.text, path
         assert "24 of 100" not in r.text, path
         assert "Goal: First 100" not in r.text, path
-        assert "Verified customers" in r.text, path
+        assert "Growth Plan" in r.text, path
 
 
 def test_new_pages_vector_only_no_glyph_arrows():
@@ -327,3 +328,45 @@ def test_snapshot_attribution_is_additive_and_empty_for_new_account():
     assert attr["campaigns"] == []
     assert len(attr["flow_steps"]) == 6
     assert all(step["ok"] is False for step in attr["flow_steps"])
+
+
+# ---------------------------------------------------------------------------
+# Sidebar plan card (slim) + collapsible sidebar
+# ---------------------------------------------------------------------------
+
+def test_sidebar_plan_card_is_just_plan_and_manage():
+    """The Growth Plan card holds only the plan name and Manage Plan —
+    no verified-customer line, no progress bar, no count."""
+    app, store = _app_with()
+    client_a, _a = _customer_client(app, store, CUSTOMER_A)
+    r = client_a.get("/portfolio")
+    assert r.status_code == 200
+    aside = _sidebar_aside(r.text)
+    assert "Growth Plan" in aside
+    assert "Manage Plan" in aside
+    assert "Verified customers" not in aside
+    assert "growth-progress" not in aside
+    assert " verified</strong>" not in aside
+    # The operator sees "Owner account — permanent" instead.
+    client_op, _op = _operator_client(app, store)
+    r = client_op.get("/portfolio")
+    aside = _sidebar_aside(r.text)
+    assert "Owner account" in aside
+    assert "Manage Plan" not in aside
+
+
+def test_sidebar_toggle_collapses_on_desktop():
+    """The header toggle collapses the sidebar on desktop (persisted
+    in localStorage) and still opens the off-canvas sidebar on
+    mobile; the overlay still closes it."""
+    app, store = _app_with()
+    client_a, _a = _customer_client(app, store, CUSTOMER_A)
+    r = client_a.get("/portfolio")
+    assert r.status_code == 200
+    assert "sidebar-toggle" in r.text
+    assert "sidebar-collapsed" in r.text
+    assert "ventoryn.sidebarCollapsed" in r.text
+    assert "Collapse sidebar" in r.text
+    assert "aria-expanded" in r.text
+    assert "sidebar-overlay" in r.text
+    assert "sidebar-open" in r.text

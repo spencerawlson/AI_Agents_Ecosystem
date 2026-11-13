@@ -114,3 +114,48 @@ def test_overview_shows_revenue_costs_and_net_profit():
     for label in ("Revenue", "Costs", "Net profit"):
         assert f"<span class='v-stat-label'>{label}</span>" in html
     assert "data-rev-total>—</span>" in html and "data-rev-profit>—</span>" in html
+
+
+def test_toggle_still_renders_when_revenue_is_fully_visible():
+    """The toggle is not only for hidden revenue: on a page whose
+    figures are all visible it still renders, and its script masks
+    them on load (remembering the real figures in data-real) so OFF
+    really hides them."""
+    client, store, _, site = _setup()
+    store.set_revenue_show(site["id"], True)
+    html = client.get("/portfolio").text
+    assert "id='rev-toggle'" in html
+    assert "$49.00" in html  # the server renders the real figure...
+    # ...and the toggle script remembers it, then masks every cell.
+    assert "data-real" in html
+    assert "el.textContent='—'" in html
+    # The eye endpoint still returns the same figures on demand.
+    assert client.get("/api/websites/revenue").json()["sites"] == {
+        site["id"]: "$49.00"}
+
+
+def test_toggle_masks_visible_revenue_on_overview():
+    """Overview with a visible site: the stats card shows the real
+    total in the HTML (the server chose to show it) and the toggle
+    script masks it on load; hide the site again and the figure must
+    vanish from the page entirely."""
+    client, store, _, site = _setup()
+    store.set_revenue_show(site["id"], True)
+    html = client.get("/ops").text
+    assert "id='rev-toggle'" in html
+    assert "$49.00" in html
+    assert "data-rev-total" in html
+    store.set_revenue_show(site["id"], False)
+    hidden = client.get("/ops").text
+    assert "$49.00" not in hidden
+    assert "data-rev-total" in hidden
+
+
+def test_reveal_choice_persists_across_pages():
+    """The toggle remembers the choice in sessionStorage so a reveal
+    survives navigation within the session."""
+    client, _, _, _ = _setup()
+    html = client.get("/portfolio").text
+    assert "ventoryn.revealRevenue" in html
+    assert "sessionStorage.getItem" in html
+    assert "if(keep)show();" in html

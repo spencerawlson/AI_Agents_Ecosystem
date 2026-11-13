@@ -320,7 +320,10 @@ def test_subscribe_page_shows_20_and_checkout(client, store, monkeypatch):
     r = client.get("/account/subscribe")
     assert r.status_code == 200
     assert "$20/month" in r.text
-    assert "100 credits" in r.text
+    # The legacy card is gone; the three tiers are offered instead.
+    assert "Axionory Growth" not in r.text
+    for label in ("Starter", "Growth", "Pro"):
+        assert label in r.text
 
     def _fake_checkout(config, account, site_url=None, plan=""):
         assert config.stripe_price_id == "price_20usd"
@@ -347,7 +350,9 @@ def test_subscribe_page_says_so_without_stripe(store):
     r = c.get("/account/subscribe")
     assert r.status_code == 200
     assert "$20/month" in r.text
-    assert "not set up yet" in r.text
+    # No Stripe prices at all: every tier reads "Coming soon" and no
+    # checkout button renders.
+    assert r.text.count("Coming soon") == 3
     assert "Subscribe — $20/month" not in r.text
 
 
