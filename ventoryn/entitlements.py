@@ -53,8 +53,22 @@ UTILITY_INTEGRATIONS = frozenset({"plausible", "stripe_sales"})
 #: Connection kinds that publish on the owner's behalf — gated by plan.
 PREMIUM_INTEGRATIONS = frozenset({"x", "facebook", "instagram", "tiktok"})
 
+#: Starter's one publishing channel (plans.py: premium_integrations "x").
+STARTER_INTEGRATIONS = frozenset({"x"})
+
 #: Growth's "selected" premium integrations (see the module docstring).
 GROWTH_INTEGRATIONS = frozenset({"x", "facebook", "instagram"})
+
+#: What each plan may publish to, in words (Subscribe page, refusals).
+INTEGRATIONS_LABEL = {"x": "X", "selected": "X, Facebook and Instagram",
+                      "all": "X, Facebook, Instagram and TikTok"}
+
+#: Display names of the publishing connections.
+KIND_NAMES = {"x": "X", "facebook": "Facebook", "instagram": "Instagram",
+              "tiktok": "TikTok"}
+
+#: The API access line per plan value (Subscribe page).
+API_LABEL = {True: "Full API access", "limited": "Read-only API access"}
 
 
 def _plan_label(account: dict) -> str:
@@ -218,15 +232,24 @@ def can_connect_integration(store, account: dict, kind: str, *,
         return True, ""
     if tier == "selected" and kind in GROWTH_INTEGRATIONS:
         return True, ""
+    if tier == "x" and kind in STARTER_INTEGRATIONS:
+        return True, ""
     label = _plan_label(account)
-    if tier == "selected":
-        return False, (
-            f"Your {label} plan includes selected integrations "
-            "(X, Facebook, Instagram). TikTok needs Pro. Upgrade "
-            "to connect it.")
+    needs = "Pro" if kind == "tiktok" else "Growth or Pro"
     return False, (
-        f"Your {label} plan doesn't include premium integrations. "
-        "Upgrade to Growth or Pro to connect social accounts.")
+        f"Your {label} plan posts to {INTEGRATIONS_LABEL.get(tier, 'X')}. "
+        f"{KIND_NAMES.get(kind, kind)} needs {needs}. Upgrade to connect it.")
+
+
+def autopilot_paused_by_plan(store, account: dict, site: dict, *,
+                             is_operator: bool = False) -> bool:
+    """True when this website's autopilot is switched on but the plan's
+    active-agent cap stops it (after a downgrade, the newest sites past
+    the cap). The switch says so, rather than looking on while the
+    autopilot loop quietly skips the site."""
+    return (bool(int(site.get("autopilot", 1) or 0))
+            and not is_autopilot_site_within_cap(store, account, site,
+                                                 is_operator=is_operator))
 
 
 def can_use_api(store, account: dict, *,

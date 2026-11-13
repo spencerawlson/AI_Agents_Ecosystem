@@ -407,9 +407,11 @@ SWITCH_JS = "<script>document.addEventListener('submit',function(e){var f=e.targ
 
 
 def autopilot_switch_html(site_id: str, on: bool, label: str,
-                          return_to: str = "") -> str:
+                          return_to: str = "", paused: bool = False) -> str:
     """The agents' autopilot switch for one website (same look as the
-    Revenue switch). ``label`` names the website for screen readers."""
+    Revenue switch). ``label`` names the website for screen readers.
+    ``paused``: switched on, but past the plan's active-agent limit, so
+    the agents are not running; the switch reads "Paused"."""
     import html as _h
 
     sid = _h.escape(site_id, quote=True)
@@ -421,7 +423,12 @@ def autopilot_switch_html(site_id: str, on: bool, label: str,
             f"aria-checked='{'true' if on else 'false'}' "
             f"aria-label='Agents on autopilot for {_h.escape(label, quote=True)}'>"
             f"<span class='rev-track' aria-hidden='true'><span class='rev-knob'></span></span>"
-            f"<span class='v-switch-text'>{'On' if on else 'Off'}</span></button></form>")
+            f"<span class='v-switch-text'>"
+            f"{('Paused' if paused else 'On') if on else 'Off'}</span></button>"
+            + ("<a class='muted v-switch-note' href='/account/subscribe' "
+               "title='Past your plan&#39;s active-agent limit'>plan limit</a>"
+               if on and paused else "")
+            + "</form>")
 
 
 BELL_JS = "<script>(function(){var b=document.getElementById('bell-btn'),p=document.getElementById('bell-panel');if(!b||!p)return;function close(){p.hidden=true;b.setAttribute('aria-expanded','false');}b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var open=p.hidden;p.hidden=!open;b.setAttribute('aria-expanded',String(open));});document.addEventListener('click',function(e){if(!p.hidden&&!p.contains(e.target)&&!b.contains(e.target))close();});document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});})();</script>"

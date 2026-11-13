@@ -347,7 +347,7 @@ def test_report_page_gated_for_starter(client, store, config):
 def test_integration_matrix(store):
     matrix = (
         # (plan, kind, allowed)
-        ("starter", "x", False),
+        ("starter", "x", True),  # Starter posts to X (Spencer, 2026-11-13)
         ("starter", "facebook", False),
         ("starter", "instagram", False),
         ("starter", "tiktok", False),
@@ -378,9 +378,9 @@ def test_integration_never_limited_for_legacy_and_operator(store):
         ok, _ = can_connect_integration(store, legacy, kind)
         assert ok
     tier = _tier_account(store, "starter", "in-op", "inop@example.com")
-    ok, _ = can_connect_integration(store, tier, "x")
+    ok, _ = can_connect_integration(store, tier, "facebook")
     assert not ok
-    ok, _ = can_connect_integration(store, tier, "x", is_operator=True)
+    ok, _ = can_connect_integration(store, tier, "facebook", is_operator=True)
     assert ok
 
 
@@ -391,7 +391,7 @@ def test_reddit_refused_for_every_plan(store):
         assert not ok and "free access" in message
 
 
-def test_x_connect_start_refused_for_starter(store, config):
+def test_x_connect_start_allowed_for_starter(store, config):
     cfg = replace(config, x_client_id="x-id", x_client_secret="x-secret",
                   x_app_registered=True)
     tclient = TestClient(create_app(saas_store=store, saas_config=cfg))
@@ -400,8 +400,15 @@ def test_x_connect_start_refused_for_starter(store, config):
     site = _site(store, account["id"], "https://xr.example.com")
     r = tclient.get(f"/websites/sites/{site['id']}/connections/x/start",
                     follow_redirects=False)
-    assert r.status_code == 403
-    assert "premium integrations" in r.text
+    assert r.status_code == 303  # past the plan gate: off to X
+
+
+def test_starter_refusal_names_what_it_includes(store):
+    account = _tier_account(store, "starter", "x-m", "xm@example.com")
+    ok, message = can_connect_integration(store, account, "facebook")
+    assert not ok and "posts to X" in message and "Growth or Pro" in message
+    ok, message = can_connect_integration(store, account, "tiktok")
+    assert not ok and "TikTok needs Pro" in message
 
 
 def test_x_connect_start_allowed_for_growth(store, config):
@@ -456,3 +463,37 @@ def test_api_report_gated_for_starter(client, store, config):
     _login(client, store, account)
     r = client.get("/api/report")
     assert r.status_code == 403
+
+
+# -- autopilot past the cap is visible, never silently on ------------------------
+
+def test_new_site_past_the_agent_cap_starts_with_autopilot_off(client, store):
+    account = _tier_account(store, "starter", "ap-new", "apnew@example.com")
+    _login(client, store, account)
+    for n in range(3):
+        client.post("/websites/sites", data={"url": f"https://ap{n}.example.com"},
+                    follow_redirects=False)
+    sites = store.list_sites(account["id"])
+    assert [int(s["autopilot"]) for s in sites] == [1, 1, 0]
+
+
+def test_site_over_the_cap_reads_paused(client, store):
+    account = _tier_account(store, "starter", "ap-p", "app@example.com")
+    _login(client, store, account)
+    sites = [_site(store, account["id"], f"https://p{n}.example.com") for n in range(3)]
+    # all three on (as after a downgrade): the newest is past Starter's 2
+    page = client.get(f"/websites/sites/{sites[2]['id']}").text
+    assert "Paused by your plan" in page and ">Paused<" in page
+    page = client.get(f"/websites/sites/{sites[0]['id']}").text
+    assert "Paused by your plan" not in page and ">On<" in page
+
+
+def test_subscribe_page_lists_channels_analytics_and_api(client, store, config):
+    account = _account(store)
+    _login(client, store, account)
+    page = client.get("/account/subscribe").text
+    for line in ("Posts to X<", "Posts to X, Facebook and Instagram<",
+                 "Posts to X, Facebook, Instagram and TikTok<",
+                 "Basic analytics (the funnel)", "No API access",
+                 "Read-only API access", "Full API access"):
+        assert line in page, line

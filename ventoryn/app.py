@@ -1544,7 +1544,7 @@ customers.</p>
 <section id="pricing">
 <div class="wrap">
 <h2>Pricing</h2>
-<p class="lede">One plan. Everything included.</p>
+<p class="lede">Start at $20 a month. Growth and Pro add more websites, channels and reports.</p>
 <div class="card price-card">
 <h2>$20/month</h2>
 <p><span class="big">$20</span> / month</p>
@@ -1903,7 +1903,10 @@ if (dropBtn && dropItem) {{
 
                 auto = autopilot_switch_html(
                     site["id"], bool(int(site.get("autopilot", 1) or 0)),
-                    r["name"], return_to="/portfolio")
+                    r["name"], return_to="/portfolio",
+                    paused=entitlements.autopilot_paused_by_plan(
+                        _saas_store, account, site,
+                        is_operator=_saas_config.is_operator(account["email"])))
                 body += (f"<tr><td><a class='v-site-name' href='/websites/sites/{sid}'>"
                          f"{esc(r['name'])}</a></td>"
                          f"<td class='num'>{visitors}</td><td class='num'>{paying}</td>"
