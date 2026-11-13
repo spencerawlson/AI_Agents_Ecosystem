@@ -288,12 +288,14 @@ def test_approvals_ownership_403_still_holds():
 # ---------------------------------------------------------------------------
 
 def test_subscribe_page_still_has_pitch_and_credit_table():
-    # Stripe configured, so the checkout button is really there.
+    # The Starter tier price is configured, so its checkout button is
+    # really there; the legacy flat-rate card is gone.
     store = SaasStore(":memory:")
     config = SaasConfig(operator_email=OPERATOR_EMAIL,
                         admin_password=ADMIN_PASSWORD,
                         stripe_secret_key="sk_test_shell",
                         stripe_price_id="price_20usd",
+                        stripe_price_id_starter="price_starter_usd",
                         base_url="http://testserver")
     app = create_app(registry=BusinessRegistry(), ledger=Ledger(),
                      approvals=ApprovalGate(), audit=AuditLog(),
@@ -303,7 +305,8 @@ def test_subscribe_page_still_has_pitch_and_credit_table():
     assert r.status_code == 200
     assert "$20/month" in r.text
     assert "What a credit buys" in r.text
-    assert "Subscribe — $20/month" in r.text
+    assert "Subscribe — $20/month" in r.text  # the Starter tier button
+    assert "Axionory Growth" not in r.text
 
 
 def test_operator_shows_permanent_subscription():

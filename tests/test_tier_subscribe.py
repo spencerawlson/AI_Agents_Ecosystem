@@ -1,6 +1,7 @@
-"""The Subscribe page's plan picker: the legacy flat-credit plan
-alongside the Axionory tiers (ventoryn/plans.py), and the
-already-subscribed wallet account view (balance + add funds).
+"""The Subscribe page's plan picker: the three Axionory tiers
+(ventoryn/plans.py) — the legacy flat-credit plan is no longer
+offered to new signups — and the already-subscribed wallet account
+view (balance + add funds).
 """
 
 import sys
@@ -11,16 +12,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ventoryn.saas_routes as saas_routes
+from ventoryn.saas import CREDIT_COSTS
 
 from test_saas_shell import _account, _login, client, config, store  # noqa: F401
 
 
-def test_subscribe_page_shows_all_four_plans_tiers_coming_soon(client, store):
+def _credit_table_html(text: str) -> str:
+    """The "What a credit buys" table: everything after its heading."""
+    return text.split("What a credit buys", 1)[1]
+
+
+def test_subscribe_page_shows_three_tiers_no_legacy(client, store):
     _login(client, store)
     r = client.get("/account/subscribe")
     assert r.status_code == 200
-    # The legacy plan still has a working checkout button.
-    assert "Subscribe — $20/month" in r.text
+    # The legacy flat-credit plan is not offered to new signups.
+    assert "Axionory Growth" not in r.text
+    assert "1,000 credits every month" not in r.text
+    assert "the original flat-rate plan" not in r.text
+    assert "Payments are not set up yet" not in r.text
     # Each tier is named and priced, but not yet payable (no Stripe
     # price configured in the test config fixture).
     for label, price in (("Starter", "$20"), ("Growth", "$39"), ("Pro", "$99")):
@@ -109,3 +119,72 @@ def test_legacy_active_account_still_shows_legacy_message(client, store):
     assert r.status_code == 200
     assert "You are subscribed to Axionory Growth at $20/month." in r.text
     assert "Wallet balance" not in r.text
+
+
+def test_credit_table_zero_balance_needs_credits(client, store):
+    """The reported bug: a 0-credit account saw "Available now" on
+    every job while Overview said "0 left". STATUS is the gating unit
+    for this account, so every job reads "Needs credits" and the
+    balance is shown above the table."""
+    _login(client, store)
+    r = client.get("/account/subscribe")
+    assert r.status_code == 200
+    table = _credit_table_html(r.text)
+    assert "Your balance:" in table and "0 credits" in table
+    assert "Available now" not in table
+    assert table.count("Needs credits") == len(CREDIT_COSTS)
+
+
+def test_credit_table_funded_account_shows_available_now(client, store):
+    account = _login(client, store)
+    store.grant_credits(account["id"], 100, "test top-up")
+    r = client.get("/account/subscribe")
+    table = _credit_table_html(r.text)
+    assert "100 credits" in table
+    assert "Needs credits" not in table
+    assert table.count("Available now") == len(CREDIT_COSTS)
+
+
+def test_credit_table_boundary_is_the_job_cost(client, store):
+    """Exactly 5 credits: the 5-credit analyze fits, the 10-credit
+    x campaign does not."""
+    account = _login(client, store)
+    store.grant_credits(account["id"], 5, "test top-up")
+    r = client.get("/account/subscribe")
+    table = _credit_table_html(r.text)
+    assert "5 credits" in table
+    analyze = table.split("analyze", 1)[1].split("</tr>", 1)[0]
+    assert "Available now" in analyze
+    campaign = table.split("x campaign", 1)[1].split("</tr>", 1)[0]
+    assert "Needs credits" in campaign
+
+
+def test_credit_table_wallet_account_zero_balance(client, store):
+    """A tier account gates on the wallet, not credits: with an empty
+    wallet every job reads "Needs wallet funds". (No active
+    subscription here, so the page shows the plan picker + table
+    rather than the wallet view.)"""
+    account = _login(client, store)
+    store.set_plan(account["id"], "starter")
+    r = client.get("/account/subscribe")
+    assert r.status_code == 200
+    table = _credit_table_html(r.text)
+    assert "Your wallet balance:" in table and "$0.00" in table
+    assert "Available now" not in table
+    assert "Needs credits" not in table
+    assert table.count("Needs wallet funds") == len(CREDIT_COSTS)
+
+
+def test_credit_table_wallet_account_with_funds(client, store):
+    """$1.00 in the wallet: the jobs whose reserve estimate fits
+    (analyze 50c, x campaign 40c, geo audit 50c, community listening
+    60c, social report 40c) are available; the bigger ones (seo
+    article 150c, video render 200c) need funds."""
+    account = _login(client, store)
+    store.set_plan(account["id"], "starter")
+    store.grant_wallet_credit(account["id"], 100, "test")
+    r = client.get("/account/subscribe")
+    table = _credit_table_html(r.text)
+    assert "$1.00" in table
+    assert table.count("Available now") == 5
+    assert table.count("Needs wallet funds") == 2

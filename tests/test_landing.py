@@ -649,6 +649,7 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
         stripe_secret_key="sk_test_shell",
         stripe_webhook_secret="whsec_test",
         stripe_price_id="price_20usd",
+        stripe_price_id_starter="price_starter_usd",
         monthly_credits=100,
         base_url="http://testserver",
         operator_email=OPERATOR_EMAIL,
@@ -705,6 +706,7 @@ def test_funnel_url_carried_through_sign_in_subscribe_site(
     assert r.status_code == 200
     assert "ada.example.com" in r.text
     assert "name='site_url'" in r.text
+    assert "name='plan' value='starter'" in r.text
 
     def _fake_checkout(cfg, account, site_url=None, plan=""):
         assert site_url == "https://ada.example.com"

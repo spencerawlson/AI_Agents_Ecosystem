@@ -960,12 +960,7 @@ def create_app(
             return ui.page(title, inner, extra_css=extra_css)
         from ventoryn.nav import platform_head_html, sidebar_html
 
-        # Growth: verified count over the account's counted sites —
-        # the exact computation from the /report customer branch.
         sites = _saas_store.list_sites(account["id"])
-        counted_ids = [s["id"] for s in sites if s.get("count_show", 1)]
-        verified = _saas_store.conversion_status_counts(
-            counted_ids)["verified"]
         # Pending: per-account pending approvals — the filter from
         # the /approvals handler.
         owned = _owned_business_ids(account)
@@ -979,7 +974,7 @@ def create_app(
             if d.get("status") == "pending")
         platform_current = _PLATFORM_CURRENT.get(current)
         sidebar = sidebar_html(
-            platform_current, is_operator, verified=verified,
+            platform_current, is_operator,
             pending_approvals=pending,
             account_email=account.get("email", ""))
         # The slim pause pill in the header row, Overview only,
@@ -5001,12 +4996,9 @@ a real Stripe payment, no signature.</p>"""
         Admin group active + app header), keeping only the board
         CONTENT styling (_ADMIN_CSS cards/tables) as extra_css.
         The admin pages open on the admin password session, never a
-        Google session, so the sidebar's Growth Plan card + the
-        Approvals badge read the operator account from the store
-        (verified over their counted sites); when the operator has
-        no Google account yet the card reads 0 and the Admin group
-        still shows — the admin pages are operator-only either
-        way."""
+        Google session, so the Approvals badge reads the operator
+        account from the store; the admin pages are operator-only
+        either way."""
         from ventoryn.nav import platform_head_html, sidebar_html
 
         operator_email = (_saas_config.operator_email or "").strip().lower()
@@ -5015,14 +5007,9 @@ a real Stripe payment, no signature.</p>"""
             if account.get("email", "").strip().lower() == operator_email:
                 operator = account
                 break
-        verified = 0
         pending = 0
         if operator is not None:
             sites = _saas_store.list_sites(operator["id"])
-            counted_ids = [s["id"] for s in sites
-                           if s.get("count_show", 1)]
-            verified = _saas_store.conversion_status_counts(
-                counted_ids)["verified"]
             owned = _owned_business_ids(operator)
             pending = len([a for a in state["approvals"].pending()
                            if _approval_visible(operator, a, owned)])
@@ -5033,7 +5020,7 @@ a real Stripe payment, no signature.</p>"""
                 for d in _saas_store.list_social_drafts(s["id"])
                 if d.get("status") == "pending")
         sidebar = sidebar_html(
-            current, True, verified=verified, pending_approvals=pending,
+            current, True, pending_approvals=pending,
             account_email=(operator or {}).get("email", ""))
         head = platform_head_html(title, pending_approvals=pending)
         return ui.page(f"{title} (admin)", inner +

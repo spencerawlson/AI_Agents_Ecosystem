@@ -119,13 +119,7 @@ SIDEBAR_CSS = """
 .growth-plan { border: 1px solid rgba(196, 181, 253, .3);
   background: rgba(255, 255, 255, .04);
   border-radius: 15px; padding: 17px; margin-top: auto; }
-.growth-title { font-size: 18px; font-weight: 800; }
-.growth-plan p { font-size: 14px; margin: 13px 0 10px; }
-.growth-progress { height: 10px; border: 0;
-  border-radius: 100px; overflow: hidden; background: rgba(255, 255, 255, .1); }
-.growth-progress i { display: block; height: 100%;
-  background: linear-gradient(90deg, #8b5cf6, #c4b5fd); border-radius: inherit; }
-.growth-plan strong { display: block; text-align: right; margin: 8px 3px 17px; }
+.growth-title { font-size: 18px; font-weight: 800; margin-bottom: 13px; }
 .growth-plan .growth-owner { text-align: center; margin: 8px 0 0;
   font-size: 13px; color: #c4b5fd; }
 .ghost-button { display: block; border: 1px solid rgba(255, 255, 255, .28); background: transparent;
@@ -153,7 +147,7 @@ SIDEBAR_CSS = """
 .app-header p { margin: 5px 0 0; font-size: 14px; color: #2d2944; }
 .app-header-actions { display: flex; align-items: center; gap: 25px;
   flex: 0 0 auto; }
-.sidebar-toggle { display: none; border: 0; background: none; color: #1f1938;
+.sidebar-toggle { display: inline-flex; border: 0; background: none; color: #1f1938;
   width: 44px; height: 44px; min-height: 44px; padding: 0; cursor: pointer;
   align-items: center; justify-content: center; border-radius: 10px; }
 .sidebar-toggle:hover { background: #f1ebff; }
@@ -248,6 +242,14 @@ SIDEBAR_CSS = """
 .avatar-dropdown a:hover { background: var(--v-violet-soft, #ede9fe);
   color: var(--v-violet-deep, #6d28d9); }
 .app-main { padding: 0 26px 32px; max-width: 1800px; margin: 0 auto; }
+@media (min-width: 1041px) {
+  /* Collapsed sidebar (desktop): the toggle hides the sidebar and
+     the workspace takes the full width. The choice persists (see
+     SIDEBAR_JS); on narrow screens the sidebar is off-canvas
+     instead, so this class is ignored there. */
+  body.sidebar-collapsed .app-layout { grid-template-columns: minmax(0, 1fr); }
+  body.sidebar-collapsed .app-sidebar { display: none; }
+}
 @media (max-width: 1040px) {
   .app-layout { display: block; }
   .app-sidebar { position: fixed; left: -270px; top: 0; width: 255px;
@@ -282,9 +284,29 @@ SIDEBAR_JS = """
   var overlay = document.querySelector('.sidebar-overlay');
   var avatarBtn = document.querySelector('.avatar-menu .avatar');
   var dropdown = document.querySelector('.avatar-dropdown');
+  var KEY = 'ventoryn.sidebarCollapsed';
+  function isNarrow() {
+    return window.matchMedia('(max-width: 1040px)').matches;
+  }
   function closeSidebar() {
     document.body.classList.remove('sidebar-open');
-    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    if (toggle && isNarrow()) toggle.setAttribute('aria-expanded', 'false');
+  }
+  function applyCollapsed(collapsed) {
+    // Desktop only: hide the sidebar and let the workspace take the
+    // full width. The choice persists in localStorage; on narrow
+    // screens the sidebar is off-canvas instead, so the stored
+    // choice is ignored there.
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    if (toggle && !isNarrow()) {
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.setAttribute('aria-label',
+                          collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    }
+    try {
+      if (collapsed) localStorage.setItem(KEY, '1');
+      else localStorage.removeItem(KEY);
+    } catch (e) {}
   }
   function closeDropdown() {
     if (dropdown) dropdown.hidden = true;
@@ -293,9 +315,21 @@ SIDEBAR_JS = """
   if (toggle) {
     toggle.addEventListener('click', function (ev) {
       ev.stopPropagation();
-      var open = document.body.classList.toggle('sidebar-open');
-      toggle.setAttribute('aria-expanded', String(open));
+      if (isNarrow()) {
+        var open = document.body.classList.toggle('sidebar-open');
+        toggle.setAttribute('aria-expanded', String(open));
+        toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+      } else {
+        applyCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+      }
     });
+    var stored = false;
+    try { stored = localStorage.getItem(KEY) === '1'; } catch (e) {}
+    if (stored) applyCollapsed(true);
+    else if (!isNarrow()) {
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.setAttribute('aria-label', 'Collapse sidebar');
+    }
   }
   if (overlay) overlay.addEventListener('click', closeSidebar);
   if (avatarBtn && dropdown) {
@@ -343,21 +377,18 @@ def _nav_item_html(key: str, label: str, href: str,
 
 
 def sidebar_html(current: str | None, is_operator: bool, *,
-                 verified: int = 0, pending_approvals: int = 0,
+                 pending_approvals: int = 0,
                  account_email: str = "") -> str:
     """The platform sidebar (``<aside class="app-sidebar">``) plus
     the mobile tap-to-close overlay.
 
     ``current`` is the PLATFORM_ITEMS key of the page being rendered
     (or None when the page is not a sidebar item): that item renders
-    as a non-clickable span, never a dead link. ``verified`` is the
-    account's verified-customer count.
+    as a non-clickable span, never a dead link.
     ``pending_approvals`` badges the Approvals item (and the header
     bell) when above zero. The operator sees the Admin group and
     "Owner account — permanent" instead of the Manage Plan button.
     """
-    verified = max(0, int(verified))
-    pct = min(verified, 100)
     items = "".join(
         _nav_item_html(key, label, href, current,
                        badge=(pending_approvals if key == "approvals"
@@ -385,9 +416,6 @@ def sidebar_html(current: str | None, is_operator: bool, *,
         f"<nav class='app-nav' aria-label='Platform'>{items}{admin}</nav>"
         f"<div class='growth-plan'>"
         f"<div class='growth-title'>Growth Plan</div>"
-        f"<p>Verified customers</p>"
-        f"<div class='growth-progress'><i style='width:{pct}%'></i></div>"
-        f"<strong>{verified} verified</strong>"
         f"{growth_action}</div>"
         f"<div class='sidebar-foot'>"
         f"<a class='nav-item' href='/account/logout'>"
@@ -397,7 +425,7 @@ def sidebar_html(current: str | None, is_operator: bool, *,
         f"<div class='sidebar-overlay' aria-hidden='true'></div>")
 
 
-REVENUE_TOGGLE_JS = "<script>document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('rev-toggle');if(!b)return;var cells=document.querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site],[data-rev-site-profit]');if(!cells.length)return;b.hidden=false;var KEY='ventoryn.revealRevenue',shown=false;cells.forEach(function(el){el.setAttribute('data-masked',el.textContent);});function mark(on){shown=on;b.setAttribute('aria-checked',on?'true':'false');var t=on?'Hide revenue':'Show revenue';b.setAttribute('aria-label',t);b.title=t;try{on?sessionStorage.setItem(KEY,'1'):sessionStorage.removeItem(KEY);}catch(e){}}function hide(){cells.forEach(function(el){el.textContent=el.getAttribute('data-masked');});mark(false);}function show(){fetch('/api/websites/revenue',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(!r.ok)throw r;return r.json();}).then(function(d){document.querySelectorAll('[data-rev-total]').forEach(function(el){el.textContent=d.total;});document.querySelectorAll('[data-rev-profit]').forEach(function(el){el.textContent=d.net_profit;});document.querySelectorAll('[data-rev-site]').forEach(function(el){var v=d.sites[el.getAttribute('data-rev-site')];if(v)el.textContent=v;});document.querySelectorAll('[data-rev-site-profit]').forEach(function(el){var v=(d.site_profit||{})[el.getAttribute('data-rev-site-profit')];if(v)el.textContent=v;});mark(true);}).catch(function(){});}b.addEventListener('click',function(){shown?hide():show();});var keep=false;try{keep=sessionStorage.getItem(KEY)==='1';}catch(e){}if(keep)show();});</script>"
+REVENUE_TOGGLE_JS = "<script>document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('rev-toggle');if(!b)return;var cells=document.querySelectorAll('[data-rev-total],[data-rev-profit],[data-rev-site],[data-rev-site-profit]');if(!cells.length)return;b.hidden=false;var KEY='ventoryn.revealRevenue',shown=false;cells.forEach(function(el){el.setAttribute('data-real',el.textContent);el.textContent='—';});function mark(on){shown=on;b.setAttribute('aria-checked',on?'true':'false');var t=on?'Hide revenue':'Show revenue';b.setAttribute('aria-label',t);b.title=t;try{on?sessionStorage.setItem(KEY,'1'):sessionStorage.removeItem(KEY);}catch(e){}}function hide(){cells.forEach(function(el){el.textContent='—';});mark(false);}function show(){fetch('/api/websites/revenue',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(!r.ok)throw r;return r.json();}).then(function(d){function real(el){var v=el.getAttribute('data-real');return (v&&v!=='—')?v:null;}document.querySelectorAll('[data-rev-total]').forEach(function(el){el.textContent=d.total||real(el)||'—';});document.querySelectorAll('[data-rev-profit]').forEach(function(el){el.textContent=d.net_profit||real(el)||'—';});document.querySelectorAll('[data-rev-site]').forEach(function(el){var v=d.sites[el.getAttribute('data-rev-site')];el.textContent=v||real(el)||'—';});document.querySelectorAll('[data-rev-site-profit]').forEach(function(el){var v=(d.site_profit||{})[el.getAttribute('data-rev-site-profit')];el.textContent=v||real(el)||'—';});mark(true);}).catch(function(){});}b.addEventListener('click',function(){shown?hide():show();});var keep=false;try{keep=sessionStorage.getItem(KEY)==='1';}catch(e){}if(keep)show();});</script>"
 
 
 #: Any on/off switch form (class v-switch-form) posts in place: the
@@ -486,9 +514,10 @@ def platform_head_html(title: str, subtitle: str = "", *,
         f"</div>"
         f"<div class='app-header-actions'>"
         f"{pause_pill}"
-        # Revenue show/hide: one toggle for the whole page. Hidden
-        # unless the page has hidden revenue to reveal; a click fetches
-        # the owner's figures, another hides them (see the script).
+        # Revenue show/hide: one toggle for the whole page. Revenue
+        # starts hidden ("—") and a click reveals the owner's figures
+        # (fetched on demand, so hidden rows never ship their values
+        # in the page); another click hides them again (see the script).
         f"<button class='rev-toggle' id='rev-toggle' type='button' role='switch' "
         f"hidden aria-checked='false' aria-label='Show revenue' title='Show revenue'>"
         f"<span class='rev-label'>Revenue</span>"

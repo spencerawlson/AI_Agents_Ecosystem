@@ -196,7 +196,7 @@ def esc(value: object) -> str:
 
 def _page(title: str, inner: str, account: dict | None = None,
           current: str | None = None, is_operator: bool = False,
-          sidebar: bool = False, verified: int = 0,
+          sidebar: bool = False,
           pending_approvals: int = 0, alerts: list | None = None) -> str:
     """Shell for the shell's own pages: the platform shell (purple
     sidebar + app header) whenever an account is given, else the
@@ -206,10 +206,9 @@ def _page(title: str, inner: str, account: dict | None = None,
     Experiments, Experiment 001, Daily plan, Attribution, or "for
     website owners" — those stay reachable by direct URL only.
 
-    ``verified`` / ``pending_approvals`` are computed by
-    ``_signed_page`` (which is where the store and the app live —
-    this function is module-level, so neither is in scope here) and
-    feed the sidebar's Growth Plan card and Approvals badge. The
+    ``pending_approvals`` is computed by ``_signed_page`` (which is
+    where the store and the app live — this function is module-level,
+    so neither is in scope here) and feeds the Approvals badge. The
     sidebar ``current`` maps from the old ``current`` arg where
     sensible ("account" / "subscribe" -> "my-account"); anything
     else gets the sidebar with nothing active. The ``sidebar``
@@ -221,15 +220,14 @@ def _page(title: str, inner: str, account: dict | None = None,
         return ui.page(title, f"<h1>{esc(title)}</h1>{inner}",
                        extra_css=_SAAS_CSS)
     # Any signed-in account page gets the platform shell — the old
-    # hamburger header is retired. ``verified`` / ``pending_approvals``
-    # come from _signed_page.
+    # hamburger header is retired. ``pending_approvals`` comes
+    # from _signed_page.
     from ventoryn.nav import platform_head_html, sidebar_html
 
     platform_current = {"account": "my-account",
                         "subscribe": "my-account",
                         "websites": "websites:sub"}.get(current)
     sb = sidebar_html(platform_current, is_operator,
-                      verified=verified,
                       pending_approvals=pending_approvals,
                       account_email=account.get("email", ""))
     head = platform_head_html(title,
@@ -258,13 +256,46 @@ def _account_subnav_html(active: str) -> str:
             f"{''.join(parts)}</nav>")
 
 
-def _credit_table() -> str:
+def _credit_table(store: SaasStore, account: dict) -> str:
+    """\"What a credit buys\": every billable job, its cost, and whether
+    this account can run it right now.
+
+    STATUS is the gating unit that applies to THIS account, not a
+    catalogue of what exists: a legacy flat-credit account pays in
+    credits (charge_credits refuses below the job's cost), a tier
+    account pays from the prepaid wallet (a job first reserves its
+    estimate — wallet_reserve_estimate_cents in ventoryn/pricing.py —
+    and InsufficientWalletFunds refuses when the available wallet
+    balance is below it). "Coming soon" is unchanged: a job type the
+    product cannot run yet.
+    """
+    if is_wallet_account(account):
+        available = store.wallet_available_cents(account["id"])
+        balance_line = (f"<p class='muted'>Your wallet balance: "
+                        f"<strong>{money(available / 100)}</strong> "
+                        f"available now.</p>")
+
+        def status(name: str, cost: int) -> str:
+            if name not in RUNNABLE_JOB_TYPES:
+                return "Coming soon"
+            estimate = pricing.wallet_reserve_estimate_cents(name)
+            return ("Available now" if available >= estimate
+                    else "Needs wallet funds")
+    else:
+        credits = store.credit_balance(account["id"])
+        balance_line = (f"<p class='muted'>Your balance: "
+                        f"<strong>{credits} credits</strong>.</p>")
+
+        def status(name: str, cost: int) -> str:
+            if name not in RUNNABLE_JOB_TYPES:
+                return "Coming soon"
+            return ("Available now" if credits >= cost else "Needs credits")
     rows = "".join(
         f"<tr><td>{esc(name.replace('_', ' '))}</td>"
         f"<td>{cost} credits</td>"
-        f"<td>{'Available now' if name in RUNNABLE_JOB_TYPES else 'Coming soon'}</td></tr>"
+        f"<td>{status(name, cost)}</td></tr>"
         for name, cost in CREDIT_COSTS.items())
-    return (f"<div class='table-wrap'><table><tr><th>Agent work</th>"
+    return (f"{balance_line}<div class='table-wrap'><table><tr><th>Agent work</th>"
             f"<th>Cost</th><th>Status</th></tr>{rows}</table></div>")
 
 
@@ -274,32 +305,15 @@ def _plural(n: int, word: str) -> str:
 
 def _plan_cards_html(config: SaasConfig, pending_field: str,
                      pending_note: str) -> str:
-    """The Subscribe page's plan picker: the legacy flat-credit plan
-    alongside the Axionory tiers (ventoryn/plans.py). A plan whose
+    """The Subscribe page's plan picker: the three Axionory tiers
+    (ventoryn/plans.py). The legacy flat-credit plan is not offered
+    here — existing legacy accounts keep it (see subscribe_page's
+    active-legacy view) but new signups pick a tier. A tier whose
     Stripe price is not configured yet shows "Coming soon" instead of
     a checkout button — the page never breaks, it just grows as each
     price is added. Tier usage is wallet-funded, not credit-funded —
     see ventoryn/pricing.py."""
-    legacy_body = (
-        f"<ul><li>{config.monthly_credits:,} credits every month</li>"
-        "<li>Your websites on Axionory, working to find new paying "
-        "customers</li><li>Growth reports per site</li></ul>")
-    if config.stripe_configured:
-        legacy_body += (
-            f"{pending_note}<form method='post' action='/account/subscribe'>"
-            f"{pending_field}<button class='btn btn-primary' type='submit'>"
-            f"Subscribe — {esc(PLAN_PRICE_LABEL)}</button></form>"
-            "<p class='muted'>Checkout is handled by Stripe. Axionory "
-            "never sees your card.</p>")
-    else:
-        legacy_body += (
-            "<p class='muted'><strong>Payments are not set up yet.</strong>"
-            f" The price is {esc(PLAN_PRICE_LABEL)}; the Stripe connection "
-            "is still being set up, so checkout is not available on this "
-            "page yet.</p>")
-    cards = [f"<div class='card'><h3>{esc(PLAN_NAME)}</h3>"
-             f"<p class='muted'>{esc(PLAN_PRICE_LABEL)} — the original "
-             f"flat-rate plan.</p>{legacy_body}</div>"]
+    cards = []
     for name in PLAN_NAMES:
         info = PLANS[name]
         features = "".join(
@@ -329,10 +343,10 @@ def _plan_cards_html(config: SaasConfig, pending_field: str,
         cards.append(f"<div class='card'><h3>{esc(info['label'])}</h3>"
                      f"{body}</div>")
     return ("<div class='card'><h2>Choose a plan</h2>"
-            "<p class='muted'>The flat-rate plan includes monthly credits. "
-            "A tier is access only — workspaces, agent and campaign slots, "
-            "team seats — with every agent action billed from your "
-            "prepaid wallet at its real, metered cost.</p></div>"
+            "<p class='muted'>A tier buys access only — workspaces, agent "
+            "and campaign slots, team seats — with every agent action "
+            "billed from your prepaid wallet at its real, metered "
+            "cost.</p></div>"
             "<div style='display:grid;grid-template-columns:repeat("
             "auto-fit,minmax(240px,1fr));gap:16px'>" + "".join(cards)
             + "</div>")
@@ -602,15 +616,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         """_page for a signed-in account: the platform shell (purple
         sidebar + app header). These routes are all behind the
         forced-2FA middleware gate, so the sidebar is safe here.
-        Growth (the verified-customer count) comes from the store over the
-        account's counted sites; pending approvals are the
-        per-account pending ones from app.state.ecosystem (set at
-        the top of create_app, long before register_saas_routes
-        runs, so it is reachable here) — approvals for this
-        account's sites, plus unassigned ones for the operator."""
+        Pending approvals are the per-account pending ones from
+        app.state.ecosystem (set at the top of create_app, long before
+        register_saas_routes runs, so it is reachable here) —
+        approvals for this account's sites, plus unassigned ones for
+        the operator."""
         sites = store.list_sites(account["id"])
-        counted_ids = [s["id"] for s in sites if s.get("count_show", 1)]
-        verified = store.conversion_status_counts(counted_ids)["verified"]
         site_biz_ids = {f"site:{s['id']}" for s in sites}
         is_op = config.is_operator(account["email"])
         gate = app.state.ecosystem["approvals"]
@@ -620,7 +631,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         from ventoryn.alerts import account_alerts
 
         return _page(title, inner, account, current=current,
-                     is_operator=is_op, sidebar=True, verified=verified,
+                     is_operator=is_op, sidebar=True,
                      pending_approvals=pending,
                      alerts=account_alerts(store, account, pending))
 
@@ -1852,7 +1863,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                                 current="subscribe")
         inner = (f"{_account_subnav_html('subscribe')}{notice}"
                  f"{_plan_cards_html(config, pending_field, pending_note)}"
-                 f"<h2>What a credit buys</h2>{_credit_table()}")
+                 f"<h2>What a credit buys</h2>{_credit_table(store, account)}")
         return _signed_page("Subscribe", inner, account,
                                 current="subscribe")
 
