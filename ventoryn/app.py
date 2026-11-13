@@ -1354,7 +1354,7 @@ section.alt { background: var(--bg-tint); }
                 f'<p><span class="big">${_p["price_usd"]}</span> / month</p><ul>'
                 + "".join(f"<li>{_tick}{esc(t)}</li>" for t in _lines)
                 + f'</ul><a class="btn {"btn-primary" if _pop else "btn-dark"}" '
-                f'href="/account/subscribe#plan-{_name}">Choose {esc(_p["label"])}</a></div>')
+                f'href="/account/subscribe?plan={_name}">Choose {esc(_p["label"])}</a></div>')
         tier_cards = f'<div class="tier-grid">{tier_cards}</div>'
         if signed_in:
             signed_banner = (
