@@ -89,15 +89,18 @@ def test_connections_list_honest_not_connected_states():
     site = store.create_site(account["id"], "https://ada.example.com")
     r = client.get(f"/websites/sites/{site['id']}")
     assert r.status_code == 200
-    for kind in ("Reddit", "X", "Plausible", "Stripe"):
+    for kind in ("X", "Plausible", "Stripe"):
         assert kind in r.text, kind
-    # Four connections, none connected yet.
-    assert r.text.count("Not connected") >= 4
-    # Reddit/X: the honest app-registration limit, on the page.
+    # The Reddit connection is not offered (Spencer, 2026-11-13): no card.
+    # (Community listening still searches public Reddit threads; that job
+    # names its source.)
+    assert "<h3>reddit " not in r.text
+    assert r.text.count("Not connected") >= 3
+    # X: the honest app-registration limit, on the page.
     assert "app registration is needed" in r.text
     # The plain-words consent + the minimum scopes are shown.
     assert "cannot send direct messages" in r.text.lower()
-    assert CONNECTION_SCOPES["reddit"] in r.text
+    assert CONNECTION_SCOPES["reddit"] not in r.text
     assert CONNECTION_SCOPES["x"] in r.text
     # X's API is paid and rate-limited — said plainly.
     assert "paid and rate-limited" in r.text

@@ -268,17 +268,17 @@ def test_campaigns_customers_analytics_show_seeded_conversions():
     assert attr["trend"][-1]["verified"] == 1
 
 
-def test_integrations_states_plainly_reddit_x_need_app_registration():
+def test_integrations_states_plainly_x_needs_app_registration():
     app, store = _app_with()
     client, account = _customer_client(app, store, CUSTOMER_A)
     store.create_site(account["id"], "https://ada.example.com")
     r = client.get("/integrations")
     assert r.status_code == 200
     # The apps grid: every service, honest about cost and availability.
-    for kind in ("Reddit", "X", "Plausible", "Stripe"):
+    for kind in ("X", "Plausible", "Stripe"):
         assert kind in r.text, kind
     assert "API is paid and rate-limited" in r.text
-    assert "Not available" in r.text  # Reddit
+    assert "Reddit" not in r.text  # not offered (Spencer, 2026-11-13)
     # The X app page: the not-registered state is stated plainly.
     x = client.get("/integrations/x")
     assert "has not set up Axionory" in x.text

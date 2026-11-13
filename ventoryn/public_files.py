@@ -44,7 +44,7 @@ SaaS founders, independent software developers, startup teams, online service bu
 
 ## Connections
 
-Per website: Reddit, X, Plausible (analytics), and Stripe (sales, read-only: Axionory can never charge or refund).
+Per website: X and TikTok (posting), Stripe (sales, read-only: Axionory can never charge or refund), and Plausible (analytics, optional). Facebook Pages and Instagram are coming once Meta approves Axionory.
 
 ## Pricing
 

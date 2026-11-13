@@ -30,11 +30,12 @@ def test_grid_lists_apps_with_counts():
     store.update_connection(a["id"], "stripe_sales", "connected", "Connected.",
                             {"webhook_secret": "whsec_test"})
     html = client.get("/integrations").text
-    for name in ("X", "Stripe sales", "Plausible", "Reddit"):
+    for name in ("X", "Stripe sales", "Plausible", "TikTok"):
         assert f"<span class='v-app-name'>{name}</span>" in html
     assert "href='/integrations/stripe_sales'" in html
     assert "Connected on 1 of 2 websites" in html
-    assert "href='/integrations/reddit'" not in html  # not available
+    assert "Reddit" not in html  # not offered (Spencer, 2026-11-13)
+    assert client.get("/integrations/reddit").status_code == 404
 
 
 def test_app_page_lists_websites_each_with_a_window():

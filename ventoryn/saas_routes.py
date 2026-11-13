@@ -2000,6 +2000,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         conn_rows = ""
         for conn in connections:
             kind = conn["kind"]
+            if kind == "reddit":
+                # Not offered (Reddit's API has no free access for this);
+                # the row may still exist for older websites, but is not shown.
+                continue
             badge = ("<span class='badge badge-ok'>Connected</span>" if
                      conn["status"] == "connected" else
                      "<span class='badge badge-off'>Not connected</span>")
