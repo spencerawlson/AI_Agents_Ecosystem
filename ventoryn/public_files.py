@@ -100,3 +100,9 @@ def register_public_files(app, config) -> None:
     def logo_png():
         return FileResponse(STATIC_DIR / "logo.png", media_type="image/png",
                             headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.api_route("/static/dashboard-preview.png", methods=["GET", "HEAD"])
+    def dashboard_preview_png():
+        return FileResponse(STATIC_DIR / "dashboard-preview.png",
+                            media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
