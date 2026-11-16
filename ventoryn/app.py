@@ -1024,6 +1024,12 @@ a { color: var(--violet-deep); }
   color: #111; font-weight: bold; }
 .btn-dark { background: var(--navy); border-color: var(--navy); color: #fff;
   font-weight: bold; }
+/* R-11: the ONE primary CTA on the homepage is the hero's waitlist
+   button. Everything else that used to be primary/dark is secondary:
+   white background, violet border + text — readable on the white
+   cards and light sections where the white-text ghost cannot go. */
+.btn-secondary { background: #fff; border-color: var(--violet-deep);
+  color: var(--violet-deep); font-weight: bold; }
 .btn-ghost { background: transparent; border-color: rgba(255,255,255,.45);
   color: #fff; }
 .btn-google { background: #fff; border-color: #888; }
@@ -1116,7 +1122,7 @@ a { color: var(--violet-deep); }
   border-radius: 10px; background: #fff; color: #111; }
 .url-card input[type=text]:focus, .url-card select:focus { outline: none;
   border-color: var(--violet); }
-.url-card .btn-primary { width: 100%; margin-top: 16px; }
+.url-card .btn-secondary { width: 100%; margin-top: 16px; }
 #landing-status { color: var(--muted); margin-top: 10px; }
 #landing-preview { background: #fff; color: var(--ink); border-radius: 12px;
   padding: 16px; margin-top: 16px; text-align: left; }
@@ -1265,6 +1271,21 @@ section.alt { background: var(--bg-tint); }
 .site-footer .base { margin-top: 28px; padding-top: 16px;
   border-top: 1px solid rgba(255,255,255,.12); text-align: center;
   color: #8f89b3; font-size: 13px; }
+/* -- cookie consent (R-04): fixed banner + preference control. The
+   first-party analytics tag (/v.js) is injected by the loader at the
+   bottom of the page ONLY after the visitor accepts — nothing
+   non-essential loads before the choice. Visible by default (also
+   with JS off); JS hides it once a choice is stored. */
+.cookie-banner { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+  background: var(--navy); color: #fff;
+  border-top: 1px solid rgba(255,255,255,.2); padding: 16px 0; }
+.cookie-banner[hidden] { display: none; }
+.cookie-banner .wrap { display: flex; gap: 16px; align-items: center;
+  flex-wrap: wrap; }
+.cookie-banner p { margin: 0; flex: 1; min-width: 260px; font-size: 15px;
+  color: #e6e2ff; }
+.cookie-banner a { color: var(--violet-soft); }
+.cookie-banner .btn { min-height: 44px; line-height: 44px; margin: 0; }
 .score-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
 .score { flex: 1 1 140px; border: 1px solid #ddd; border-radius: 8px;
   padding: 12px; background: #fafafa; text-align: center; }
@@ -1353,7 +1374,7 @@ section.alt { background: var(--bg-tint); }
                 + f'<h3>{esc(_p["label"])}</h3>'
                 f'<p><span class="big">${_p["price_usd"]}</span> / month</p><ul>'
                 + "".join(f"<li>{_tick}{esc(t)}</li>" for t in _lines)
-                + f'</ul><a class="btn {"btn-primary" if _pop else "btn-dark"}" '
+                + f'</ul><a class="btn btn-secondary" '
                 f'href="/account/subscribe?plan={_name}">Choose {esc(_p["label"])}</a></div>')
         tier_cards = f'<div class="tier-grid">{tier_cards}</div>'
         if signed_in:
@@ -1405,6 +1426,7 @@ section.alt { background: var(--bg-tint); }
 <meta charset="utf-8">
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <link rel="icon" type="image/png" href="/favicon.png">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
 <meta name="description" content="Axionory&#x27;s AI agents find your audience and prepare campaigns. You approve every action; verified attribution shows which efforts bring paying customers.">
 <meta property="og:title" content="Axionory — Become a Founding Customer">
 <meta property="og:description" content="Enter your website, connect your accounts, and let Axionory's AI agents discover your audience, prepare campaigns, and identify opportunities to grow. You approve every action.">
@@ -1438,7 +1460,7 @@ section.alt { background: var(--bg-tint); }
 <li><a href="#faq">FAQ</a></li>
 </ul></nav>
 <div class="nav-actions">{nav_signin}
-<a class="btn btn-primary" href="#start">Get Started</a></div>
+<a class="btn btn-ghost" href="#start">Get Started</a></div>
 </div></header>
 {signed_banner}
 <main>
@@ -1453,7 +1475,7 @@ Axionory&rsquo;s AI agents discover your audience, prepare campaigns, and
 identify opportunities to grow. You approve every action, while verified
 attribution shows which efforts turn into paying customers.</p>
 <div class="hero-ctas">
-<a class="btn btn-primary" href="#start">Start Getting Customers</a>
+<a class="btn btn-primary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a>
 <a class="btn btn-ghost" href="#how-it-works">See How It Works</a>
 </div>
 <ul class="trust">
@@ -1475,7 +1497,7 @@ to fix. Nothing is published.</p>
 <label for="landing-country">Market country</label>
 <select id="landing-country" autocomplete="off" required>
 {country_options("ca")}</select>
-<p><button type="submit" class="btn btn-primary"
+<p><button type="submit" class="btn btn-secondary"
  id="landing-submit">Analyze my site — free</button></p>
 </form>
 <div id="landing-status" class="muted" aria-live="polite"></div>
@@ -1496,7 +1518,7 @@ to fix. Nothing is published.</p>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 3l9 4v6c0 6-4 9-9 11-5-2-9-5-9-11V7z" fill="none" stroke="#166534" stroke-width="2"/><path d="M10 14l3 3 5-6" fill="none" stroke="#166534" stroke-width="2"/></svg></span><span class="step-num">4</span><strong>Approve Every Action</strong><span>Review recommended posts, replies, and campaigns before anything is published or executed.</span></li>
 <li><span class="step-icon"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M6 25V4" stroke="#92400e" stroke-width="2"/><path d="M6 4h16l-4 5 4 5H6" fill="none" stroke="#92400e" stroke-width="2"/></svg></span><span class="step-num">5</span><strong>Track Verified Customers</strong><span>Follow attribution from approved action to checkout and see which approved actions turned into verified paying customers.</span></li>
 </ol>
-<div class="steps-cta"><a class="btn btn-primary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a></div>
+<div class="steps-cta"><a class="btn btn-secondary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a></div>
 </div>
 </section>
 <section id="product">
@@ -1605,7 +1627,7 @@ measurable customer growth.</p>
 <p>Joining the waitlist is free registration, separate from the
 $20/month subscription.</p>
 <div class="hero-ctas">
-<a class="btn btn-primary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a>
+<a class="btn btn-secondary" href="/founding-customer-waitlist">Join the Founding Customer Waitlist</a>
 <a class="btn btn-ghost" href="/account/login">Explore the Platform</a>
 </div>
 </div>
@@ -1626,10 +1648,16 @@ $20/month subscription.</p>
 <span class="soon">Documentation — coming soon</span>
 <span class="soon">Support — coming soon</span>
 <a href="/privacy">Privacy Policy</a>
-<a href="/terms">Terms of Service</a></div>
+<a href="/terms">Terms of Service</a>
+<a href="#" id="cookie-settings">Cookie settings</a></div>
 </div>
 <p class="base">Axionory — AI customer acquisition for your website.</p>
 </div></footer>
+<div class="cookie-banner" id="cookie-consent" role="dialog" aria-label="Cookie consent" aria-live="polite"><div class="wrap">
+<p>Axionory uses first-party analytics to understand visits to this page — no advertising cookies, no data sold. Accept to let the analytics load, or decline and browse without it. Read the <a href="/privacy">Privacy Policy</a>.</p>
+<button class="btn btn-secondary" id="cookie-accept" type="button">Accept analytics</button>
+<button class="btn btn-ghost" id="cookie-decline" type="button">Decline</button>
+</div></div>
 <script>
 "use strict";
 window.VENTORYN = {state_json};
@@ -1643,9 +1671,9 @@ function ctaFor(url) {{
   const box = $("landing-cta");
   const enc = encodeURIComponent(url);
   if (window.VENTORYN.subscribed) {{
-    box.innerHTML = "<p><a class='btn btn-primary' href='/websites/sites/new?url=" + enc + "'>Add this website to your account</a></p>";
+    box.innerHTML = "<p><a class='btn btn-secondary' href='/websites/sites/new?url=" + enc + "'>Add this website to your account</a></p>";
   }} else if (window.VENTORYN.signedIn) {{
-    box.innerHTML = "<p><a class='btn btn-primary' href='/account/subscribe?site_url=" + enc + "'>Subscribe — $20/month to add " + esc(url) + "</a></p>";
+    box.innerHTML = "<p><a class='btn btn-secondary' href='/account/subscribe?site_url=" + enc + "'>Subscribe — $20/month to add " + esc(url) + "</a></p>";
   }} else {{
     box.innerHTML = "<p><a class='btn btn-google' href='/account/auth/google/start?site_url=" + enc + "'>Sign in with Google to subscribe — $20/month</a></p>" +
       "<p class='muted'>Your website is carried through sign-in and checkout — you never retype it.</p>";
@@ -1769,14 +1797,62 @@ if (dropBtn && dropItem) {{
     }});
   }});
 }}
+// Cookie consent (R-04): the first-party analytics tag (/v.js) loads
+// ONLY after the visitor accepts. The choice lives in localStorage;
+// "Cookie settings" in the footer re-opens the banner. The site id
+// comes from window.AXIONORY_ANALYTICS_SITE, set in <head> — when
+// analytics is not configured there is no tag to load, but the
+// banner still records the preference for when it is.
+(function () {{
+  var KEY = "axionory-consent";
+  var banner = $("cookie-consent");
+  var site = window.AXIONORY_ANALYTICS_SITE || "";
+  function loadAnalytics() {{
+    if (!site) return;
+    if (document.querySelector("script[data-axionory-analytics]")) return;
+    var s = document.createElement("script");
+    s.defer = true;
+    s.setAttribute("data-site", site);
+    s.setAttribute("data-axionory-analytics", "1");
+    s.src = "/v.js";
+    document.head.appendChild(s);
+  }}
+  function setChoice(v) {{
+    try {{ localStorage.setItem(KEY, v); }} catch (e) {{}}
+    banner.hidden = true;
+    if (v === "accepted") loadAnalytics();
+  }}
+  var saved = null;
+  try {{ saved = localStorage.getItem(KEY); }} catch (e) {{}}
+  if (saved === "accepted") {{ loadAnalytics(); banner.hidden = true; }}
+  else if (saved === "declined") {{ banner.hidden = true; }}
+  else {{ banner.hidden = false; }}
+  $("cookie-accept").addEventListener("click", function () {{ setChoice("accepted"); }});
+  $("cookie-decline").addEventListener("click", function () {{ setChoice("declined"); }});
+  var settings = $("cookie-settings");
+  if (settings) settings.addEventListener("click", function (e) {{
+    e.preventDefault();
+    try {{ localStorage.removeItem(KEY); }} catch (err) {{}}
+    banner.hidden = false;
+  }});
+}})();
 
 </script>
 </body></html>"""
 
     def _own_snippet_landing() -> str:
-        from ventoryn.analytics import own_snippet
+        """R-04: the landing page does NOT carry the raw analytics tag.
+        The tag (/v.js) is injected by the consent loader at the bottom
+        of the page only after the visitor accepts — see the cookie
+        banner. This just publishes the site id for that loader; when
+        analytics is off it publishes nothing. Signed-in pages
+        (ventoryn/ui.py) still carry the raw tag."""
+        from ventoryn.analytics import own_site_id
 
-        return own_snippet()
+        site = own_site_id()
+        if not site:
+            return ""
+        return (f'<script>window.AXIONORY_ANALYTICS_SITE="{site}";</script>')
 
     @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def landing_page(request: Request):

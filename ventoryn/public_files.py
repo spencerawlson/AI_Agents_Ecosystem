@@ -96,6 +96,15 @@ def register_public_files(app, config) -> None:
         return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png",
                             headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.api_route("/favicon.ico", methods=["GET", "HEAD"])
+    def favicon_ico():
+        """The real .ico (16/32/48, converted from the brand favicon.png)
+        so the default /favicon.ico request browsers make does not 404
+        (R-10). The .png stays the declared <link rel=icon>."""
+        return FileResponse(STATIC_DIR / "favicon.ico",
+                            media_type="image/x-icon",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
     @app.api_route("/static/logo.png", methods=["GET", "HEAD"])
     def logo_png():
         return FileResponse(STATIC_DIR / "logo.png", media_type="image/png",
