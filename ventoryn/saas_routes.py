@@ -9,6 +9,10 @@ Pages:
   GET  /account                         -> Live Ops, or the landing page
   GET  /account/login                   -> the landing page (sign-in
                                           lives there, visible on it)
+  GET  /founding-customer-waitlist      -> free waitlist registration
+                                          (email only, no charge)
+  POST /founding-customer-waitlist      -> validate the email, reject
+                                          duplicates, record the entry
   GET  /account/auth/google/start       -> Google authorization URL
   GET  /account/auth/google/callback    code -> session cookie -> /ops
   GET  /account/logout                  end the session -> landing page
@@ -79,6 +83,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -196,6 +201,20 @@ _SAAS_CSS = """
 
 def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
+
+
+#: Waitlist email shape: one @, no spaces, a dot in the domain. This
+#: is a format check only — it does not verify the mailbox exists.
+_WAITLIST_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _valid_waitlist_email(value: str) -> str:
+    """The normalized waitlist email (stripped, lowercased), or '' when
+    the format is invalid."""
+    email = (value or "").strip().lower()
+    if len(email) > 254 or not _WAITLIST_EMAIL_RE.match(email):
+        return ""
+    return email
 
 
 def _page(title: str, inner: str, account: dict | None = None,
@@ -1969,6 +1988,73 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       account, current="subscribe"),
                 status_code=400)
         return RedirectResponse(session["url"], status_code=303)
+
+    # -- founding customer waitlist (public, free) ---------------------
+    # The landing page's "Join the Founding Customer Waitlist" CTAs
+    # point here. Joining is free registration, separate from the
+    # $20/month subscription — this route never charges anything and
+    # sends no email; it only records the address. Submissions are
+    # rate-limited per client IP (the same RateLimiter as the
+    # anonymous analyze preview) so the public form cannot be
+    # hammered; a repeat submission is idempotent (INSERT OR IGNORE
+    # + "already registered"), so a refresh-resubmit is harmless.
+    from ventoryn.security import RateLimiter, client_key
+    waitlist_limit = RateLimiter(limit=10, window=3600)
+
+    def _waitlist_form(error: str = "", email: str = "") -> str:
+        err = (f"<p><strong>{esc(error)}</strong></p>" if error else "")
+        return (
+            f"{err}<p>Free registration, separate from the $20/month "
+            "subscription. Nothing is charged.</p>"
+            "<form method='post' action='/founding-customer-waitlist'>"
+            "<label for='waitlist-email'>Email address</label>"
+            f"<input type='email' id='waitlist-email' name='email' required "
+            f"placeholder='you@example.com' value='{esc(email)}'>"
+            "<p><button type='submit' class='btn btn-primary'>"
+            "Join the waitlist</button></p></form>"
+            "<p><a href='/'>Back to the homepage</a>.</p>")
+
+    @app.get("/founding-customer-waitlist", response_class=HTMLResponse)
+    def waitlist_page():
+        return _page("Join the Founding Customer Waitlist",
+                     _waitlist_form())
+
+    @app.post("/founding-customer-waitlist", response_class=HTMLResponse)
+    def waitlist_submit(request: Request, email: str = Form("")):
+        key = client_key(request)
+        if not waitlist_limit.allow(key):
+            wait = waitlist_limit.retry_after(key)
+            return HTMLResponse(
+                _page("Join the Founding Customer Waitlist",
+                      "<p>Too many waitlist sign-ups from this address — "
+                      f"try again in {max(1, wait // 60)} minute(s).</p>"
+                      "<p><a href='/founding-customer-waitlist'>Back</a>.</p>"),
+                status_code=429, headers={"Retry-After": str(wait)})
+        clean = _valid_waitlist_email(email)
+        if not clean:
+            return HTMLResponse(
+                _page("Join the Founding Customer Waitlist",
+                      _waitlist_form(
+                          error="Enter a valid email address, "
+                                "like you@example.com.",
+                          email=email)),
+                status_code=400)
+        if store.waitlist_entry(clean) is not None:
+            return _page(
+                "Join the Founding Customer Waitlist",
+                f"<p><strong>{esc(clean)}</strong> is already registered "
+                "on the free Founding Customer waitlist — nothing was "
+                "charged and nothing changed.</p>"
+                "<p><a href='/'>Back to the homepage</a>.</p>")
+        store.add_waitlist_entry(clean, source="landing")
+        return _page(
+            "Join the Founding Customer Waitlist",
+            "<p><strong>You're on the list.</strong></p>"
+            f"<p><strong>{esc(clean)}</strong> is registered on the free "
+            "Founding Customer waitlist. Joining the waitlist is free "
+            "registration, separate from the $20/month subscription — "
+            "nothing was charged.</p>"
+            "<p><a href='/'>Back to the homepage</a>.</p>")
 
     @app.post("/account/wallet/topup")
     def wallet_topup_start(request: Request, amount_cents: int = Form(...)):
