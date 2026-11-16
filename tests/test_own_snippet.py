@@ -20,10 +20,14 @@ def _client():
     return client, store
 
 
-def test_landing_and_app_pages_carry_the_tag():
+def test_signed_in_pages_carry_the_tag():
+    # R-04: the PUBLIC landing page no longer carries the raw tag (it
+    # loads only after cookie consent) — the signed-in app pages still
+    # do, one tag each, in <head>.
     client, store = _client()
     landing = client.get("/").text
-    assert TAG in landing and landing.index(TAG) < landing.index("</head>")
+    assert TAG not in landing
+    assert 'window.AXIONORY_ANALYTICS_SITE="8e7c68c8885a1ef3e072a01c"' in landing
     sign_in(client, store)
     for path in ("/ops", "/portfolio", "/account/dashboard"):
         html = client.get(path).text

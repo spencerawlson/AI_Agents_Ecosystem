@@ -40,7 +40,12 @@ def test_hero_copy_exact():
     assert 'class="grad">Founding Customer</span>' in r.text
     assert "Let AI Find Them. You Approve Every Move." in r.text
     assert "Enter your website, connect your accounts" in r.text
-    assert "Start Getting Customers" in r.text
+    # R-11: the hero's one primary CTA is the waitlist (the old
+    # "Start Getting Customers" only scrolled to the hero itself).
+    assert "Start Getting Customers" not in r.text
+    hero = r.text.split('<section class="hero"')[1].split("</section>")[0]
+    assert ('<a class="btn btn-primary" href="/founding-customer-waitlist">'
+            "Join the Founding Customer Waitlist</a>" in hero)
     assert "See How It Works" in r.text
     for trust in ("Human-approved actions",
                   "Verified customer attribution",
