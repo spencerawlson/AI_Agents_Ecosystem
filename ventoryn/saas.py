@@ -756,6 +756,11 @@ CREATE TABLE IF NOT EXISTS saas_usage_events (
     pricing_version TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS founding_waitlist (
+    email TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'landing'
+);
 """
 
 #: Columns added to tables that already exist on a deployed state
@@ -1155,6 +1160,39 @@ class SaasStore:
             self._conn.execute(
                 "UPDATE saas_accounts SET plan = ? WHERE id = ?",
                 (plan, account_id))
+
+    # -- founding customer waitlist (free registration) ----------------
+    def add_waitlist_entry(self, email: str,
+                           source: str = "landing") -> dict:
+        """Record one free-waitlist email (lowercased, unique). A repeat
+        submission is a no-op — the existing entry comes back unchanged
+        (the route tells the visitor they are already registered).
+        Nothing is charged and no email is sent; this is registration
+        only, separate from the $20/month subscription."""
+        email = email.strip().lower()
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO founding_waitlist"
+                " (email, created_at, source) VALUES (?, ?, ?)",
+                (email, now, source))
+        return self.waitlist_entry(email)
+
+    def waitlist_entry(self, email: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM founding_waitlist WHERE email = ?",
+                (email.strip().lower(),)).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_waitlist_entries(self) -> list[dict]:
+        """Every waitlist email, oldest first. Operator-only data — no
+        customer page lists it."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM founding_waitlist ORDER BY created_at"
+                ).fetchall()
+        return [_row_dict(r) for r in rows]
 
     # -- sessions ------------------------------------------------------------
     def create_session(self, account_id: str) -> str:
