@@ -703,10 +703,16 @@ def create_app(
   border-top: 1px solid var(--v-line); padding-top: 12px; }
 /* Websites carousel (Overview): the same cards as the grid, one
    swipeable row instead — scroll-snap does the work natively on
-   touch, the arrow buttons are the non-touch fallback. */
+   touch, the arrow buttons are the non-touch fallback. The track
+   grows to fill the wrap (flex: 1) and the cards center inside it
+   (justify-content: safe center): with few cards the strip sits in
+   the middle of the section instead of hugging the left edge, and
+   when the cards overflow, safe center falls back to flex-start so
+   the first card stays reachable and the last still scrolls in. */
 .v-carousel-wrap { position: relative; display: flex; align-items: center;
   gap: 8px; margin: 18px 0; }
 .v-carousel { display: flex; gap: 14px; overflow-x: auto; min-width: 0;
+  flex: 1 1 auto; justify-content: safe center;
   scroll-snap-type: x mandatory; scroll-behavior: smooth;
   padding: 2px 2px 14px; -webkit-overflow-scrolling: touch; }
 .v-carousel > .v-biz { scroll-snap-align: start; flex: 0 0 300px;
@@ -721,7 +727,7 @@ def create_app(
   /* Phones: stack the business cards vertically instead of the
      swipe row — every site is visible without swiping. */
   .v-carousel { flex-direction: column; overflow: visible;
-    scroll-snap-type: none; padding: 2px; }
+    scroll-snap-type: none; padding: 2px; flex: 0 1 auto; }
   .v-carousel > .v-biz { flex: 1 1 auto; }
   .v-carousel-btn { display: none; }
   .v-carousel-wrap { gap: 0; margin: 14px 0; }
