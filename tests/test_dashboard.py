@@ -11,6 +11,7 @@ from core.audit import AuditLog
 from core.ledger import Ledger
 from core.registry import BusinessRegistry
 from ventoryn.app import create_app
+from ventoryn.signature import sign_agent_link
 from orchestrator.approvals import ApprovalGate
 from orchestrator.engine import Orchestrator
 from orchestrator.registry import AgentRegistry
@@ -313,3 +314,38 @@ def test_live_ops_is_ventoryn_and_professional():
     doc = root / "docs" / "ventoryn-live-ops.md"
     assert doc.exists()
     assert doc.read_text(encoding="utf-8").splitlines()[0] == "# Axionory — Live Ops"
+
+
+def test_live_ops_results_campaign_scroll_and_centered_donut():
+    """Overview Results: the Campaign performance table scrolls
+    vertically inside a bounded card (the long signed URLs wrap —
+    no horizontal scroll), and the Conversion status donut is
+    centred with its legend underneath it. The /report and
+    Analytics layouts are untouched — the rules are scoped to
+    .v-results-pair."""
+    store, config = operator_store_and_config()
+    app = create_app(saas_store=store, saas_config=config)
+    client = TestClient(app)
+    account = sign_in(client, store)
+    site = store.create_site(account["id"], "https://www.road2cissp.com")
+    for i in range(12):
+        sign_agent_link("https://www.road2cissp.com/lab/", site["id"],
+                        "road2cissp.com", "x", f"job-{i}", store,
+                        key="test-key")
+    r = client.get("/ops")
+    assert r.status_code == 200
+    # All 12 campaigns render; nothing is paginated away.
+    assert r.text.count("road2cissp.com/lab/?utm_source=ventoryn") == 12
+    # Campaign card: bounded height, vertical scroll, no horizontal
+    # scroll; the long URL column wraps inside the card.
+    assert ".v-results-pair .table-wrap { max-height: 400px; overflow-y: auto;" in r.text
+    assert "overflow-x: hidden; }" in r.text
+    assert ".v-results-pair .table-wrap td:first-child { overflow-wrap: anywhere; }" in r.text
+    # Donut: stacked vertically and centred; legend underneath.
+    assert ".v-results-pair .v-donut-wrap { flex-direction: column;" in r.text
+    assert ".v-results-pair .v-legend { text-align: center; }" in r.text
+    # The shared /report + Analytics donut layout is untouched.
+    assert ".v-donut-wrap { display: flex; gap: 16px; align-items: center;" in r.text
+    # Wording unchanged.
+    assert "No data" in r.text
+    assert "No conversions recorded yet." in r.text

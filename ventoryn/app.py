@@ -855,6 +855,18 @@ def create_app(
   flex-wrap: wrap; }
 .v-legend { list-style: none; padding: 0; margin: 0; }
 .v-legend li { margin: 6px 0; font-size: 14px; }
+/* Overview Results only (.v-results-pair): the conversion donut is
+   centred with its legend underneath it (never beside it), and the
+   campaign table scrolls vertically inside a bounded card instead
+   of growing the page — the long signed URLs wrap inside the card,
+   so there is no horizontal scroll. Scoped here so /report and the
+   Analytics page keep their own layout. */
+.v-results-pair .v-donut-wrap { flex-direction: column;
+  align-items: center; text-align: center; }
+.v-results-pair .v-legend { text-align: center; }
+.v-results-pair .table-wrap { max-height: 400px; overflow-y: auto;
+  overflow-x: hidden; }
+.v-results-pair .table-wrap td:first-child { overflow-wrap: anywhere; }
 .v-dot { display: inline-block; width: 12px; height: 12px;
   border-radius: 50%; margin-right: 6px; }
 .v-trend { width: 100%; height: auto; display: block; }
