@@ -96,6 +96,9 @@ def execute(store, config, account: dict, site: dict, job_type: str, *,
     hold instead of spending credits; a legacy account is charged
     exactly as before. Returns the job row."""
     is_op = config.is_operator(account.get("email"))
+    # A due monthly operator grant lands before the charge check,
+    # so the grant funds the job it enables.
+    store.apply_due_monthly_grant(account["id"])
     if job is None:
         if is_wallet_account(account) and not is_op:
             reservation = store.reserve_wallet_funds(

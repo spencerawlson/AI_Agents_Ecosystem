@@ -61,7 +61,7 @@ PLATFORM_ITEMS = (
 )
 
 # The Admin group, operator only. Hrefs kept exactly as the old
-# hamburger menu had them: /admin is the live feed; the other three
+# hamburger menu had them: /admin is the live feed; the other four
 # are the oversight pages. "Agent activity" (not "Agents"): the
 # customer Agents page is the roster; this is the operator's view
 # of what the agents are doing across accounts.
@@ -69,6 +69,7 @@ _ADMIN_ITEMS = (
     ("admin-live", "Live", "/admin"),
     ("admin-subscribers", "Subscribers", "/admin/subscribers"),
     ("admin-accounts", "Accounts", "/admin/accounts"),
+    ("admin-grants", "Grants", "/admin/grants"),
     ("admin-agents", "Agent activity", "/admin/agents"),
 )
 

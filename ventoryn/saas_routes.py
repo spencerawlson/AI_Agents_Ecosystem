@@ -292,6 +292,9 @@ def _credit_table(store: SaasStore, account: dict) -> str:
     balance is below it). "Coming soon" is unchanged: a job type the
     product cannot run yet.
     """
+    # A due monthly operator grant lands when the balance is looked
+    # at (lazy recurrence — no scheduler).
+    store.apply_due_monthly_grant(account["id"])
     if is_wallet_account(account):
         available = store.wallet_available_cents(account["id"])
         balance_line = (f"<p class='muted'>Your wallet balance: "
@@ -1803,6 +1806,13 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         account, redirect = _need_account(request)
         if redirect is not None:
             return redirect
+        # A due monthly operator grant lands on first activity in
+        # the month — re-read the account so the plan card shows
+        # the fresh balance.
+        store.apply_due_monthly_grant(account["id"])
+        refreshed = store.get_account(account["id"])
+        if refreshed is not None:
+            account = refreshed
         sites = store.list_sites(account["id"])
         # The website the visitor typed on the landing page, carried
         # through sign-in and checkout — it arrives prefilled on the
