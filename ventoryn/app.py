@@ -59,8 +59,13 @@ from core.ledger import Ledger
 from core.registry import BusinessRegistry
 import urllib.parse
 
+from ventoryn.plans import (OPERATOR_GRANT_DEFAULT_CREDITS,
+                         OPERATOR_GRANT_DEFAULT_WALLET_CENTS,
+                         OPERATOR_GRANT_MONTHLY_CAP_CENTS,
+                         OPERATOR_GRANT_MONTHLY_CAP_CREDITS)
 from ventoryn.saas import (ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_HOURS,
-                       CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE)
+                       CREDIT_COSTS, LIVE_WINDOW_MINUTES, SESSION_COOKIE,
+                       SaasError)
 from ventoryn.totp import provisioning_uri
 from ventoryn import entitlements, site_jobs, ui
 from ventoryn.icons import icon
@@ -81,6 +86,7 @@ _ACTIVITY_KIND_LABELS = {
     "site-added": "Website added",
     "subscribed": "Subscribed",
     "job": "Job run",
+    "operator_grant": "Operator grant",
 }
 
 
@@ -5102,6 +5108,19 @@ a real Stripe payment, no signature.</p>"""
             return None, RedirectResponse("/admin/login", status_code=303)
         return True, None
 
+    def _spendable_credits_cell(account: dict) -> str:
+        """The Credits cell on the admin tables: the balance the
+        account actually spends — wallet funds for a tier account,
+        legacy credits otherwise; Unlimited for the operator (who
+        never pays). The old cell showed credits_balance for
+        everyone, which is 0 / meaningless for tier accounts."""
+        if _saas_config.is_operator(account["email"]):
+            return "Unlimited"
+        if account.get("plan"):
+            available = _saas_store.wallet_available_cents(account["id"])
+            return f"${available / 100:.2f}"
+        return str(account["credits_balance"])
+
     def _admin_page(title: str, inner: str, current: str) -> str:
         """Admin shell: the platform shell (purple sidebar with the
         Admin group active + app header), keeping only the board
@@ -5406,7 +5425,7 @@ a real Stripe payment, no signature.</p>"""
                 f"<tr><td>{esc(account['email'])}</td>"
                 f"<td>{esc(account['name'] or '—')}</td>"
                 f"<td>{len(sites)}</td><td>{paying}</td>"
-                f"<td>{'Unlimited' if _saas_config.is_operator(account['email']) else account['credits_balance']}</td></tr>")
+                f"<td>{_spendable_credits_cell(account)}</td></tr>")
         inner = ("<div class='v-admin-card'>"
                  "<p class='muted'>Every account with an active "
                  "$20/month subscription. Counts only — no site URLs, "
@@ -5420,10 +5439,19 @@ a real Stripe payment, no signature.</p>"""
         return _admin_page("Subscribers", inner, "admin-subscribers")
 
     @app.get("/admin/accounts", response_class=HTMLResponse)
-    def admin_accounts(request: Request):
+    def admin_accounts(request: Request, error: str = ""):
         _, redirect = _need_admin(request)
         if redirect is not None:
             return redirect
+        errors = {
+            "unknown": "Unknown account.",
+            "operator": "The operator account is unlimited — no grant "
+                        "needed.",
+            "duplicate": "That account already has a monthly grant — "
+                         "pause or revoke it on the Grants page first.",
+            "bad_amount": "Grant not created — check the amount "
+                          "(legacy 1–1000 credits, wallet $5–$500).",
+        }
         rows = ""
         for account in _saas_store.list_accounts():
             sites = _saas_store.list_sites(account["id"])
@@ -5432,25 +5460,223 @@ a real Stripe payment, no signature.</p>"""
                           f"<form method='post' action='/admin/accounts/"
                           f"{esc(account['id'])}/reset-totp'>"
                           f"<button type='submit'>Reset 2FA</button></form>")
+            # The grant form: amount + kind + note, in the currency
+            # the account spends (legacy credits for a no-plan
+            # account, wallet dollars for a tier account). The
+            # operator is unlimited — no form for his own row.
+            if _saas_config.is_operator(account["email"]):
+                grant_cell = "—"
+            else:
+                if account.get("plan"):
+                    hint = "wallet $"
+                    default = OPERATOR_GRANT_DEFAULT_WALLET_CENTS // 100
+                else:
+                    hint = "credits"
+                    default = OPERATOR_GRANT_DEFAULT_CREDITS
+                grant_cell = (
+                    f"<form method='post' action='/admin/accounts/"
+                    f"{esc(account['id'])}/grants'>"
+                    f"<input name='amount' type='number' step='any' "
+                    f"value='{default}' required aria-label='Amount'>"
+                    f"<select name='kind' aria-label='Kind'>"
+                    f"<option value='monthly'>Monthly</option>"
+                    f"<option value='one_time'>One-time</option></select>"
+                    f"<input name='note' type='text' maxlength='120' "
+                    f"placeholder='Note (optional)' aria-label='Note'>"
+                    f"<button type='submit'>Grant</button></form>"
+                    f"<span class='muted'>{hint}</span>")
             rows += (
                 f"<tr><td>{esc(account['email'])}</td>"
                 f"<td>{esc(account['name'] or '—')}</td>"
                 f"<td>{esc(account['subscription_status'])}</td>"
                 f"<td>{len(sites)}</td>"
-                f"<td>{'Unlimited' if _saas_config.is_operator(account['email']) else account['credits_balance']}</td>"
+                f"<td>{_spendable_credits_cell(account)}</td>"
                 f"<td>{esc((account['created_at'] or '')[:10])}</td>"
                 f"<td>{'Enabled' if totp['enabled'] else 'Not set up'}</td>"
-                f"<td>{reset_cell}</td></tr>")
+                f"<td>{reset_cell}</td>"
+                f"<td>{grant_cell}</td></tr>")
         inner = ("<div class='v-admin-card'>"
                  "<p class='muted'>Every account that exists on the "
                  "platform — subscribed or not. Counts only.</p>"
+                 + (f"<p class='v-error'>{esc(errors[error])}</p>"
+                    if error in errors else "") +
                  "<div class='table-wrap'><table>"
                  "<tr><th>Email</th><th>Name</th><th>Subscription</th>"
                  "<th>Sites</th><th>Credits</th><th>Created</th>"
-                 "<th>Two-factor</th><th>Reset 2FA</th></tr>"
-                 f"{rows or '<tr><td colspan=8>No accounts yet.</td></tr>'}"
+                 "<th>Two-factor</th><th>Reset 2FA</th><th>Grant</th></tr>"
+                 f"{rows or '<tr><td colspan=9>No accounts yet.</td></tr>'}"
                  "</table></div></div>")
         return _admin_page("Accounts", inner, "admin-accounts")
+
+    # -- admin credit grants ----------------------------------------
+    # The first per-account money action in admin: the operator
+    # assigns spendable balance to an account (a few credits a
+    # month, like his own unlimited — Spencer, 2026-11-17). The
+    # operator is spending his own money here (he absorbs the
+    # provider cost), not touching a customer's financial decisions,
+    # which is why it fits the admin's purpose. Grants are in the
+    # currency the account spends (legacy credits for a no-plan
+    # account, wallet cents for a tier account), auto-selected from
+    # the plan at creation and fixed after that.
+    @app.post("/admin/accounts/{account_id}/grants")
+    def admin_create_credit_grant(request: Request, account_id: str,
+                                  amount: str = Form(""),
+                                  kind: str = Form("monthly"),
+                                  note: str = Form("")):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        account = _saas_store.get_account(account_id)
+        if account is None:
+            return RedirectResponse("/admin/accounts?error=unknown",
+                                    status_code=303)
+        if _saas_config.is_operator(account["email"]):
+            return RedirectResponse("/admin/accounts?error=operator",
+                                    status_code=303)
+        if kind not in ("monthly", "one_time"):
+            return RedirectResponse("/admin/accounts?error=bad_amount",
+                                    status_code=303)
+        unit = "wallet_cents" if account.get("plan") else "credits"
+        try:
+            if unit == "wallet_cents":
+                # The form amount is dollars ($5.00); the store
+                # works in cents.
+                parsed = int(round(float((amount or "").strip()) * 100))
+            else:
+                parsed = int((amount or "").strip())
+        except (TypeError, ValueError):
+            return RedirectResponse("/admin/accounts?error=bad_amount",
+                                    status_code=303)
+        if kind == "monthly":
+            existing = [g for g in
+                        _saas_store.list_operator_grants(account_id)
+                        if g["kind"] == "monthly"
+                        and g["status"] in ("active", "paused")]
+            if existing:
+                return RedirectResponse(
+                    "/admin/accounts?error=duplicate", status_code=303)
+        try:
+            grant = _saas_store.create_operator_grant(
+                account_id, parsed, kind,
+                note=(note or "").strip()[:120], unit=unit)
+        except SaasError:
+            return RedirectResponse("/admin/accounts?error=bad_amount",
+                                    status_code=303)
+        state["audit"].record(
+            agent_type="admin", event="admin_credit_grant",
+            result={"success": True, "email": account["email"],
+                    "amount": grant["amount"], "unit": grant["unit"],
+                    "kind": grant["kind"]})
+        return RedirectResponse("/admin/grants", status_code=303)
+
+    @app.get("/admin/grants", response_class=HTMLResponse)
+    def admin_grants(request: Request):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        # Apply any due monthly grants first, so the totals below
+        # are current (the lazy recurrence also runs on the
+        # dashboard and in autopilot; the page is the third call
+        # site).
+        for grant in _saas_store.list_operator_grants():
+            if grant["kind"] == "monthly" and grant["status"] == "active":
+                _saas_store.apply_due_monthly_grant(grant["account_id"])
+        grants = _saas_store.list_operator_grants()
+        wallet_month = _saas_store.operator_grants_applied_this_month(
+            "wallet_cents")
+        credits_month = _saas_store.operator_grants_applied_this_month(
+            "credits")
+        rows = ""
+        for grant in grants:
+            if grant["unit"] == "wallet_cents":
+                amount = f"${grant['amount'] / 100:.2f}"
+            else:
+                amount = f"{grant['amount']} credits"
+            history = _saas_store.operator_grant_history(
+                grant["account_id"], grant["unit"], limit=3)
+            history_html = "".join(
+                f"<div>{esc(e['reason'])} · "
+                f"{esc((e['created_at'] or '')[:10])}</div>"
+                for e in history) or "<span class='muted'>—</span>"
+            if grant["status"] == "active":
+                actions = (
+                    f"<form method='post' action='/admin/grants/"
+                    f"{esc(grant['id'])}/pause'>"
+                    f"<button type='submit'>Pause</button></form>"
+                    f"<form method='post' action='/admin/grants/"
+                    f"{esc(grant['id'])}/revoke'>"
+                    f"<button type='submit'>Revoke</button></form>")
+            elif grant["status"] == "paused":
+                actions = (
+                    f"<form method='post' action='/admin/grants/"
+                    f"{esc(grant['id'])}/resume'>"
+                    f"<button type='submit'>Resume</button></form>"
+                    f"<form method='post' action='/admin/grants/"
+                    f"{esc(grant['id'])}/revoke'>"
+                    f"<button type='submit'>Revoke</button></form>")
+            else:  # revoked is terminal
+                actions = "—"
+            rows += (
+                f"<tr><td>{esc(grant['email'] or '—')}</td>"
+                f"<td>{esc(amount)}</td>"
+                f"<td>{esc(grant['kind'])}</td>"
+                f"<td>{esc(grant['status'])}</td>"
+                f"<td>{esc(grant['last_granted_month'] or '—')}</td>"
+                f"<td>{esc(grant['note'] or '—')}</td>"
+                f"<td>{history_html}</td>"
+                f"<td>{actions}</td></tr>")
+        inner = ("<div class='v-admin-card'>"
+                 "<p class='muted'>Operator grants: spendable balance "
+                 "assigned to accounts, a few credits a month. "
+                 "Revoking stops future grants only — nothing already "
+                 "granted is taken back.</p>"
+                 f"<p>Granted this month: <strong>"
+                 f"${wallet_month / 100:.2f} wallet</strong> (cap "
+                 f"${OPERATOR_GRANT_MONTHLY_CAP_CENTS / 100:.2f}) · "
+                 f"<strong>{credits_month} credits</strong> (cap "
+                 f"{OPERATOR_GRANT_MONTHLY_CAP_CREDITS})</p>"
+                 "<div class='table-wrap'><table>"
+                 "<tr><th>Account</th><th>Amount</th><th>Kind</th>"
+                 "<th>Status</th><th>Last granted</th><th>Note</th>"
+                 "<th>Recent grants</th><th>Actions</th></tr>"
+                 f"{rows or '<tr><td colspan=8>No grants yet.</td></tr>'}"
+                 "</table></div></div>")
+        return _admin_page("Credit grants", inner, "admin-grants")
+
+    def _admin_set_grant_status(request: Request, grant_id: str,
+                                status: str, event: str):
+        _, redirect = _need_admin(request)
+        if redirect is not None:
+            return redirect
+        grant = _saas_store.get_operator_grant(grant_id)
+        if grant is None:
+            return RedirectResponse("/admin/grants", status_code=303)
+        try:
+            updated = _saas_store.set_operator_grant_status(grant_id,
+                                                             status)
+        except SaasError:
+            return RedirectResponse("/admin/grants", status_code=303)
+        state["audit"].record(
+            agent_type="admin", event=event,
+            result={"success": True, "email": grant["email"],
+                    "amount": updated["amount"], "unit": updated["unit"],
+                    "kind": updated["kind"], "status": status})
+        return RedirectResponse("/admin/grants", status_code=303)
+
+    @app.post("/admin/grants/{grant_id}/pause")
+    def admin_pause_credit_grant(request: Request, grant_id: str):
+        return _admin_set_grant_status(request, grant_id, "paused",
+                                       "admin_credit_grant_pause")
+
+    @app.post("/admin/grants/{grant_id}/resume")
+    def admin_resume_credit_grant(request: Request, grant_id: str):
+        return _admin_set_grant_status(request, grant_id, "active",
+                                       "admin_credit_grant_resume")
+
+    @app.post("/admin/grants/{grant_id}/revoke")
+    def admin_revoke_credit_grant(request: Request, grant_id: str):
+        return _admin_set_grant_status(request, grant_id, "revoked",
+                                       "admin_credit_grant_revoke")
 
     @app.get("/admin/agents", response_class=HTMLResponse)
     def admin_agents(request: Request):

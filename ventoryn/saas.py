@@ -68,7 +68,17 @@ from urllib.parse import urlparse
 
 from core.countries import normalize_country
 from ventoryn.keyed_lock import KeyedLock
-from ventoryn.plans import PLAN_NAMES, PLANS, STARTER_WALLET_CREDIT_CENTS
+from ventoryn.plans import (
+    OPERATOR_GRANT_MAX_CREDITS,
+    OPERATOR_GRANT_MAX_WALLET_CENTS,
+    OPERATOR_GRANT_MIN_CREDITS,
+    OPERATOR_GRANT_MIN_WALLET_CENTS,
+    OPERATOR_GRANT_MONTHLY_CAP_CENTS,
+    OPERATOR_GRANT_MONTHLY_CAP_CREDITS,
+    PLAN_NAMES,
+    PLANS,
+    STARTER_WALLET_CREDIT_CENTS,
+)
 from ventoryn.signature import (make_tag, parse_tag, sign_agent_link,
                                 tag_from_url)
 from ventoryn.token_crypto import decrypt_token, encrypt_token, is_encrypted
@@ -739,6 +749,19 @@ CREATE TABLE IF NOT EXISTS saas_wallet_topups (
     amount_cents INTEGER NOT NULL,
     refunded_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_operator_grants (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_granted_month TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT 'operator',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS saas_usage_events (
     id TEXT PRIMARY KEY,
@@ -1669,6 +1692,336 @@ class SaasStore:
                 self._conn.rollback()
                 raise
         return True
+
+    # -- operator credit grants ----------------------------------------
+    # The operator assigns spendable balance to an account (admin
+    # only — see /admin/accounts). A grant is made in the currency
+    # the account spends: legacy credits for a no-plan account,
+    # wallet cents for a tier account. The spend branch itself is
+    # untouched: grants only add balance, never change how a job
+    # charges.
+
+    def _grant_reason(self, unit: str, amount: int,
+                      month: str | None = None,
+                      monthly: bool = False) -> str:
+        """Ledger reason for a grant application. Monthly reasons
+        carry the month (the platform cap sums on the 'Operator
+        monthly grant' prefix); one-time grants and adjustments do
+        not, so they never count toward the monthly cap."""
+        if unit == "wallet_cents":
+            shown = f"${abs(amount) / 100:.2f}"
+        else:
+            shown = f"{abs(amount)} credits"
+        if amount < 0:
+            return f"Operator adjustment — -{shown}"
+        if monthly:
+            return f"Operator monthly grant — {shown} ({month})"
+        return f"Operator grant — {shown}"
+
+    def _apply_grant_locked(self, account_id: str, unit: str,
+                            amount: int, reason: str, now: str) -> None:
+        """Balance update + ledger row for one grant application.
+        Caller holds the lock and an open transaction (the balance
+        UPDATE and the ledger INSERT land together, like the other
+        grant_* methods). Never called with amount == 0."""
+        if unit == "wallet_cents":
+            self._conn.execute(
+                "UPDATE saas_accounts SET wallet_balance_cents ="
+                " wallet_balance_cents + ? WHERE id = ?",
+                (amount, account_id))
+            self._conn.execute(
+                "INSERT INTO saas_wallet_ledger (id, account_id,"
+                " delta_cents, reason, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (_new_id(), account_id, amount, reason, now))
+        else:
+            self._conn.execute(
+                "UPDATE saas_accounts SET credits_balance ="
+                " credits_balance + ? WHERE id = ?",
+                (amount, account_id))
+            self._conn.execute(
+                "INSERT INTO saas_credit_ledger (id, account_id, delta,"
+                " reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                (_new_id(), account_id, amount, reason, now))
+
+    def _monthly_granted_locked(self, unit: str, month: str) -> int:
+        """Cents (wallet) or credits (legacy) already granted by
+        monthly grants in ``month`` ('YYYY-MM'). Caller holds the
+        lock. One-time grants and adjustments do not count — only
+        the recurring monthly applications do."""
+        if unit == "wallet_cents":
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(delta_cents), 0) FROM"
+                " saas_wallet_ledger WHERE reason LIKE"
+                " 'Operator monthly grant%' AND"
+                " substr(created_at, 1, 7) = ?",
+                (month,)).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(delta), 0) FROM saas_credit_ledger"
+                " WHERE reason LIKE 'Operator monthly grant%' AND"
+                " substr(created_at, 1, 7) = ?",
+                (month,)).fetchone()
+        return int(row[0]) if row else 0
+
+    def create_operator_grant(self, account_id: str, amount: int,
+                              kind: str, note: str = "",
+                              unit: str | None = None,
+                              now: datetime | None = None) -> dict:
+        """Create an operator grant and apply its first amount
+        immediately (a monthly grant's first month lands at
+        creation, then monthly via apply_due_monthly_grant).
+        ``amount`` is credits for the 'credits' unit, cents for
+        'wallet_cents'; the unit defaults to the currency the
+        account spends. A one-time grant with a negative amount is
+        a downward adjustment, clamped so the balance never goes
+        below zero. Raises SaasError for an unknown account, a bad
+        kind or unit, an out-of-bounds amount, or a second active
+        monthly grant on the same account. The operator's own
+        account is refused by the admin route (he is unlimited),
+        not here — the store does not know the operator email."""
+        now = now or _now()
+        month = now.strftime("%Y-%m")
+        stamp = _iso(now)
+        if kind not in ("monthly", "one_time"):
+            raise SaasError(f"Unknown grant kind: {kind}")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM saas_accounts WHERE id = ?",
+                    (account_id,)).fetchone()
+                if row is None:
+                    self._conn.rollback()
+                    raise SaasError(f"Unknown account: {account_id}")
+                if unit is None:
+                    unit = ("wallet_cents" if row["plan"]
+                            else "credits")
+                if unit not in ("credits", "wallet_cents"):
+                    self._conn.rollback()
+                    raise SaasError(f"Unknown grant unit: {unit}")
+                if unit == "wallet_cents":
+                    lo = OPERATOR_GRANT_MIN_WALLET_CENTS
+                    hi = OPERATOR_GRANT_MAX_WALLET_CENTS
+                    balance = int(row["wallet_balance_cents"])
+                else:
+                    lo = OPERATOR_GRANT_MIN_CREDITS
+                    hi = OPERATOR_GRANT_MAX_CREDITS
+                    balance = int(row["credits_balance"])
+                if kind == "monthly":
+                    if not (lo <= amount <= hi):
+                        self._conn.rollback()
+                        raise SaasError(
+                            "Monthly grant amount out of bounds")
+                    dup = self._conn.execute(
+                        "SELECT id FROM saas_operator_grants"
+                        " WHERE account_id = ? AND kind = 'monthly'"
+                        " AND status IN ('active', 'paused')",
+                        (account_id,)).fetchone()
+                    if dup is not None:
+                        self._conn.rollback()
+                        raise SaasError(
+                            "Account already has a monthly grant"
+                            " (pause/revoke it first)")
+                elif amount == 0:
+                    self._conn.rollback()
+                    raise SaasError("Grant amount must not be zero")
+                elif amount > 0 and not (lo <= amount <= hi):
+                    self._conn.rollback()
+                    raise SaasError("Grant amount out of bounds")
+                elif amount < 0:
+                    # Downward adjustment: clamp to the balance so it
+                    # never goes below zero.
+                    amount = max(amount, -balance)
+                    if amount == 0:
+                        self._conn.rollback()
+                        raise SaasError(
+                            "Nothing to deduct — balance is zero")
+                grant_id = _new_id()
+                self._conn.execute(
+                    "INSERT INTO saas_operator_grants (id, account_id,"
+                    " unit, amount, kind, status, last_granted_month,"
+                    " note, created_by, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 'operator',"
+                    " ?, ?)",
+                    (grant_id, account_id, unit, amount, kind,
+                     month if kind == "monthly" else "", note, stamp, stamp))
+                # The first amount lands immediately — for a monthly
+                # grant this is its first month (stamped above); a
+                # one-time grant is fully applied here. An explicit
+                # operator action is never blocked by the monthly cap;
+                # the cap gates the lazy recurrence only.
+                reason = self._grant_reason(
+                    unit, amount, month, monthly=(kind == "monthly"))
+                self._apply_grant_locked(account_id, unit, amount,
+                                         reason, stamp)
+                self._conn.commit()
+            except SaasError:
+                raise
+            except Exception:
+                self._conn.rollback()
+                raise
+        self.record_activity_event(
+            account_id, "operator_grant",
+            f"Operator grant — {reason}")
+        return self.get_operator_grant(grant_id)
+
+    def apply_due_monthly_grant(self, account_id: str,
+                                now: datetime | None = None) -> int:
+        """Grant this month's amount for an active monthly grant, if
+        one is due — at most once per calendar month, atomically
+        (check-and-stamp inside one transaction, like the starter
+        credit). Returns the amount granted (credits or cents, per
+        the grant's unit) or 0 when nothing was due, the account
+        has no active monthly grant, or the platform monthly cap
+        was reached. No backlog: an account away for months gets
+        one month on its return, never the missed months."""
+        now = now or _now()
+        month = now.strftime("%Y-%m")
+        stamp = _iso(now)
+        granted = 0
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                account = self._conn.execute(
+                    "SELECT * FROM saas_accounts WHERE id = ?",
+                    (account_id,)).fetchone()
+                if account is None:
+                    self._conn.commit()
+                    return 0
+                grant = self._conn.execute(
+                    "SELECT * FROM saas_operator_grants"
+                    " WHERE account_id = ? AND kind = 'monthly'"
+                    " AND status = 'active' ORDER BY created_at LIMIT 1",
+                    (account_id,)).fetchone()
+                if grant is None:
+                    self._conn.commit()
+                    return 0
+                if grant["last_granted_month"] == month:
+                    self._conn.commit()
+                    return 0
+                unit = grant["unit"]
+                amount = int(grant["amount"])
+                cap = (OPERATOR_GRANT_MONTHLY_CAP_CENTS
+                       if unit == "wallet_cents"
+                       else OPERATOR_GRANT_MONTHLY_CAP_CREDITS)
+                if (self._monthly_granted_locked(unit, month)
+                        + amount > cap):
+                    # Cap reached: skip this month (the operator
+                    # sees the totals on /admin/grants) and do NOT
+                    # stamp the month, so the grant is retried on
+                    # the account's next activity while under cap.
+                    self._conn.commit()
+                    return 0
+                reason = self._grant_reason(unit, amount, month,
+                                            monthly=True)
+                self._apply_grant_locked(account_id, unit, amount,
+                                         reason, stamp)
+                self._conn.execute(
+                    "UPDATE saas_operator_grants SET"
+                    " last_granted_month = ?, updated_at = ?"
+                    " WHERE id = ?", (month, stamp, grant["id"]))
+                self._conn.commit()
+                granted = amount
+            except Exception:
+                self._conn.rollback()
+                raise
+        if granted:
+            self.record_activity_event(
+                account_id, "operator_grant",
+                f"Operator grant — {self._grant_reason(grant['unit'], granted, month, monthly=True)}")
+        return granted
+
+    def list_operator_grants(self,
+                             account_id: str | None = None) -> list[dict]:
+        """All operator grants, newest first, with the account's
+        email attached. Optionally filtered to one account."""
+        with self._lock:
+            if account_id is None:
+                rows = self._conn.execute(
+                    "SELECT g.*, a.email FROM saas_operator_grants g"
+                    " LEFT JOIN saas_accounts a ON a.id = g.account_id"
+                    " ORDER BY g.created_at DESC").fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT g.*, a.email FROM saas_operator_grants g"
+                    " LEFT JOIN saas_accounts a ON a.id = g.account_id"
+                    " WHERE g.account_id = ?"
+                    " ORDER BY g.created_at DESC",
+                    (account_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def get_operator_grant(self, grant_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT g.*, a.email FROM saas_operator_grants g"
+                " LEFT JOIN saas_accounts a ON a.id = g.account_id"
+                " WHERE g.id = ?", (grant_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def set_operator_grant_status(self, grant_id: str,
+                                  status: str) -> dict | None:
+        """Pause, resume, or revoke a grant. 'revoked' is terminal
+        — a revoked grant can never come back. Returns the updated
+        grant, or None when the id is unknown. Raises SaasError for
+        an unknown status or a revoked grant."""
+        if status not in ("active", "paused", "revoked"):
+            raise SaasError(f"Unknown grant status: {status}")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM saas_operator_grants WHERE id = ?",
+                    (grant_id,)).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return None
+                if row["status"] == "revoked":
+                    self._conn.rollback()
+                    raise SaasError("Grant is revoked")
+                if row["status"] != status:
+                    self._conn.execute(
+                        "UPDATE saas_operator_grants SET status = ?,"
+                        " updated_at = ? WHERE id = ?",
+                        (status, _iso(_now()), grant_id))
+                self._conn.commit()
+            except SaasError:
+                raise
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_operator_grant(grant_id)
+
+    def operator_grants_applied_this_month(
+            self, unit: str, month: str | None = None) -> int:
+        """Cents (wallet) or credits (legacy) granted by monthly
+        grants in ``month`` ('YYYY-MM', defaulting to this month)
+        — the platform-cap numerator, also shown on /admin/grants."""
+        month = month or _now().strftime("%Y-%m")
+        with self._lock:
+            return self._monthly_granted_locked(unit, month)
+
+    def operator_grant_history(self, account_id: str, unit: str,
+                               limit: int = 5) -> list[dict]:
+        """Recent operator-grant ledger entries for an account,
+        newest first — what the /admin/grants page shows per grant.
+        Normalized to {'delta', 'reason', 'created_at'} either way."""
+        with self._lock:
+            if unit == "wallet_cents":
+                rows = self._conn.execute(
+                    "SELECT delta_cents AS delta, reason, created_at"
+                    " FROM saas_wallet_ledger WHERE account_id = ?"
+                    " AND reason LIKE 'Operator%'"
+                    " ORDER BY created_at DESC LIMIT ?",
+                    (account_id, limit)).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT delta, reason, created_at"
+                    " FROM saas_credit_ledger WHERE account_id = ?"
+                    " AND reason LIKE 'Operator%'"
+                    " ORDER BY created_at DESC LIMIT ?",
+                    (account_id, limit)).fetchall()
+        return [_row_dict(r) for r in rows]
 
     def wallet_reserved_cents(self, account_id: str) -> int:
         account = self.get_account(account_id)

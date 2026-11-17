@@ -22,6 +22,30 @@ from __future__ import annotations
 #: SaasStore.grant_starter_wallet_credit_once).
 STARTER_WALLET_CREDIT_CENTS = 2500  # $25
 
+#: Operator credit grants (admin assigns spendable balance to an
+#: account — see SaasStore.create_operator_grant). A grant is made
+#: in the currency the account spends: legacy credits for a no-plan
+#: account, wallet cents for a tier account. Defaults: 50 legacy
+#: credits or $5.00 wallet per month — "a few credits per month"
+#: (Spencer, 2026-11-17).
+OPERATOR_GRANT_DEFAULT_CREDITS = 50
+OPERATOR_GRANT_DEFAULT_WALLET_CENTS = 500  # $5.00
+#: One-time / monthly amount bounds. Wallet bounds mirror the
+#: top-up bounds on SaasConfig (wallet_topup_min_cents/max_cents);
+#: legacy grants are capped at the monthly allowance.
+OPERATOR_GRANT_MIN_CREDITS = 1
+OPERATOR_GRANT_MAX_CREDITS = 1000
+OPERATOR_GRANT_MIN_WALLET_CENTS = 500  # $5.00
+OPERATOR_GRANT_MAX_WALLET_CENTS = 50000  # $500.00
+#: Platform-wide monthly cap on grants applied in a month
+#: (Spencer, 2026-11-17: $100/month total). The two currencies
+#: cannot be summed, so each has its own cap: wallet grants are
+#: capped in dollars, legacy-credit grants in credits (5000 = one
+#: hundred default monthly grants). Both stop runaway monthly
+#: outflow; the cap is enforced in apply_due_monthly_grant.
+OPERATOR_GRANT_MONTHLY_CAP_CENTS = 10000  # $100
+OPERATOR_GRANT_MONTHLY_CAP_CREDITS = 5000
+
 PLANS: dict[str, dict] = {
     "starter": {
         "label": "Starter",

@@ -298,3 +298,155 @@ def test_wallet_statement_csv_is_chronological(store):
     assert lines[0] == "date,amount_usd,reason"
     assert "first" in lines[1] and "10.00" in lines[1]
     assert "second" in lines[2] and "-2.00" in lines[2]
+
+
+# -- operator credit grants ------------------------------------------------
+# The operator assigns spendable balance to an account (a few
+# credits a month). Grants are in the currency the account spends —
+# legacy credits for a no-plan account, wallet cents for a tier
+# account — auto-selected from the plan at creation and fixed
+# after that. The first month lands immediately at creation;
+# later months land lazily on first activity (apply_due_monthly_grant).
+import datetime as _dt
+
+
+def _nov():
+    return _dt.datetime(2026, 11, 17, tzinfo=_dt.timezone.utc)
+
+
+def test_operator_grant_monthly_lands_immediately(store):
+    account = _account(store)
+    grant = store.create_operator_grant(account["id"], 50, "monthly",
+                                        note="first")
+    assert grant["unit"] == "credits"
+    assert grant["status"] == "active"
+    assert grant["last_granted_month"] == "2026-11"
+    assert store.credit_balance(account["id"]) == 50
+
+
+def test_operator_grant_monthly_applies_once_per_month(store):
+    account = _account(store)
+    store.create_operator_grant(account["id"], 50, "monthly", now=_nov())
+    # Same month again: nothing.
+    assert store.apply_due_monthly_grant(account["id"], now=_nov()) == 0
+    assert store.credit_balance(account["id"]) == 50
+    # Next month: one more grant.
+    dec = _dt.datetime(2026, 12, 5, tzinfo=_dt.timezone.utc)
+    assert store.apply_due_monthly_grant(account["id"], now=dec) == 50
+    assert store.credit_balance(account["id"]) == 100
+    # Still only once that month, and no backlog for skipped months.
+    jan = _dt.datetime(2027, 1, 5, tzinfo=_dt.timezone.utc)
+    assert store.apply_due_monthly_grant(account["id"], now=jan) == 50
+    assert store.credit_balance(account["id"]) == 150
+
+
+def test_operator_grant_unit_auto_selected_from_plan(store):
+    legacy = _account(store)
+    assert store.create_operator_grant(
+        legacy["id"], 50, "monthly")["unit"] == "credits"
+    tier = _account(store, sub="google-sub-tier",
+                    email="tier@example.com")
+    store.set_plan(tier["id"], "starter")
+    grant = store.create_operator_grant(tier["id"], 500, "monthly")
+    assert grant["unit"] == "wallet_cents"
+    assert store.wallet_balance_cents(tier["id"]) == 500
+
+
+def test_operator_grant_second_monthly_refused(store):
+    account = _account(store)
+    store.create_operator_grant(account["id"], 50, "monthly")
+    with pytest.raises(SaasError, match="already has"):
+        store.create_operator_grant(account["id"], 10, "monthly")
+
+
+def test_operator_grant_pause_and_revoke_stop_grants(store):
+    account = _account(store)
+    grant = store.create_operator_grant(account["id"], 50, "monthly",
+                                        now=_nov())
+    store.set_operator_grant_status(grant["id"], "paused")
+    dec = _dt.datetime(2026, 12, 5, tzinfo=_dt.timezone.utc)
+    assert store.apply_due_monthly_grant(account["id"], now=dec) == 0
+    store.set_operator_grant_status(grant["id"], "active")
+    assert store.apply_due_monthly_grant(account["id"], now=dec) == 50
+    store.set_operator_grant_status(grant["id"], "revoked")
+    jan = _dt.datetime(2027, 1, 5, tzinfo=_dt.timezone.utc)
+    assert store.apply_due_monthly_grant(account["id"], now=jan) == 0
+    # Revoked is terminal; the balance already granted stays.
+    with pytest.raises(SaasError, match="revoked"):
+        store.set_operator_grant_status(grant["id"], "active")
+    assert store.credit_balance(account["id"]) == 100
+
+
+def test_operator_grant_one_time_and_negative_adjustment(store):
+    account = _account(store)
+    store.create_operator_grant(account["id"], 100, "one_time")
+    assert store.credit_balance(account["id"]) == 100
+    # A negative one-time adjustment deducts, clamped at zero.
+    adj = store.create_operator_grant(account["id"], -10000, "one_time")
+    assert adj["amount"] == -100
+    assert store.credit_balance(account["id"]) == 0
+    # A paused grant still occupies the monthly slot.
+    store.create_operator_grant(account["id"], 50, "monthly")
+    grant = store.list_operator_grants(account["id"])[0]
+    store.set_operator_grant_status(grant["id"], "paused")
+    with pytest.raises(SaasError, match="already has"):
+        store.create_operator_grant(account["id"], 10, "monthly")
+    # ...until it is revoked, which frees the slot.
+    store.set_operator_grant_status(grant["id"], "revoked")
+    store.create_operator_grant(account["id"], 10, "monthly")
+
+
+def test_operator_grant_bounds(store):
+    account = _account(store)
+    for bad in (0, -1, 1001):
+        with pytest.raises(SaasError, match="out of bounds"):
+            store.create_operator_grant(account["id"], bad, "monthly")
+    tier = _account(store, sub="google-sub-tier",
+                    email="tier@example.com")
+    store.set_plan(tier["id"], "starter")
+    with pytest.raises(SaasError, match="out of bounds"):
+        store.create_operator_grant(tier["id"], 100, "monthly")
+    with pytest.raises(SaasError, match="out of bounds"):
+        store.create_operator_grant(tier["id"], 50001, "monthly")
+    with pytest.raises(SaasError, match="not be zero"):
+        store.create_operator_grant(tier["id"], 0, "one_time")
+    with pytest.raises(SaasError, match="Unknown grant kind"):
+        store.create_operator_grant(account["id"], 50, "weekly")
+
+
+def test_operator_grant_ledger_reason_and_activity(store):
+    account = _account(store)
+    store.create_operator_grant(account["id"], 50, "monthly", now=_nov())
+    entries = store.list_credit_entries(account["id"], limit=5)
+    assert entries[0]["reason"].startswith("Operator monthly grant")
+    assert entries[0]["delta"] == 50
+    events = store.recent_activity_events(limit=5)
+    assert any(e["kind"] == "operator_grant"
+               and e["email"] == account["email"] for e in events)
+
+
+def test_operator_grant_monthly_cap_skips_when_reached(store):
+    # Five accounts with 1000-credit monthly grants, all granted in
+    # October: the platform cap is 5000 credits/month. A sixth
+    # account's grant was also created in October (creation is an
+    # explicit operator action and is not capped). In November the
+    # five big grants fill the cap, so the sixth is skipped — and
+    # the month is not stamped, so it retries next month.
+    oct_now = _dt.datetime(2026, 10, 15, tzinfo=_dt.timezone.utc)
+    nov_now = _dt.datetime(2026, 11, 5, tzinfo=_dt.timezone.utc)
+    small = _account(store, sub="google-sub-small",
+                     email="small@example.com")
+    store.create_operator_grant(small["id"], 50, "monthly", now=oct_now)
+    for i in range(5):
+        big = _account(store, sub=f"google-sub-big{i}",
+                       email=f"big{i}@example.com")
+        store.create_operator_grant(big["id"], 1000, "monthly",
+                                    now=oct_now)
+        assert store.apply_due_monthly_grant(big["id"],
+                                             now=nov_now) == 1000
+    assert store.operator_grants_applied_this_month("credits",
+                                                    "2026-11") == 5000
+    assert store.apply_due_monthly_grant(small["id"], now=nov_now) == 0
+    assert store.credit_balance(small["id"]) == 50
+    grant = store.list_operator_grants(small["id"])[0]
+    assert grant["last_granted_month"] == "2026-10"
