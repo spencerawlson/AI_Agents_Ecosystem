@@ -718,7 +718,11 @@ def create_app(
   cursor: pointer; box-shadow: var(--v-shadow); padding: 0; }
 .v-carousel-btn:hover { background: var(--v-violet-soft); }
 @media (max-width: 640px) {
-  .v-carousel > .v-biz { flex: 0 0 85%; }
+  /* Phones: stack the business cards vertically instead of the
+     swipe row — every site is visible without swiping. */
+  .v-carousel { flex-direction: column; overflow: visible;
+    scroll-snap-type: none; padding: 2px; }
+  .v-carousel > .v-biz { flex: 1 1 auto; }
   .v-carousel-btn { display: none; }
   .v-carousel-wrap { gap: 0; margin: 14px 0; }
 }
@@ -809,7 +813,25 @@ def create_app(
 .v-act-bar { width: 100%; max-width: 36px; background: var(--v-blue);
   border-radius: 4px 4px 0 0; min-height: 2px; }
 .v-act-num { font-size: 12px; font-weight: 700; }
-.v-act-day { font-size: 11px; color: var(--v-muted); }
+.v-act-day { font-size: 12px; color: var(--v-muted); }
+@media (max-width: 560px) {
+  /* Websites table on phones: a right-edge fade so the swipe is
+     discoverable, and the site-name column stays pinned while
+     swiping. The table stays a table — no card layout. */
+  .v-site-list { box-shadow: inset -20px 0 14px -14px rgba(11, 14, 30, .28), var(--v-shadow); }
+  .v-site-table th:first-child, .v-site-table td:first-child {
+    position: sticky; left: 0; z-index: 1;
+    box-shadow: 1px 0 0 0 var(--v-line); }
+  .v-site-table th:first-child { z-index: 2; }
+  .v-site-table td:first-child { background: var(--v-card); }
+  .v-site-table tbody tr:hover td:first-child {
+    background: color-mix(in srgb, var(--v-violet) 6%, var(--v-card)); }
+  /* Business-card action links ("View" in .v-biz-extra) sit in a
+     paragraph, not a table cell, so the table-link rule above does
+     not reach them — same 44px treatment here. */
+  .v-biz-extra a { display: inline-flex; align-items: center;
+    min-height: 44px; padding: 0 4px; }
+}
 """
     # Admin look — a blend of the Kay Ayiti and ShipItAyiti admin
     # boards: Kay Ayiti's light board (pale blue-grey background,
@@ -902,6 +924,14 @@ def create_app(
   color: var(--v-muted); text-transform: uppercase; letter-spacing: .05em; }
 .cards .card .value { font-size: 24px; font-weight: 800;
   margin-top: 4px; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  /* Overview campaign table on phones: it was overflow-x: hidden,
+     so the ~80px past the edge was clipped, not swipeable. Let it
+     scroll horizontally like the other tables, with the same
+     right-edge fade. Fade only — no sticky first column here. */
+  .v-results-pair .table-wrap { overflow-x: auto;
+    box-shadow: inset -20px 0 14px -14px rgba(11, 14, 30, .28), var(--v-shadow); }
+}
 """
 
     # Approvals: the pending/decided tables as platform cards —
@@ -1335,7 +1365,8 @@ section.alt { background: var(--bg-tint); }
     top: 60px; left: 0; right: 0; background: var(--navy); padding: 8px 16px 16px;
     gap: 0; }
   .nav-links.open { display: flex; }
-  .nav-links a { padding: 12px; }
+  .nav-links a, .nav-drop a { min-height: 44px; display: flex;
+    align-items: center; padding: 12px 16px; }
   .nav-item { width: 100%; }
   .nav-drop { position: static; box-shadow: none; border: 0; padding: 0 0 0 12px;
     min-width: 0; }
@@ -4583,7 +4614,7 @@ shows verified conversions only.</p>"""
 <div class='v-stat v-stat-3'><span class='v-stat-label'>Unattributed</span>
 <span class='v-stat-value'>{counts['unattributed']}</span></div></div>
 <h2>Funnel — visitors to paying customers</h2>
-<div class="table-wrap"><table>
+<div class="table-wrap v-table-cue"><table>
 <tr><th>Website</th><th>Visitors (30 days)</th><th>Signups</th>
 <th>Paying customers</th><th>Revenue</th></tr>{rows}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
@@ -5500,7 +5531,7 @@ a real Stripe payment, no signature.</p>"""
                  "platform — subscribed or not. Counts only.</p>"
                  + (f"<p class='v-error'>{esc(errors[error])}</p>"
                     if error in errors else "") +
-                 "<div class='table-wrap'><table>"
+                 "<div class='table-wrap v-table-cue'><table>"
                  "<tr><th>Email</th><th>Name</th><th>Subscription</th>"
                  "<th>Sites</th><th>Credits</th><th>Created</th>"
                  "<th>Two-factor</th><th>Reset 2FA</th><th>Grant</th></tr>"

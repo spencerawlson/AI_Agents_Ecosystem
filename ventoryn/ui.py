@@ -169,6 +169,22 @@ input:focus, select:focus, textarea:focus { outline: none;
   .v-main h1 { font-size: 22px; }
   th, td { font-size: 13px; padding: 9px 10px; }
   .btn { width: 100%; margin: 4px 0; }
+  /* Table action links ("View", "Open", "Set up", "Connect Stripe")
+     get a 44px-tall hit area on phones. */
+  .app-main td a { display: inline-flex; align-items: center;
+    min-height: 44px; padding: 0 4px; }
+}
+/* Horizontally scrolling tables on phones: a right-edge fade so the
+   swipe is discoverable, and a sticky first column so the row label
+   stays visible while swiping. Applied by adding .v-table-cue to the
+   table's .table-wrap (Analytics funnel, Admin accounts). */
+@media (max-width: 560px) {
+  .v-table-cue { box-shadow: inset -20px 0 14px -14px rgba(11, 14, 30, .28), var(--v-shadow); }
+  .v-table-cue th:first-child, .v-table-cue td:first-child {
+    position: sticky; left: 0; z-index: 1;
+    box-shadow: 1px 0 0 0 var(--v-line); }
+  .v-table-cue th:first-child { background: #faf9fe; }
+  .v-table-cue td:first-child { background: var(--v-card); }
 }
 """
 

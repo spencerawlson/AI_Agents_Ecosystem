@@ -148,7 +148,7 @@ SIDEBAR_CSS = """
 .app-header p { margin: 5px 0 0; font-size: 14px; color: #2d2944; }
 .app-header-actions { display: flex; align-items: center; gap: 25px;
   flex: 0 0 auto; }
-.sidebar-toggle { display: inline-flex; border: 0; background: none; color: #1f1938;
+.sidebar-toggle { display: inline-flex; flex: 0 0 auto; border: 0; background: none; color: #1f1938;
   width: 44px; height: 44px; min-height: 44px; padding: 0; cursor: pointer;
   align-items: center; justify-content: center; border-radius: 10px; }
 .sidebar-toggle:hover { background: #f1ebff; }
@@ -219,8 +219,9 @@ SIDEBAR_CSS = """
 .bell-head { display: flex; align-items: baseline; justify-content: space-between; }
 .v-alert-actions { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .v-alert-read, .v-alert-all { margin: 0; display: inline; }
-.v-alert-mark { border: 0; background: none; padding: 0; min-height: 0; cursor: pointer;
-  font: inherit; font-size: 12px; font-weight: 600; color: #6b6684; text-decoration: underline; }
+.v-alert-mark { border: 0; background: none; padding: 10px 6px; min-height: 44px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; color: #6b6684; text-decoration: underline;
+  display: inline-flex; align-items: center; }
 .v-alert-mark:hover { color: #6d28d9; }
 .v-alert.is-read { opacity: .55; border-left-color: #c9c4da; }
 .bell-panel .v-alerts { max-height: 360px; overflow: auto; }
@@ -269,9 +270,30 @@ SIDEBAR_CSS = """
   .app-main { padding: 0 14px 22px; }
 }
 @media (max-width: 560px) {
-  .avatar { width: 32px; height: 32px; min-height: 32px; }
+  /* Mobile header: the toggle never shrinks below its 44px, the
+     title wraps instead of truncating to "Ove…", and the header
+     actions pack tighter so the title has room to read in full. */
+  .app-header { padding: 13px 14px; position: relative; }
+  .app-page-head { gap: 12px; }
+  .app-header-actions { gap: 6px; }
+  .app-header h1 { white-space: normal; overflow: visible; text-overflow: clip; }
+  .avatar { width: 44px; height: 44px; min-height: 44px; }
+  .rev-toggle { padding: 9px 4px; }
   .pause-pill span { display: none; }
   .pause-pill { padding: 0 10px; }
+  /* Bell panel: anchored to the header (not the bell) so it sits
+     just below the header at any header height and spans the
+     viewport with a 12px margin instead of spilling past the
+     left edge. */
+  .bell-menu { position: static; }
+  .bell-panel { position: absolute; top: calc(100% + 8px);
+    left: 12px; right: 12px; width: auto; }
+}
+@media (max-width: 400px) {
+  /* At 400px and below the header cannot fit the pause pill and
+     the full title: the pill hides (it duplicates the Overview
+     Agents card and the full Pause control in My account). */
+  .pause-pill-form { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-sidebar { transition: none; }
@@ -403,7 +425,11 @@ def sidebar_html(current: str | None, is_operator: bool, *,
                            icon_name=icon_name)
             for (key, label, href), icon_name in zip(
                 _ADMIN_ITEMS,
-                ("admin", "customers", "user", "agents"))))
+                # One icon per item, in order: the zip truncates at
+                # the shortest, so a missing name silently drops a
+                # whole admin section from the sidebar (that is how
+                # "Agent activity" vanished when Grants was added).
+                ("admin", "customers", "user", "check", "agents"))))
     else:
         growth_action = ("<a class='ghost-button' "
                          "href='/account/subscribe'>Manage Plan</a>")
