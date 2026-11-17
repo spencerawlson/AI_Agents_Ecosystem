@@ -320,9 +320,12 @@ def test_live_ops_results_campaign_scroll_and_centered_donut():
     """Overview Results: the Campaign performance table scrolls
     vertically inside a bounded card (the long signed URLs wrap —
     no horizontal scroll), and the Conversion status donut is
-    centred with its legend underneath it. The /report and
-    Analytics layouts are untouched — the rules are scoped to
-    .v-results-pair."""
+    centred with its legend underneath it and sits in the vertical
+    middle of its cell (the left cell is a flex column; the donut
+    wrap fills the leftover height and centres its content), not
+    hugging the top while the tall table leaves a gap below it.
+    The /report and Analytics layouts are untouched — the rules are
+    scoped to .v-results-pair."""
     store, config = operator_store_and_config()
     app = create_app(saas_store=store, saas_config=config)
     client = TestClient(app)
@@ -344,6 +347,11 @@ def test_live_ops_results_campaign_scroll_and_centered_donut():
     # Donut: stacked vertically and centred; legend underneath.
     assert ".v-results-pair .v-donut-wrap { flex-direction: column;" in r.text
     assert ".v-results-pair .v-legend { text-align: center; }" in r.text
+    # Donut block: vertically centred in its cell, not hugging the top.
+    assert ".v-results-pair > div:first-child { display: flex; flex-direction: column; }" in r.text
+    assert (".v-results-pair .v-donut-wrap { flex-direction: column;\n"
+            "  align-items: center; text-align: center; flex: 1;\n"
+            "  justify-content: center; }") in r.text
     # The shared /report + Analytics donut layout is untouched.
     assert ".v-donut-wrap { display: flex; gap: 16px; align-items: center;" in r.text
     # Wording unchanged.
