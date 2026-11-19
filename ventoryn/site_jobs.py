@@ -236,11 +236,13 @@ def _run_social(site, inputs, ctx):
 
 def _site_profile(site) -> tuple[dict, list[str], object]:
     from core.seo_content import fetch_inventory
+    from ventoryn.languages import resolve_language
 
     inventory = fetch_inventory(site["url"])
     titles = [p.title for p in inventory.pages if getattr(p, "title", "")][:12]
     profile = {"site_url": site["url"], "what": f"The website {site['url']}",
-               "market": site["country"], "language": site["language"],
+               "market": site["country"],
+               "language": resolve_language(site.get("language")),
                "page_titles": titles}
     return profile, titles, inventory
 
@@ -273,6 +275,7 @@ def _run_seo(site, inputs, ctx):
             candidates.append({"url": page.url, "title": page.title})
     run = _dispatch(ctx["orchestrator"], "creative", "seo_article",
                     {"keyword": keyword, "niche": niche, "site_url": site["url"],
+                     "language": profile["language"],
                      "facts": [profile["what"], *titles[:6]],
                      "link_candidates": candidates,
                      "inventory_urls": sorted(inventory.urls),

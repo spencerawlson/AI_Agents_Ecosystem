@@ -83,11 +83,22 @@ def draft_posts(site: dict, *, days: int, posts_per_day: float,
 
     `brand_profile` is the site's Brand DNA (see ventoryn.brand_dna):
     when present, its non-empty fields shape the prompt's voice; when
-    absent, the prompt is exactly as before."""
+    absent, the prompt is exactly as before.
+
+    The posts are written in the site's stored language (English when
+    the site has none). `brand_profile`, when passed, is a Brand DNA
+    profile (Gap 1 shape): its per-language tone is used when one is
+    provided for the language, otherwise its default tone — a tone
+    nobody supplied is never machine-translated and presented as the
+    brand's (see `ventoryn.languages.tone_for_language`)."""
     from agents.marketing.agent import clean_llm_text
     from core.llm import LLMGateway
     from core.seo_content import fetch_inventory
+    from ventoryn.languages import (language_instruction, resolve_language,
+                                    tone_for_language)
 
+    language = resolve_language(site.get("language"))
+    tone = tone_for_language(brand_profile, language)
     want = plan_size(days, posts_per_day)
     if inventory is None:
         try:
@@ -100,13 +111,18 @@ def draft_posts(site: dict, *, days: int, posts_per_day: float,
     page_list = "\n".join(f"- {u}  ({t})" for u, t in pages) or f"- {site['url']}"
     brand_lines = []
     if brand_profile:
-        tone = ", ".join(brand_profile.get("tone") or [])
+        # The tone line uses the RESOLVED tone (per-language when the
+        # profile provides one for this language, else the default) —
+        # the same tone language_instruction() puts in the prompt, so the
+        # prompt speaks in one voice and a per-language tone replaces
+        # the default everywhere, never alongside it.
+        resolved_tone = ", ".join(tone)
         products = ", ".join(p.get("name", "")
                              for p in brand_profile.get("products") or [])
         audience = ", ".join(brand_profile.get("audience") or [])
         triggers = ", ".join(brand_profile.get("buying_triggers") or [])
-        if tone:
-            brand_lines.append(f"Tone of voice: {tone}.")
+        if resolved_tone:
+            brand_lines.append(f"Tone of voice: {resolved_tone}.")
         if products:
             brand_lines.append(f"Products: {products}.")
         if audience:
@@ -121,7 +137,8 @@ def draft_posts(site: dict, *, days: int, posts_per_day: float,
     limit = X_MAX_CHARS - (X_LINK_CHARS if with_link else 0)
     prompt = (
         f"You write X (Twitter) posts for the website {site['url']} "
-        f"(market: {site.get('country', '')}, language: {site.get('language', 'en')}).\n"
+        f"(market: {site.get('country', '')}, language: {language}).\n"
+        f"{language_instruction(language, tone)}\n"
         f"Write {want} DIFFERENT posts for a {days}-day campaign.\n\n"
         f"The ONLY facts you may use are these pages and their titles — never "
         f"invent prices, numbers, features, testimonials or claims:\n{page_list}"

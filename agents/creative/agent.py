@@ -236,6 +236,9 @@ class CreativeAgent(BaseAgent):
         keyword = str(task.inputs.get("keyword", "")).strip()
         if not keyword:
             raise ValueError("seo_article needs a target keyword")
+        from ventoryn.languages import language_instruction, resolve_language
+
+        language = resolve_language(task.inputs.get("language"))
         niche = task.inputs.get("niche", "")
         site_url = str(task.inputs.get("site_url", "")).rstrip("/")
         facts = [str(f) for f in task.inputs.get("facts", []) if f]
@@ -253,6 +256,7 @@ class CreativeAgent(BaseAgent):
         fact_list = "\n".join(f"- {f}" for f in facts) or "(no facts provided)"
         prompt = (
             f"You are an expert SEO writer for a site in this niche: {niche}.\n"
+            f"{language_instruction(language)}\n"
             f"Write ONE article targeting the keyword: \"{keyword}\".\n\n"
             f"SITE FACTS (the only facts you may assert — never invent "
             f"features, prices, statistics or testimonials):\n{fact_list}\n\n"

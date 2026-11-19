@@ -201,13 +201,14 @@ def validate_country(raw: object) -> str:
 
 
 def validate_language(raw: object) -> str | None:
-    """Optional market language (en, fr, en-ca …); empty means None."""
-    lang = str(raw or "").strip().lower()
-    if not lang:
-        return None
-    if not re.fullmatch(r"[a-z]{2,5}(-[a-z]{2})?", lang):
-        raise ValueError("language must look like en, fr or en-ca")
-    return lang
+    """Optional market language (en, fr, en-ca …); empty means None.
+
+    Now accepts any well-formed BCP-47-style tag — script subtags
+    (`zh-hans`), numeric regions (`es-419`), variants (`de-ch-1901`).
+    Canonical form is lowercase (`EN-CA` → `en-ca`)."""
+    from ventoryn.languages import validate_language as _validate
+
+    return _validate(raw)
 
 
 def new_job_store() -> dict:
