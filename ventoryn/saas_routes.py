@@ -2266,6 +2266,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # right away in the background; the site page fills in.
         from ventoryn import site_snapshot
         site_snapshot.start(store, site, REPORTS_DIR)
+        # Brand DNA learns the brand from the URL in the same step, so
+        # onboarding is one paste: snapshot + brand profile together.
+        from ventoryn import brand_dna
+        brand_dna.start(store, site)
         return RedirectResponse(f"/websites/sites/{site['id']}",
                                 status_code=303)
 
@@ -2709,6 +2713,15 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             snap = _snap.snapshot_store_for(store).get(site["id"])
         snapshot_html = (f"<style>{_snap.SNAPSHOT_CSS}</style>"
                          + _snap.render_card(site, snap))
+        # Brand DNA: tone, colours, products, audience, buying triggers
+        # learned from the site itself. Older sites never had one: start
+        # it now, like the snapshot above.
+        from ventoryn import brand_dna as _dna
+        dna_rec = _dna.brand_dna_store_for(store).get(site["id"])
+        if dna_rec is None:
+            _dna.start(store, site)
+            dna_rec = _dna.brand_dna_store_for(store).get(site["id"])
+        brand_dna_html = _dna.render_card(site, dna_rec)
         # Founding Customer Program: verified customers are distinct,
         # real Stripe payments (manual sales never count as verified).
         f100 = first100_summary(store, site_id)
@@ -2728,7 +2741,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 "Program</h2><p class='muted'>Your customer count is "
                 "hidden — turn it on in Data &amp; privacy controls "
                 "below.</p></div>")
-        inner = snapshot_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
+        inner = snapshot_html + brand_dna_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
 connection is missing the value reads "unavailable" — never invented.</p></div>
@@ -3661,6 +3674,22 @@ funnel counts it. This is the owner-recorded fallback.</p>
         # Cooldown + one-at-a-time are enforced inside start().
         site_snapshot.start(store, site, REPORTS_DIR)
         return RedirectResponse(f"/websites/sites/{site_id}#site-snapshot",
+                                status_code=303)
+
+    @app.post("/websites/sites/{site_id}/brand-dna")
+    def brand_dna_refresh(request: Request, site_id: str):
+        from ventoryn import brand_dna
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account, current="websites"), status_code=404)
+        # Cooldown + one-at-a-time are enforced inside start().
+        brand_dna.start(store, site)
+        return RedirectResponse(f"/websites/sites/{site_id}#brand-dna",
                                 status_code=303)
 
     @app.get("/websites/sites/{site_id}/snapshot-image")

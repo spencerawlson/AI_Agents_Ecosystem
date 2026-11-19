@@ -399,8 +399,20 @@ def _run_x_campaign(site, inputs, ctx):
     days = max(1, min(int(inputs.get("days") or 30), 365))
     ppd = max(0.1, min(float(inputs.get("posts_per_day") or 1), 4))
     with_link = str(inputs.get("with_link", "1")) not in ("0", "", "false", "off")
+    # Brand DNA, when learned for this site, shapes the drafts' voice.
+    # A missing or failed profile changes nothing — drafting carries on
+    # exactly as before.
+    profile = None
+    try:
+        from ventoryn import brand_dna
+
+        rec = brand_dna.brand_dna_store_for(store).get(site["id"])
+        if rec and rec.get("status") == "done" and rec.get("data"):
+            profile = rec["data"]
+    except Exception:  # noqa: BLE001 - brand DNA must never break drafting
+        profile = None
     posts = campaigns.draft_posts(site, days=days, posts_per_day=ppd,
-                                  with_link=with_link)
+                                  with_link=with_link, brand_profile=profile)
     campaign = campaigns.propose(store, site, posts, days=days, posts_per_day=ppd,
                                  with_link=with_link,
                                  source=inputs.get("source") or "manual")
