@@ -44,6 +44,14 @@ WALLET_RESERVE_ESTIMATE_CENTS: dict[str, int] = {
 #: Used for any job type not listed above.
 DEFAULT_WALLET_RESERVE_ESTIMATE_CENTS = 100
 
+#: Conservative per-asset estimate (cents) used to size the wallet
+#: hold placed before a bulk-content run — its real cost is only
+#: known after usage_metering records the run's actual LLM calls.
+#: The x_campaign job reserves 40c for ~30 posts (~1.3c/post), so
+#: 5c/asset is headroom, not a price; the settle charges the real
+#: (priced) usage, never the estimate.
+BULK_ASSET_RESERVE_ESTIMATE_CENTS = 5
+
 
 def wallet_reserve_estimate_cents(job_type: str) -> int:
     return WALLET_RESERVE_ESTIMATE_CENTS.get(

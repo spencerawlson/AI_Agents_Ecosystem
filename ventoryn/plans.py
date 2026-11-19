@@ -61,6 +61,14 @@ PLANS: dict[str, dict] = {
         "premium_integrations": "x",
         "team_seats": 1,
         "api_access": False,
+        # Bulk content (Gap 2): a CAP, not a currency — a bulk run may
+        # never produce more than this many assets at once, nor more
+        # than the monthly total below, per account. Exceeding either
+        # is rejected before any work or wallet charge. Monthly figure
+        # anchors on Holo's published Starter allowance (125
+        # creations/mo); Growth/Pro scale with the tier.
+        "bulk_max_assets_per_run": 25,
+        "bulk_max_assets_per_month": 125,
     },
     "growth": {
         "label": "Growth",
@@ -73,6 +81,8 @@ PLANS: dict[str, dict] = {
         "premium_integrations": "selected",
         "team_seats": 3,
         "api_access": "limited",
+        "bulk_max_assets_per_run": 50,
+        "bulk_max_assets_per_month": 250,
     },
     "pro": {
         "label": "Pro",
@@ -85,6 +95,8 @@ PLANS: dict[str, dict] = {
         "premium_integrations": "all",
         "team_seats": 10,
         "api_access": True,
+        "bulk_max_assets_per_run": 100,
+        "bulk_max_assets_per_month": 500,
     },
 }
 
