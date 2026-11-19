@@ -4660,6 +4660,14 @@ Signups read unavailable because no signup tracking is connected yet.</p>
          "it.", "#5850ec"),
         ("tiktok", "TikTok", "Post each website's approved videos to its "
          "own TikTok account. You set up and confirm every post.", "#010101"),
+        ("shopify", "Shopify", "Read orders and revenue from each "
+         "website's own Shopify store, so Axionory can show what "
+         "advertising earned. Read-only — nothing is created, refunded, "
+         "or charged.", "#96bf48"),
+        ("woocommerce", "WooCommerce", "Read orders and revenue from each "
+         "website's own WooCommerce store, so Axionory can show what "
+         "advertising earned. Read-only — nothing is created, refunded, "
+         "or charged.", "#7f54b3"),
     )
     _INTEGRATIONS_CSS = """
 .v-apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -4823,6 +4831,61 @@ dialog.v-dialog::backdrop { background: rgba(11, 14, 30, .55); }
                     "<p class='muted'>The operator has not set up Axionory's "
                     "Meta app yet, so this website cannot connect. Nothing "
                     "is faked.</p>")
+        elif kind == "shopify":
+            if connected:
+                raw = (_saas_store.get_connection(s["id"], "shopify") or {}
+                       ).get("_detail_raw") or {}
+                shop_label = (raw.get("shop_name") or
+                              raw.get("shop_domain") or "your store")
+                parts.append(f"<p class='muted'>Store: {esc(shop_label)}</p>")
+                parts.append(
+                    "<p class='muted'>Axionory reads orders and revenue "
+                    "from this store — nothing is created, refunded, or "
+                    "charged.</p>")
+            elif _saas_config.shopify_configured and \
+                    _saas_config.app_registered("shopify"):
+                parts.append(
+                    f"<form method='post' action='/websites/sites/{sid}/connections/shopify/start'>"
+                    f"<label for='sh-dom-{sid}'>Your Shopify store address</label>"
+                    f"<input type='text' id='sh-dom-{sid}' name='shop_domain' "
+                    f"autocomplete='off' spellcheck='false' "
+                    f"placeholder='your-store.myshopify.com'>"
+                    f"<p><button class='btn btn-primary' type='submit'>"
+                    f"Connect with Shopify</button></p></form>")
+            else:
+                parts.append(
+                    "<p class='muted'>The operator has not set up Axionory's "
+                    "Shopify app yet, so this website cannot connect. "
+                    "Nothing is faked.</p>")
+        elif kind == "woocommerce":
+            if connected:
+                raw = (_saas_store.get_connection(s["id"], "woocommerce")
+                       or {}).get("_detail_raw") or {}
+                parts.append(
+                    f"<p class='muted'>Store: {esc(raw.get('store_url') or 'your store')}</p>")
+                parts.append(
+                    "<p class='muted'>Axionory reads orders and revenue "
+                    "from this store — nothing is created, refunded, or "
+                    "charged.</p>")
+            else:
+                parts.append(
+                    f"<form method='post' action='/websites/sites/{sid}/connections/woocommerce'>{rt}"
+                    f"<label for='woo-url-{sid}'>Your store address</label>"
+                    f"<input type='text' id='woo-url-{sid}' name='store_url' "
+                    f"autocomplete='off' spellcheck='false' "
+                    f"placeholder='https://your-store.com'>"
+                    f"<label for='woo-key-{sid}'>Consumer key</label>"
+                    f"<input type='text' id='woo-key-{sid}' name='consumer_key' "
+                    f"autocomplete='off' spellcheck='false' "
+                    f"placeholder='ck_… (stored encrypted, never shown back)'>"
+                    f"<label for='woo-sec-{sid}'>Consumer secret</label>"
+                    f"<input type='password' id='woo-sec-{sid}' name='consumer_secret' "
+                    f"autocomplete='off' spellcheck='false' "
+                    f"placeholder='cs_… (stored encrypted, never shown back)'>"
+                    f"<p class='muted'>Create a Read key in WooCommerce → "
+                    f"Settings → Advanced → REST API.</p>"
+                    f"<p><button class='btn btn-primary' type='submit'>"
+                    f"Connect WooCommerce</button></p></form>")
         elif kind == "tiktok":
             from ventoryn import tiktok as _tt
 

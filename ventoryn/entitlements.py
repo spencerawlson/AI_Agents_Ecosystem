@@ -48,7 +48,8 @@ from ventoryn.plans import PLANS, limit
 
 #: Connection kinds every plan may use: read-only analytics and
 #: sales, not publishing.
-UTILITY_INTEGRATIONS = frozenset({"plausible", "stripe_sales"})
+UTILITY_INTEGRATIONS = frozenset({"plausible", "stripe_sales",
+                                  "shopify", "woocommerce"})
 
 #: Connection kinds that publish on the owner's behalf — gated by plan.
 PREMIUM_INTEGRATIONS = frozenset({"x", "facebook", "instagram", "tiktok"})
@@ -65,7 +66,8 @@ INTEGRATIONS_LABEL = {"x": "X", "selected": "X, Facebook and Instagram",
 
 #: Display names of the publishing connections.
 KIND_NAMES = {"x": "X", "facebook": "Facebook", "instagram": "Instagram",
-              "tiktok": "TikTok"}
+              "tiktok": "TikTok", "shopify": "Shopify",
+              "woocommerce": "WooCommerce"}
 
 #: The API access line per plan value (Subscribe page).
 API_LABEL = {True: "Full API access", "limited": "Read-only API access"}
@@ -211,8 +213,9 @@ def can_view_advanced_analytics(store, account: dict, *,
 def can_connect_integration(store, account: dict, kind: str, *,
                             is_operator: bool = False) -> tuple[bool, str]:
     """True when ``account`` may connect ``kind`` for a website.
-    Utility connections (Plausible, Stripe sales) are open to every
-    plan; publishing connections are gated by the plan's
+    Utility connections (Plausible, Stripe sales, Shopify,
+    WooCommerce) are open to every plan — they read data, they do
+    not publish; publishing connections are gated by the plan's
     premium-integrations tier. Reddit is refused for everyone — its
     API no longer offers the free access this would need."""
     if is_operator:

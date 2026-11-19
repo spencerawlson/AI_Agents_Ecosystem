@@ -240,6 +240,15 @@ class SaasConfig:
     #: instead of failing or faking a connection.
     facebook_app_id: str = ""
     facebook_app_secret: str = ""
+    #: Axionory's Shopify app credentials (VENTORYN_SHOPIFY_CLIENT_ID /
+    #: VENTORYN_SHOPIFY_CLIENT_SECRET) for merchant-client store
+    #: installs. One app covers every merchant store that installs
+    #: it. Empty means "not configured": the Shopify connect flow
+    #: refuses honestly instead of failing or faking a connection.
+    #: WooCommerce needs no operator app — each merchant generates
+    #: their own Read key in wp-admin.
+    shopify_client_id: str = ""
+    shopify_client_secret: str = ""
     #: Social publishing is DISABLED BY DEFAULT. The operator turns it
     #: on (VENTORYN_SOCIAL_PUBLISHING_ENABLED=1) only when the
     #: provider apps are registered, reviewed, and ready. The
@@ -308,6 +317,8 @@ class SaasConfig:
                 env.get("VENTORYN_X_MONTHLY_BUDGET_USD"), 5.0),
             facebook_app_id=env.get("VENTORYN_FACEBOOK_APP_ID", ""),
             facebook_app_secret=env.get("VENTORYN_FACEBOOK_APP_SECRET", ""),
+            shopify_client_id=env.get("VENTORYN_SHOPIFY_CLIENT_ID", ""),
+            shopify_client_secret=env.get("VENTORYN_SHOPIFY_CLIENT_SECRET", ""),
             social_publishing_enabled=env.get(
                 "VENTORYN_SOCIAL_PUBLISHING_ENABLED", "") == "1",
             social_daily_cap_usd=_safe_float(
@@ -341,6 +352,12 @@ class SaasConfig:
             # Verification + App Review are the further Meta gates —
             # see docs/implementation/META_APPROVAL_STEPS.md.
             return self.facebook_configured
+        if kind == "shopify":
+            # One Shopify app covers every merchant store that
+            # installs it; "registered" means the client id + secret
+            # are configured. The merchant's install is the further
+            # step — no App Store review for a custom app.
+            return self.shopify_configured
         return True
 
     @property
@@ -402,6 +419,12 @@ class SaasConfig:
         """True only when the Meta (Facebook/Instagram) app
         credentials are set. Empty means "not configured"."""
         return bool(self.facebook_app_id and self.facebook_app_secret)
+
+    @property
+    def shopify_configured(self) -> bool:
+        """True only when Axionory's Shopify app credentials are set.
+        Empty means "not configured"."""
+        return bool(self.shopify_client_id and self.shopify_client_secret)
 
 
 def default_saas_db_path() -> Path | None:
@@ -912,12 +935,19 @@ DEFAULT_CONNECTIONS = (
     ("tiktok", "not_connected",
      "Not connected — connect the TikTok account this website's "
      "approved videos are posted to."),
+    ("shopify", "not_connected",
+     "Not connected — a Shopify app registration is needed before "
+     "Axionory can read your store's orders and revenue."),
+    ("woocommerce", "not_connected",
+     "Not connected — connect your WooCommerce store so Axionory "
+     "can read its orders and revenue."),
 )
 
 #: Secret fields inside a connection's detail JSON. Never returned by
 #: get_connections(), never logged, never rendered.
 _SECRET_DETAIL_KEYS = frozenset({"api_key", "webhook_secret",
-                                 "access_token", "refresh_token"})
+                                 "access_token", "refresh_token",
+                                 "consumer_key", "consumer_secret"})
 
 #: Minimum OAuth / API scopes requested for each connection. The
 #: Connect screen shows these in plain words (see
@@ -944,6 +974,12 @@ CONNECTION_SCOPES: dict[str, str] = {
     # TikTok Login Kit + Content Posting API: who you are, post a
     # video you approved, or send it to your TikTok inbox as a draft.
     "tiktok": "user.info.basic video.publish video.upload",
+    # Shopify: read-only order/revenue data. No write scope is ever
+    # requested — no order creation, refunds, product edits, charges.
+    "shopify": "read_orders read_products read_customers",
+    # WooCommerce: a Read key reads orders, products, customers.
+    # A Write key is never asked for.
+    "woocommerce": "Read (orders, products, customers)",
 }
 
 #: Plain-words consent text shown on each Connect screen: exactly
@@ -985,12 +1021,24 @@ CONNECTION_CONSENT: dict[str, str] = {
                "TikTok inbox as drafts. It cannot read your messages, "
                "comment, follow, or change your account. Every post is "
                "set up and confirmed by you on the posting screen."),
+    "shopify": ("Axionory can read orders, products, and customers "
+                "from your Shopify store so it can show what your "
+                "advertising earned and what each customer cost. It "
+                "cannot create or change an order, refund a payment, "
+                "edit a product, or charge anything. Read-only, always."),
+    "woocommerce": ("Axionory can read orders, products, and "
+                    "customers from your WooCommerce store so it can "
+                    "show what your advertising earned and what each "
+                    "customer cost. It cannot create or change an "
+                    "order, refund a payment, edit a product, or "
+                    "charge anything. Read-only, always."),
 }
 
 #: Kinds whose connection needs the operator to register an OAuth
 #: app in the provider's developer console first (Spencer's step).
 #: Until then the connection honestly says so and cannot be used.
-APP_REGISTRATION_KINDS = frozenset({"reddit", "x", "facebook", "instagram"})
+APP_REGISTRATION_KINDS = frozenset({"reddit", "x", "facebook", "instagram",
+                                    "shopify"})
 
 #: What happens to the provider token on Disconnect, per kind.
 #: reddit/x are revoked by an HTTP call to the provider (see
@@ -1011,6 +1059,14 @@ CONNECTION_REVOKE_NOTE: dict[str, str] = {
                   "key in your Plausible dashboard after disconnecting."),
     "stripe_sales": ("Remove the webhook endpoint in your Stripe "
                      "dashboard after disconnecting."),
+    "shopify": ("The Shopify token is revoked at Shopify when you "
+                "disconnect. If that did not confirm, remove the app "
+                "in your Shopify admin under Settings > Apps and sales "
+                "channels."),
+    "woocommerce": ("WooCommerce has no API to delete a key — remove "
+                    "this key in your WordPress admin under WooCommerce "
+                    "→ Settings → Advanced → REST API after "
+                    "disconnecting."),
 }
 
 
@@ -4350,10 +4406,12 @@ def revoke_provider_token(kind: str, detail: dict,
     Reddit/X are revoked with a real HTTP call to the provider when
     the app credentials are available; when they are not (no app
     registration yet) there is no live token to revoke, so the
-    disconnect is still safe. Plausible keys and Stripe webhook
-    secrets have no provider revoke API — the token is deleted
-    locally and the customer is told to remove it in the provider's
-    dashboard (see CONNECTION_REVOKE_NOTE)."""
+    disconnect is still safe. Shopify tokens are revoked with a
+    DELETE to the store's api-permissions endpoint. Plausible keys,
+    Stripe webhook secrets and WooCommerce keys have no provider
+    revoke API — the token is deleted locally and the customer is
+    told to remove it in the provider's dashboard (see
+    CONNECTION_REVOKE_NOTE)."""
     if kind == "reddit":
         token = (detail or {}).get("access_token") or ""
         if not token or not client_id:
@@ -4385,6 +4443,23 @@ def revoke_provider_token(kind: str, detail: dict,
                            "was deleted here; remove Axionory in TikTok's "
                            "Settings > Security > Apps to be sure.")
         return True, CONNECTION_REVOKE_NOTE["tiktok"]
+    if kind == "shopify":
+        from ventoryn import commerce_oauth as _co
+
+        shop = (detail or {}).get("shop_domain") or ""
+        token = (detail or {}).get("access_token") or ""
+        if not token or not shop:
+            return True, ("Nothing to revoke at Shopify — no live token "
+                          "was stored.")
+        try:
+            ok = _co.revoke_shopify_token(shop, token, urlopen=urlopen)
+        except Exception:  # noqa: BLE001 - reported, local copy still goes
+            ok = False
+        if ok:
+            return True, "The token was revoked at Shopify."
+        return False, CONNECTION_REVOKE_NOTE["shopify"]
+    if kind == "woocommerce":
+        return True, CONNECTION_REVOKE_NOTE["woocommerce"]
     return True, CONNECTION_REVOKE_NOTE.get(kind, "")
 
 
