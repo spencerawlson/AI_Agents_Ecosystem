@@ -148,7 +148,8 @@ def test_site_defaults_to_honest_connections(store):
     site = store.create_site(account["id"], "https://road2cissp.com")
     kinds = {c["kind"]: c for c in store.get_connections(site["id"])}
     assert set(kinds) == {"reddit", "x", "facebook", "instagram",
-                          "plausible", "stripe_sales", "tiktok"}
+                          "plausible", "stripe_sales", "tiktok",
+                          "shopify", "woocommerce"}
     assert all(c["status"] == "not_connected" for c in kinds.values())
     assert "app registration" in kinds["reddit"]["note"]
     # Facebook and Instagram are honest about the Meta gates too —
@@ -159,6 +160,12 @@ def test_site_defaults_to_honest_connections(store):
     assert "Meta app registration" in kinds["instagram"]["note"]
     assert "Business Verification" in CONNECTION_CONSENT["facebook"]
     assert "not clickable" in CONNECTION_CONSENT["instagram"]
+    # Shopify is honest the same way — its note names the app
+    # registration; WooCommerce needs none (the merchant's own key).
+    assert "Shopify app registration" in kinds["shopify"]["note"]
+    assert "WooCommerce store" in kinds["woocommerce"]["note"]
+    assert "read-only" in CONNECTION_CONSENT["shopify"].lower()
+    assert "read-only" in CONNECTION_CONSENT["woocommerce"].lower()
 
 
 # ---------------------------------------------------------------------------

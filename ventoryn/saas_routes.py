@@ -105,6 +105,20 @@ from ventoryn.campaign_cost import describe as describe_estimate
 from ventoryn.first100 import first100_summary
 from ventoryn.signature import sign_agent_link
 from ventoryn.social_costs import caps_allow, estimate_cost, rate_note
+from ventoryn.commerce_oauth import (
+    build_authorize_url as build_shopify_authorize_url,
+)
+from ventoryn.commerce_oauth import (
+    exchange_code as exchange_shopify_code,
+)
+from ventoryn.commerce_oauth import (
+    shopify_redirect_uri,
+    test_woocommerce_connection,
+    validate_callback_hmac,
+    validate_shop_domain,
+    validate_store_url,
+    verify_shopify_connection,
+)
 from ventoryn.social_oauth import (
     build_authorize_url,
     exchange_code,
@@ -1257,6 +1271,122 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       "Back</a>.</p>", account, current="account"),
                 status_code=400)
 
+    @app.post("/websites/sites/{site_id}/connections/shopify/start")
+    def shopify_connect_start(request: Request, site_id: str,
+                              shop_domain: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="websites"), status_code=404)
+        if not config.shopify_configured \
+                or not config.app_registered("shopify"):
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>Shopify is not available yet — Axionory's own "
+                      "Shopify app registration is still needed. No "
+                      "store was connected and nothing was stored.</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="websites"),
+                status_code=400)
+        ok, message = entitlements.can_connect_integration(
+            store, account, "shopify",
+            is_operator=config.is_operator(account.get("email")))
+        if not ok:
+            return _plan_refused(site["url"], message, account, site_id)
+        try:
+            shop = validate_shop_domain(shop_domain)
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="websites"),
+                status_code=400)
+        store.ensure_connections(site_id)  # websites added before Shopify existed
+        state = store.create_connection_oauth_state(site_id, "shopify", "")
+        url = build_shopify_authorize_url(
+            shop, config, shopify_redirect_uri(config.base_url), state)
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/account/auth/shopify/callback", response_class=HTMLResponse)
+    def shopify_connect_callback(request: Request, code: str = "",
+                                 state: str = "", shop: str = "",
+                                 hmac: str = "", timestamp: str = "",
+                                 host: str = ""):
+        account = _account(request)
+        pending = store.consume_connection_oauth_state(state)
+        if not code or pending is None or pending["kind"] != "shopify":
+            return HTMLResponse(
+                _page("Connect Shopify",
+                      "<p>Connecting Shopify did not complete — the link "
+                      "expired or was already used. "
+                      "<a href='/account/login'>Back</a>.</p>"),
+                status_code=400)
+        site = store.get_site(pending["site_id"])
+        site_id = pending["site_id"]
+        if (site is None or account is None
+                or site["account_id"] != account["id"]):
+            return HTMLResponse(
+                _page("Connect Shopify",
+                      "<p>This connection link is not valid.</p>"),
+                status_code=400)
+        # Shopify signs every parameter it sends back (including the
+        # state it echoed). The HMAC is checked before anything else
+        # happens with these parameters — the callback is public.
+        params = {k: v for k, v in
+                  (("code", code), ("shop", shop), ("state", state),
+                   ("timestamp", timestamp), ("host", host),
+                   ("hmac", hmac)) if v}
+        if not validate_callback_hmac(params, config.shopify_client_secret):
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>Shopify's reply did not check out — the "
+                      "connection was not completed. Try again from the "
+                      "website page.</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="websites"),
+                status_code=400)
+        try:
+            shop_domain = validate_shop_domain(shop)
+            tokens = exchange_shopify_code(shop_domain, config, code)
+            probe = verify_shopify_connection(
+                shop_domain, tokens["access_token"])
+        except SaasError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(str(exc))}</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="websites"),
+                status_code=400)
+        shop_info = probe.get("shop") or {}
+        missing = probe.get("missing_scopes") or []
+        shop_name = shop_info.get("name") or shop_domain
+        # verify() returns the GraphQL shop shape: name,
+        # myshopifyDomain, currencyCode (camelCase).
+        currency = shop_info.get("currencyCode") or ""
+        if missing:
+            note = ("Connected, but Shopify did not grant these read "
+                    "permissions: " + ", ".join(missing) + ". Reinstall "
+                    "the app with all read permissions to see full "
+                    "order data.")
+        else:
+            note = f"Connected — reading orders from {shop_name}."
+        store.ensure_connections(site_id)
+        store.update_connection(
+            site_id, "shopify", "connected", note,
+            {"shop_domain": shop_domain,
+             "access_token": tokens["access_token"],
+             "scope": tokens.get("scope") or "",
+             "shop_name": shop_name,
+             "currency_code": currency})
+        store.record_activity_event(account["id"], "site",
+                                    f"Connected Shopify for {site['host']}")
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
+
     @app.get("/websites/sites/{site_id}/connections/instagram/start")
     def instagram_connect_start(request: Request, site_id: str):
         account, redirect = _need_account(request)
@@ -2160,6 +2290,10 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                   ).get("_detail_raw") or {}
         ig_raw = (store.get_connection(site_id, "instagram") or {}
                   ).get("_detail_raw") or {}
+        shopify_raw = (store.get_connection(site_id, "shopify") or {}
+                       ).get("_detail_raw") or {}
+        woocommerce_raw = (store.get_connection(site_id, "woocommerce") or {}
+                           ).get("_detail_raw") or {}
         x_access_token = x_raw.get("access_token", "")
         plausible_key = plausible_raw.get("api_key") if \
             (store.get_connection(site_id, "plausible") or {}
@@ -2410,6 +2544,62 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                     form = (f"<p><a class='btn btn-primary' href='/websites/sites/"
                             f"{esc(site_id)}/connections/tiktok/start'>Connect with "
                             f"TikTok</a></p>")
+            elif kind == "shopify":
+                if conn["status"] == "connected":
+                    shop_label = (shopify_raw.get("shop_name") or
+                                  shopify_raw.get("shop_domain") or
+                                  "your store")
+                    currency = shopify_raw.get("currency_code") or ""
+                    form = (f"<p class='muted'>Store: {esc(shop_label)}"
+                            + (f" ({esc(currency)})" if currency else "")
+                            + "</p><p class='muted'>Axionory reads orders "
+                            "and revenue from this store — nothing is "
+                            "created, refunded, or charged.</p>")
+                elif not config.shopify_configured:
+                    form = ("<p class='muted'>Shopify is not set up on "
+                            "this server yet — Axionory's own Shopify app "
+                            "registration is still needed.</p>")
+                else:
+                    form = (f"<form method='post' action='/websites/sites/"
+                            f"{esc(site_id)}/connections/shopify/start'>"
+                            "<label for='shopify_domain'>Your Shopify "
+                            "store address</label>"
+                            "<input type='text' id='shopify_domain' "
+                            "name='shop_domain' autocomplete='off' "
+                            "spellcheck='false' "
+                            "placeholder='your-store.myshopify.com'>"
+                            "<p><button class='btn btn-primary' "
+                            "type='submit'>Connect with Shopify</button></p>"
+                            "</form>")
+            elif kind == "woocommerce":
+                if conn["status"] == "connected":
+                    store_label = (woocommerce_raw.get("store_url") or
+                                   "your store")
+                    form = (f"<p class='muted'>Store: {esc(store_label)}"
+                            "</p><p class='muted'>Axionory reads orders "
+                            "and revenue from this store — nothing is "
+                            "created, refunded, or charged.</p>")
+                else:
+                    form = (f"<form method='post' action='/websites/sites/"
+                            f"{esc(site_id)}/connections/woocommerce'>"
+                            "<label for='woo_url'>Your store address</label>"
+                            "<input type='text' id='woo_url' name='store_url' "
+                            "autocomplete='off' spellcheck='false' "
+                            "placeholder='https://your-store.com'>"
+                            "<label for='woo_key'>Consumer key</label>"
+                            "<input type='text' id='woo_key' "
+                            "name='consumer_key' autocomplete='off' "
+                            "spellcheck='false' "
+                            "placeholder='ck_… (stored encrypted, never shown back)'>"
+                            "<label for='woo_secret'>Consumer secret</label>"
+                            "<input type='password' id='woo_secret' "
+                            "name='consumer_secret' autocomplete='off' "
+                            "spellcheck='false' "
+                            "placeholder='cs_… (stored encrypted, never shown back)'>"
+                            "<p class='muted'>Create a Read key in "
+                            "WooCommerce → Settings → Advanced → REST API.</p>"
+                            "<p><button class='btn' type='submit'>"
+                            "Connect WooCommerce</button></p></form>")
             else:
                 # Reddit: no free API access exists for this anymore —
                 # honest, permanent "not available" rather than a
@@ -2616,6 +2806,9 @@ funnel counts it. This is the owner-recorded fallback.</p>
                           site_domain: str = Form(""),
                           api_key: str = Form(""),
                           webhook_secret: str = Form(""),
+                          store_url: str = Form(""),
+                          consumer_key: str = Form(""),
+                          consumer_secret: str = Form(""),
                           return_to: str = Form("")):
         account, redirect = _need_account(request)
         if redirect is not None:
@@ -2633,11 +2826,12 @@ funnel counts it. This is the owner-recorded fallback.</p>
                       f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
                       account, current="websites"),
                 status_code=400)
-        if kind in ("x", "facebook", "instagram"):
+        if kind in ("x", "facebook", "instagram", "shopify"):
             # OAuth connections use the Connect button on this page,
             # not this form.
             label = {"x": "X", "facebook": "Facebook",
-                     "instagram": "Instagram"}[kind]
+                     "instagram": "Instagram",
+                     "shopify": "Shopify"}[kind]
             return HTMLResponse(
                 _signed_page(site["url"],
                       f"<p>Use the \"Connect with {label}\" link to "
@@ -2677,6 +2871,35 @@ funnel counts it. This is the owner-recorded fallback.</p>
                     site_id, "stripe_sales", "not_connected",
                     "Not connected — add your Stripe webhook signing secret "
                     "to see real paying customers here.", detail)
+        elif kind == "woocommerce":
+            # The key is stored only when the live read-only probe
+            # passes — a failed test stores nothing.
+            ok, message = entitlements.can_connect_integration(
+                store, account, "woocommerce",
+                is_operator=config.is_operator(account.get("email")))
+            if not ok:
+                return _plan_refused(site["url"], message, account, site_id)
+            raw = (store.get_connection(site_id, "woocommerce") or {}
+                   ).get("_detail_raw") or {}
+            try:
+                probe = test_woocommerce_connection(
+                    store_url, consumer_key.strip(),
+                    consumer_secret.strip())
+            except SaasError as exc:
+                return HTMLResponse(
+                    _signed_page(site["url"],
+                          f"<p>{esc(str(exc))}</p>"
+                          f"<p><a href='/websites/sites/{esc(site_id)}'>"
+                          "Back</a>.</p>", account, current="websites"),
+                    status_code=400)
+            detail = dict(raw)
+            detail["store_url"] = probe["store_url"]
+            detail["consumer_key"] = consumer_key.strip()
+            detail["consumer_secret"] = consumer_secret.strip()
+            store.update_connection(
+                site_id, "woocommerce", "connected",
+                f"Connected — reading orders from {probe['store_url']}.",
+                detail)
         else:
             return HTMLResponse(
                 _signed_page(site["url"], "<p>Unknown connection.</p>", account, current="websites"),
