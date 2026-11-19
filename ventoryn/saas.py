@@ -2604,6 +2604,12 @@ class SaasStore:
         clean = validate_site_url(url)
         # Any real ISO 3166-1 code is accepted; anything else raises.
         clean_country = normalize_country(country)
+        # The full validated tag is stored (en-ca, zh-hans …), not
+        # truncated to two characters — the site's language choice
+        # must survive so generation can use it.
+        from ventoryn.languages import validate_language
+
+        clean_language = validate_language(language) or "en"
         # Called before the lock below (ensure_default_workspace takes
         # its own lock; self._lock is not reentrant).
         workspace = self.ensure_default_workspace(account_id)
@@ -2616,7 +2622,7 @@ class SaasStore:
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (site_id, account_id, clean, urlparse(clean).netloc,
                  clean_country,
-                 (language or "en").lower()[:2], workspace["id"], now))
+                 clean_language, workspace["id"], now))
             for kind, status, note in DEFAULT_CONNECTIONS:
                 self._conn.execute(
                     "INSERT INTO saas_connections (id, site_id, kind, status,"
@@ -2694,6 +2700,20 @@ class SaasStore:
             self._conn.execute(
                 "UPDATE saas_sites SET video_voice_id = ?, video_avatar_id = ? WHERE id = ?",
                 (voice_id[:64], avatar_id[:64], site_id))
+
+    def set_site_language(self, site_id: str, language: str) -> str:
+        """Change a site's content language. The tag is validated
+        (empty means English) and the full canonical tag is stored;
+        returns the stored tag. Affects the next generation run only —
+        nothing already drafted or posted is touched."""
+        from ventoryn.languages import validate_language
+
+        clean = validate_language(language) or "en"
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE saas_sites SET language = ? WHERE id = ?",
+                (clean, site_id))
+        return clean
 
     def set_site_autopilot(self, site_id: str, on: bool) -> None:
         with self._lock, self._conn:

@@ -102,6 +102,7 @@ from ventoryn import entitlements, pricing, site_jobs
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core.countries import country_options
+from ventoryn.languages import language_datalist
 from ventoryn.plans import PLAN_NAMES, PLANS, is_wallet_account
 from ventoryn.ui import money
 from ventoryn.qrcode import qr_svg
@@ -2470,12 +2471,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                  "<select id='country' name='country'>"
                  f"{country_options('ca')}"
                  "</select>"
-                 "<label for='language'>Market language</label>"
-                 "<select id='language' name='language'>"
-                 "<option value='en' selected>English (en)</option>"
-                 "<option value='fr'>French (fr)</option>"
-                 "<option value='ht'>Haitian Creole (ht)</option>"
-                 "</select>"
+                 "<label for='language'>Content language</label>"
+                 f"{language_datalist('en')}"
+                 "<p class='muted'>The language Axionory generates in for "
+                 "this website — pick one, or type any language tag "
+                 "(e.g. fr-ca, zh-hans). You can change it later on the "
+                 "website's page.</p>"
                  "<p><button class='btn btn-primary' type='submit'>"
                  "Add website</button></p></form></div>")
         return _signed_page("Add a website", inner, account, current="websites")
@@ -2997,6 +2998,7 @@ connection is missing the value reads "unavailable" — never invented.</p></div
 {founding_card}
 <h2>Run agent work</h2>
 {_autopilot_card(site, account)}
+{_language_card(site)}
 {_video_settings_card(site)}
 <div class='card'><p>Credit balance: <strong>{balance_text}</strong></p>
 <form method='post' action='/websites/sites/{esc(site_id)}/jobs' enctype='multipart/form-data' class='v-jobform'>
@@ -3562,6 +3564,23 @@ funnel counts it. This is the owner-recorded fallback.</p>
         store.set_site_video(site_id, voice_id, avatar_id)
         return RedirectResponse(f"/websites/sites/{site_id}#video-settings", status_code=303)
 
+    def _language_card(site: dict) -> str:
+        """This website's content language — the language generation
+        (campaigns, articles, video scripts) is written in. Changing
+        it affects the next run only; nothing already drafted or
+        posted is touched."""
+        current = site.get("language") or "en"
+        return (f"<div class='card' id='content-language'><h3>Content language</h3>"
+                f"<p>Axionory generates in <strong>{esc(current)}</strong> "
+                f"for this website.</p>"
+                f"<form method='post' action='/websites/sites/{esc(site['id'])}/language'>"
+                f"<label for='language'>Language</label>"
+                f"{language_datalist(current)}"
+                "<p class='muted'>Pick one, or type any language tag "
+                "(e.g. fr-ca, zh-hans).</p>"
+                "<p><button class='btn' type='submit'>Save language</button></p>"
+                "</form></div>")
+
     def _autopilot_card(site: dict, account: dict) -> str:
         from ventoryn import autopilot
 
@@ -3713,6 +3732,27 @@ funnel counts it. This is the owner-recorded fallback.</p>
         # anywhere a crafted form names.
         back = "/portfolio" if return_to == "/portfolio" else f"/websites/sites/{site_id}#autopilot"
         return RedirectResponse(back, status_code=303)
+
+    @app.post("/websites/sites/{site_id}/language")
+    def site_language(request: Request, site_id: str,
+                      language: str = Form("en")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                      account, current="websites"), status_code=404)
+        try:
+            store.set_site_language(site_id, language)
+        except ValueError as exc:
+            return HTMLResponse(
+                _signed_page("Website",
+                      f"<p>{esc(exc)}</p><p><a href='/websites/sites/{esc(site_id)}'>"
+                      "Back</a>.</p>", account, current="websites"),
+                status_code=400)
+        return RedirectResponse(f"/websites/sites/{site_id}#content-language",
+                                status_code=303)
 
     def _video_fields(site: dict) -> str:
         """Video job options: ElevenLabs voiceover and HeyGen presenter,
