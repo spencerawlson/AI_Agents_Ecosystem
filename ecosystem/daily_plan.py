@@ -72,11 +72,12 @@ BANNER = ("> **NOTHING WAS PUBLISHED AND NO MARKETING MONEY WAS SPENT.** "
 _TIER_FIX = 0
 _TIER_DECISION = 1
 _TIER_REPLY = 2
-_TIER_DUE_JOB = 3
-_TIER_DRAFT = 4
-_TIER_WEEK_TASK = 5
-_TIER_SEO = 6
-_TIER_METRICS_GAP = 7
+_TIER_COMPETITOR = 3
+_TIER_DUE_JOB = 4
+_TIER_DRAFT = 5
+_TIER_WEEK_TASK = 6
+_TIER_SEO = 7
+_TIER_METRICS_GAP = 8
 
 _JOB_ORDER = ("audit", "keywords", "metrics", "strategy")
 
@@ -278,7 +279,43 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "needs_llm": False,
         })
 
-    # Tier 3 — jobs due today, in run order. These are the agent jobs;
+    # Tier 3 — competitor moves + trends (Holo gap 3). Findings come
+    # from state["competitor_findings"] — stored provider findings only
+    # (see ventoryn.competitor_trends.findings_for_plan); the builder
+    # never fetches, and no finding here was ever invented. A rival's
+    # move or a rising trend outranks due jobs (it goes stale), but not
+    # a drafted reply. Trend findings get their own channel. When there
+    # are no findings there are no items here — the plan's
+    # competitor_status (below) says "no competitor data yet" instead.
+    for finding in state.get("competitor_findings") or []:
+        title = str(finding.get("title") or "").strip()
+        if not title:
+            continue
+        is_trend = str(finding.get("kind") or "") == "trend"
+        stable = str(finding.get("id") or "") or _slug(title)
+        rival = str(finding.get("competitor") or "").strip()
+        add(_TIER_COMPETITOR, {
+            "id": f"{'trend' if is_trend else 'competitor'}:{_slug(stable)}",
+            "channel": "trends" if is_trend else "competitors",
+            "kind": "do",
+            "title": (f"Trend: {title}" if is_trend else
+                      f"Rival move: {title}"),
+            "detail": ((f"{rival} · " if rival else "")
+                       + f"{_cell(finding.get('text'))} "
+                       f"(source: {_cell(finding.get('source'))}"
+                       + (f", {_cell(finding.get('url'))}"
+                          if finding.get("url") else "") + ")"),
+            "action": ("Review the finding and draft a response — "
+                       "nothing posts without your approval."),
+            "done_when": "You acted on it, or decided it needs no reply.",
+            "source": "competitor tracking"
+                      + (f" ({finding.get('source')})"
+                         if finding.get("source") else ""),
+            "source_key": f"competitor-finding:{stable}",
+            "needs_llm": False,
+        })
+
+    # Tier 4 — jobs due today, in run order. These are the agent jobs;
     # the item is to run the growth cycle, which runs only the due ones.
     for job in due_jobs(state, now, cadence, retry_after):
         if job == "metrics" and not metrics:
@@ -303,7 +340,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "needs_llm": job in ("strategy",),
         })
 
-    # Tier 4 — drafts for active experiments that still need content.
+    # Tier 5 — drafts for active experiments that still need content.
     for slug in sorted(experiments):
         exp = experiments[slug]
         if exp.get("status") != "active" or exp.get("drafts") is not None:
@@ -323,7 +360,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "needs_llm": True,
         })
 
-    # Tier 5 — this week's strategy tasks, then P1 site fixes.
+    # Tier 6 — this week's strategy tasks, then P1 site fixes.
     for n, task in enumerate(strategy.get("this_week") or [], 1):
         add(_TIER_WEEK_TASK, {
             "id": f"task:{n}",
@@ -352,7 +389,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "needs_llm": False,
         })
 
-    # Tier 6 — one gated SEO article, only once the SEO pipeline is in
+    # Tier 7 — one gated SEO article, only once the SEO pipeline is in
     # use for this business (a keyword map or drafted articles exist).
     if keywords or state.get("seo_articles"):
         add(_TIER_SEO, {
@@ -369,7 +406,7 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "needs_llm": True,
         })
 
-    # Tier 7 — no measurement at all. Fix measurement before scaling
+    # Tier 8 — no measurement at all. Fix measurement before scaling
     # anything: without it, no experiment can be judged.
     if not metrics:
         add(_TIER_METRICS_GAP, {
@@ -394,6 +431,8 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
         item["rank"] = rank
 
     north_star = (strategy.get("north_star") or {})
+    comp_findings = [f for f in (state.get("competitor_findings") or [])
+                     if str(f.get("title") or "").strip()]
     return {
         "business": business_name,
         "site_url": site_url,
@@ -403,6 +442,15 @@ def build_daily_plan(*, business_name: str, site_url: str, state: dict,
             "metric": north_star.get("metric"),
             "current": north_star.get("current"),
             "target_90d": north_star.get("target_90d"),
+        },
+        # Holo gap 3: the honest competitor state. Always present, so
+        # the dashboard can render "no competitor data yet" instead of
+        # an empty section — and never an invented rival, post, or trend.
+        "competitor_status": {
+            "tracked": len(state.get("competitors") or []),
+            "findings": len(comp_findings),
+            "message": ("no competitor data yet" if not comp_findings else
+                        f"{len(comp_findings)} competitor finding(s)"),
         },
         "items": items,
         "truncated": truncated,

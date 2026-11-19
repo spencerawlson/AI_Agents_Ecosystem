@@ -692,6 +692,27 @@ CREATE TABLE IF NOT EXISTS saas_social_drafts (
     created_at TEXT NOT NULL,
     decided_at TEXT
 );
+CREATE TABLE IF NOT EXISTS saas_competitors (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_competitor_findings (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    competitor_id TEXT NOT NULL DEFAULT '',
+    competitor TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    observed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS saas_x_post_log (
     id TEXT PRIMARY KEY,
     site_id TEXT NOT NULL,
@@ -3033,6 +3054,127 @@ class SaasStore:
                 " link_url, campaign_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (draft_id, site_id, kind, text, link_url, campaign_id, _iso(_now())))
         return self.get_social_draft(draft_id)
+
+    # -- competitor tracking (Holo gap 3) ---------------------------------
+    # A site tracks ITS rivals (tenant isolation is the site_id column,
+    # same as social drafts and campaigns). Findings are stored only
+    # from a real provider report (see ventoryn.competitor_trends) —
+    # never invented. The empty state is honest everywhere:
+    # competitor_summary() says "no competitor data yet".
+
+    def add_competitor(self, site_id: str, name: str, url: str = "",
+                       notes: str = "") -> dict:
+        """Track one rival for a site. Raises SaasError on an empty name
+        or a bad URL (validate_site_url); duplicate names for a site are
+        allowed — rivals can share a name, they cannot share a row."""
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise SaasError("Give the competitor a name.")
+        try:
+            clean_url = validate_site_url(url) if (url or "").strip() else ""
+        except ValueError as exc:
+            raise SaasError(str(exc)) from exc
+        competitor_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_competitors (id, site_id, name, url,"
+                " notes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (competitor_id, site_id, clean_name[:200], clean_url,
+                 (notes or "")[:500], _iso(_now())))
+        return self.get_competitor(competitor_id)
+
+    def get_competitor(self, competitor_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_competitors WHERE id = ?",
+                (competitor_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_competitors(self, site_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_competitors WHERE site_id = ?"
+                " ORDER BY created_at",
+                (site_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def remove_competitor(self, site_id: str, competitor_id: str) -> bool:
+        """Stop tracking a rival; its findings go with it. Returns False
+        when no such rival exists for this site (a rival of another
+        site is never touched). Findings are matched by the rival's id
+        and by its name — provider findings carry the rival's name, not
+        the store id, so both must be cleared."""
+        rival = self.get_competitor(competitor_id)
+        if rival is None or rival.get("site_id") != site_id:
+            return False
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM saas_competitors WHERE id = ? AND site_id = ?",
+                (competitor_id, site_id))
+            self._conn.execute(
+                "DELETE FROM saas_competitor_findings"
+                " WHERE site_id = ? AND (competitor_id = ? OR competitor = ?)",
+                (site_id, competitor_id, rival.get("name") or ""))
+        return True
+
+    def record_competitor_findings(self, site_id: str,
+                                   findings: list[dict]) -> int:
+        """Store provider findings for a site. Deduped on
+        (site_id, url, title) so a re-fetch never duplicates a finding;
+        a finding with no title is skipped (a title is what the plan
+        shows). Returns how many new rows were stored."""
+        stored = 0
+        with self._lock, self._conn:
+            for f in findings or []:
+                title = str(f.get("title") or "").strip()
+                if not title:
+                    continue
+                url = str(f.get("url") or "")
+                exists = self._conn.execute(
+                    "SELECT 1 FROM saas_competitor_findings"
+                    " WHERE site_id = ? AND url = ? AND title = ? LIMIT 1",
+                    (site_id, url, title)).fetchone()
+                if exists:
+                    continue
+                self._conn.execute(
+                    "INSERT INTO saas_competitor_findings (id, site_id,"
+                    " competitor_id, competitor, kind, title, text, url,"
+                    " source, observed_at, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (_new_id(), site_id, str(f.get("competitor_id") or ""),
+                     str(f.get("competitor") or "")[:200],
+                     str(f.get("kind") or ""), title[:500],
+                     str(f.get("text") or "")[:2000], url,
+                     str(f.get("source") or ""),
+                     str(f.get("observed_at") or _iso(_now())),
+                     _iso(_now())))
+                stored += 1
+        return stored
+
+    def list_competitor_findings(self, site_id: str,
+                                 limit: int = 20) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_competitor_findings WHERE site_id = ?"
+                " ORDER BY observed_at DESC, created_at DESC LIMIT ?",
+                (site_id, limit)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def competitor_summary(self, site_id: str) -> dict:
+        """The honest state for a site: tracked rivals + stored
+        findings, or the empty state. Every surface renders this same
+        message — never a fabricated rival, post, or trend."""
+        competitors = self.list_competitors(site_id)
+        findings = self.list_competitor_findings(site_id)
+        if not findings:
+            message = "no competitor data yet"
+            status = "no_data"
+        else:
+            message = (f"{len(findings)} finding(s) from "
+                       f"{len(competitors)} tracked rival(s)")
+            status = "has_data"
+        return {"competitors": competitors, "findings": findings,
+                "status": status, "message": message}
 
     # -- alerts read state ---------------------------------------------------
     def mark_alert_read(self, account_id: str, key: str) -> None:
