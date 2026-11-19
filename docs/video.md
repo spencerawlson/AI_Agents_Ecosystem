@@ -54,6 +54,44 @@ Output: `reports/videos/<slug>.mp4` + `.srt`, a report at
 `reports/video_<yyyymmdd>_<slug>.md`, and an entry in the growth
 state under `videos` (`rendered`).
 
+## Video ads (UGC) — the render-job slot
+
+`ventoryn/video_ads.py` is the video-ad slot in the content engine
+(Gap 5, Holo parity without a provider chosen):
+
+- **Script/storyboard**: `generate_video_ad_script(site_url,
+  brand_profile=None)` writes a short ad — hook, 4 scenes with
+  visuals + voiceover lines, CTA — from the site URL and an optional
+  plain-dict brand profile (`name`, `tagline`, `tone`, `audience`,
+  `offer`, `cta`). Only brand facts actually supplied are used; an
+  empty profile produces a generic script naming only the site host,
+  never invented facts. `storyboard(script)` derives the shot list.
+  Every script passes `validate_script` before it is returned.
+- **Render jobs**: `VideoRenderProvider` is the injected provider
+  interface (`render` / `status`, no live calls at import). Jobs live
+  in `SaasStore` (`saas_video_ad_jobs`) with the lifecycle queued →
+  rendering → ready | failed. With no provider configured a job sits
+  honestly at `awaiting_provider`: nothing is rendered, no URL is
+  stored. `HeyGenProvider` wraps the in-repo HeyGen v3 client
+  (`core/media_providers.py`); it is never constructed by default and
+  fails honestly without keys.
+- **Draft-only**: a rendered video ad is a draft until a human
+  approves it through the existing review record
+  (`video_review_status` / `set_video_review`, the Approvals flow).
+  `publish_video_ad(store, job_id)` is the only publish gate and
+  refuses without an approval record. It posts nothing itself.
+
+Provider comparison (public pricing, checked 2026-11-19 — re-verify
+before any spend): **OpenAI Sora is shut down** (API sunset
+2026-09-24), so it is not a choice. **HeyGen** (live, API
+pay-as-you-go wallet from $5; Avatar III $0.60/min, Avatar IV
+$2.31–$4.83/min, Avatar V $7.20/min; a 24s ad ≈ $0.24–$2.88) makes
+the talking-presenter UGC ad and already has a client in the repo.
+**Runway** (live, API $0.01/credit, $10 min top-up; Gen-4 Turbo
+$0.05/s, Gen-4.5 $0.12/s; a 24s ad ≈ $1.20/$2.88) makes AI footage
+from text or a product image, with no avatar presenter. No provider
+is wired in; choosing one and approving its cost is Spencer's call.
+
 ## What it does not do
 
 No AI voice (no TTS key in the repo), no stock or AI-generated

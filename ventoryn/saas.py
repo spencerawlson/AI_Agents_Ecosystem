@@ -744,6 +744,20 @@ CREATE TABLE IF NOT EXISTS saas_video_reviews (
     status TEXT NOT NULL,
     decided_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saas_video_ad_jobs (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    script_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT '',
+    provider_status TEXT NOT NULL DEFAULT 'awaiting_provider',
+    provider_job_id TEXT NOT NULL DEFAULT '',
+    video_url TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS saas_media_spend (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
@@ -3402,6 +3416,78 @@ class SaasStore:
                 "INSERT INTO saas_video_reviews (job_id, account_id, status, decided_at)"
                 " VALUES (?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET status = excluded.status,"
                 " decided_at = excluded.decided_at", (job_id, account_id, status, _iso(_now())))
+
+    # -- video ad jobs (Gap 5: script/storyboard + render-job slot) -----------
+    # A video ad is a draft until a human approves it (see
+    # ventoryn/video_ads.py publish_video_ad, which reads the same
+    # saas_video_reviews record the Approvals page uses). The render
+    # provider is never stored here — only its name and the job id it
+    # returned. No key, no secret, ever lands in this table.
+
+    def create_video_ad_job(self, account_id: str, site_id: str,
+                            script: dict) -> dict:
+        """A video-ad render job, queued. ``provider_status`` starts at
+        ``awaiting_provider``: with no provider configured the job
+        honestly waits — nothing is rendered, no URL is invented."""
+        job_id = _new_id()
+        now = _iso(_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_video_ad_jobs (id, account_id, site_id,"
+                " script_json, status, provider, provider_status,"
+                " provider_job_id, video_url, error, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, 'queued', '', 'awaiting_provider',"
+                " '', '', '', ?, ?)",
+                (job_id, account_id, site_id, json.dumps(script), now, now))
+        return self.get_video_ad_job(job_id)
+
+    def get_video_ad_job(self, job_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_video_ad_jobs WHERE id = ?",
+                (job_id,)).fetchone()
+        if not row:
+            return None
+        job = _row_dict(row)
+        job["script"] = json.loads(job.pop("script_json") or "{}")
+        return job
+
+    def list_video_ad_jobs(self, account_id: str,
+                           site_id: str | None = None) -> list[dict]:
+        with self._lock:
+            if site_id:
+                rows = self._conn.execute(
+                    "SELECT * FROM saas_video_ad_jobs WHERE account_id = ?"
+                    " AND site_id = ? ORDER BY created_at DESC",
+                    (account_id, site_id)).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM saas_video_ad_jobs WHERE account_id = ?"
+                    " ORDER BY created_at DESC", (account_id,)).fetchall()
+        out = []
+        for r in rows:
+            job = _row_dict(r)
+            job["script"] = json.loads(job.pop("script_json") or "{}")
+            out.append(job)
+        return out
+
+    def update_video_ad_job(self, job_id: str, **fields) -> dict | None:
+        """Set render fields (status, provider, provider_status,
+        provider_job_id, video_url, error). Only the lifecycle in
+        ventoryn/video_ads.py moves ``status``; this is the storage
+        behind it, not a second state machine."""
+        allowed = {"status", "provider", "provider_status",
+                   "provider_job_id", "video_url", "error"}
+        changes = {k: v for k, v in fields.items() if k in allowed}
+        if not changes:
+            return self.get_video_ad_job(job_id)
+        changes["updated_at"] = _iso(_now())
+        sets = ", ".join(f"{k} = ?" for k in changes)
+        with self._lock, self._conn:
+            self._conn.execute(
+                f"UPDATE saas_video_ad_jobs SET {sets} WHERE id = ?",
+                (*changes.values(), job_id))
+        return self.get_video_ad_job(job_id)
 
     def record_media_usage(self, account_id: str, site_id: str, provider: str,
                            units: float, unit: str, amount_usd: float | None,
