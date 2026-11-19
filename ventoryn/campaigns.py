@@ -76,9 +76,14 @@ def validate_posts(raw: list, *, allowed_urls: set[str], fallback_url: str,
 
 
 def draft_posts(site: dict, *, days: int, posts_per_day: float,
-                with_link: bool, llm=None, inventory=None) -> list[dict]:
+                with_link: bool, llm=None, inventory=None,
+                brand_profile: dict | None = None) -> list[dict]:
     """Ask the AI for the campaign's posts. Raises RuntimeError when it
-    cannot produce at least one usable post."""
+    cannot produce at least one usable post.
+
+    `brand_profile` is the site's Brand DNA (see ventoryn.brand_dna):
+    when present, its non-empty fields shape the prompt's voice; when
+    absent, the prompt is exactly as before."""
     from agents.marketing.agent import clean_llm_text
     from core.llm import LLMGateway
     from core.seo_content import fetch_inventory
@@ -93,13 +98,34 @@ def draft_posts(site: dict, *, days: int, posts_per_day: float,
              (inventory.pages if inventory else [])][:25]
     allowed = {u for u, _ in pages} | {site["url"]}
     page_list = "\n".join(f"- {u}  ({t})" for u, t in pages) or f"- {site['url']}"
+    brand_lines = []
+    if brand_profile:
+        tone = ", ".join(brand_profile.get("tone") or [])
+        products = ", ".join(p.get("name", "")
+                             for p in brand_profile.get("products") or [])
+        audience = ", ".join(brand_profile.get("audience") or [])
+        triggers = ", ".join(brand_profile.get("buying_triggers") or [])
+        if tone:
+            brand_lines.append(f"Tone of voice: {tone}.")
+        if products:
+            brand_lines.append(f"Products: {products}.")
+        if audience:
+            brand_lines.append(f"Who it is for: {audience}.")
+        if triggers:
+            brand_lines.append(f"What makes buyers act: {triggers}.")
+    brand_section = ""
+    if brand_lines:
+        brand_section = ("\n\nBrand voice — facts learned from the site itself, "
+                         "write in this voice:\n"
+                         + "\n".join(f"- {line}" for line in brand_lines))
     limit = X_MAX_CHARS - (X_LINK_CHARS if with_link else 0)
     prompt = (
         f"You write X (Twitter) posts for the website {site['url']} "
         f"(market: {site.get('country', '')}, language: {site.get('language', 'en')}).\n"
         f"Write {want} DIFFERENT posts for a {days}-day campaign.\n\n"
         f"The ONLY facts you may use are these pages and their titles — never "
-        f"invent prices, numbers, features, testimonials or claims:\n{page_list}\n\n"
+        f"invent prices, numbers, features, testimonials or claims:\n{page_list}"
+        f"{brand_section}\n\n"
         f"Rules: each post is at most {limit} characters, written in the site's "
         f"language, helpful and specific, no hashtag stuffing (0-2 hashtags), "
         f"no URLs in the text"
