@@ -2332,6 +2332,51 @@ customers per site.</p>{hidden_note}
                         f"<td>{esc(_draft['status'].capitalize())}</td>"
                         f"<td>{esc(_when)}</td>"
                         "<td>—</td></tr>")
+        # Newsletters are the same approval story: a draft the account
+        # must approve before it can send. Pending ones sit beside the
+        # social drafts; decided ones beside the decided list. Only
+        # this account's own sites' newsletters — the site lookup
+        # enforces ownership. The decide forms post to the newsletter
+        # approve/reject endpoints (same ownership check as the site
+        # page) and carry the two-factor field when 2FA is enabled.
+        # A newsletter already approved but not sent (e.g. the send
+        # was refused because Resend is not set up yet) stays pending
+        # here with a Send now button — its approval record exists.
+        for _site in _saas_store.list_sites(account["id"]):
+            for _nl in _saas_store.list_newsletters(_site["id"]):
+                _base = (f"/websites/sites/{esc(_site['id'])}/newsletters/"
+                         f"{esc(_nl['id'])}")
+                _recips = _nl.get("recipients") or []
+                _when = (str(_nl.get("decided_at") or "")
+                         .replace("T", " ")[:19] or "—")
+                if _nl.get("status") in ("draft", "approved",
+                                         "send_failed"):
+                    draft_pending_count += 1
+                    _label = ("Approve &amp; send" if _nl.get("status") == "draft"
+                              else "Send now")
+                    draft_pend_rows += (
+                        f"<tr><td><strong>Email newsletter</strong> — "
+                        f"{esc(_nl.get('subject') or '')}<br>"
+                        f"<span class='muted'>To {len(_recips)} recipient(s)"
+                        f" — {esc(_nl.get('status') or '')}</span></td>"
+                        f"<td><form method='post' action='{_base}/approve'>"
+                        f"{totp_field}<p>"
+                        f"<button class='btn btn-primary' type='submit'>"
+                        f"{_label}</button> "
+                        "<button class='btn' type='submit' "
+                        f"formaction='{_base}/reject'>Reject</button>"
+                        "</p></form></td></tr>")
+                elif _nl.get("status") in ("sent", "rejected"):
+                    _resend = _nl.get("resend_id") or ""
+                    draft_dec_rows += (
+                        f"<tr><td><strong>Email newsletter</strong> — "
+                        f"{esc(_nl.get('subject') or '')}"
+                        + (f"<br><span class='muted'>Sent as "
+                           f"{esc(_resend)}</span>" if _resend else "")
+                        + "</td>"
+                        f"<td>{esc(_nl['status'].capitalize())}</td>"
+                        f"<td>{esc(_when)}</td>"
+                        "<td>—</td></tr>")
         # Pending rows are expandable: the human-readable summary is
         # always visible, and the full proposed action (raw payload)
         # is one click away — visible before Approve. The decide

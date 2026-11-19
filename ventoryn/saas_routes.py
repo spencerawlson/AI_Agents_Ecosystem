@@ -64,6 +64,14 @@ Pages:
   POST /websites/sites/{site_id}/social/instagram/drafts/{draft_id}/approve
                                          the ONLY path that posts to Instagram
   POST /websites/sites/{site_id}/social/instagram/drafts/{draft_id}/reject
+  POST /websites/sites/{site_id}/newsletters
+                                         compose a newsletter draft (never sends it)
+  POST /websites/sites/{site_id}/newsletters/generate
+                                         generate a draft from the site's pages (never sends it)
+  POST /websites/sites/{site_id}/newsletters/{newsletter_id}/approve
+                                         approve the draft, then send it via Resend
+                                         (the ONLY path that sends email)
+  POST /websites/sites/{site_id}/newsletters/{newsletter_id}/reject
 
 Sign-in flow (the ShipItAyiti flow): the landing page carries the
 sign-in and the URL box; after Google sign-in EVERYONE goes straight
@@ -74,9 +82,9 @@ operator only (see ventoryn.app).
 
 A job that costs more credits than the balance is refused with the
 balance shown. The only routes that ever publish anything external
-are the X / Facebook / Instagram draft-approve routes above —
-composing a draft never posts it, and nothing else here posts or
-publishes anywhere.
+are the X / Facebook / Instagram draft-approve routes above and the
+newsletter approve route — composing a draft never posts or sends
+it, and nothing else here posts or publishes anywhere.
 """
 
 from __future__ import annotations
@@ -118,6 +126,14 @@ from ventoryn.commerce_oauth import (
     validate_shop_domain,
     validate_store_url,
     verify_shopify_connection,
+)
+from ventoryn.newsletters import (
+    approve_newsletter,
+    draft_newsletter,
+    newsletter_section_html,
+    send_newsletter,
+    validate_from_email,
+    validate_recipients,
 )
 from ventoryn.social_oauth import (
     build_authorize_url,
@@ -1707,6 +1723,148 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         store.decide_social_draft(draft_id, "rejected")
         return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
 
+    # -- Email newsletters: compose/generate -> approve-and-send, never automatic
+    @app.post("/websites/sites/{site_id}/newsletters")
+    def newsletter_create(request: Request, site_id: str,
+                          subject: str = Form(""),
+                          body_text: str = Form(""),
+                          from_email: str = Form(""),
+                          recipients: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="websites"), status_code=404)
+        try:
+            from_addr = validate_from_email(from_email)
+            to_addrs = validate_recipients(recipients)
+        except ValueError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(exc)}</p><p><a href='/websites/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=400)
+        if not subject.strip() or not body_text.strip():
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      "<p>A newsletter needs a subject and text.</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=400)
+        store.create_newsletter(site_id, account["id"],
+                                subject=subject.strip()[:200],
+                                body_text=body_text.strip()[:2000],
+                                from_email=from_addr, recipients=to_addrs)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
+
+    @app.post("/websites/sites/{site_id}/newsletters/generate")
+    def newsletter_generate(request: Request, site_id: str,
+                            from_email: str = Form(""),
+                            recipients: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="websites"), status_code=404)
+        try:
+            from_addr = validate_from_email(from_email)
+            to_addrs = validate_recipients(recipients)
+        except ValueError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(exc)}</p><p><a href='/websites/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=400)
+        try:
+            generated = draft_newsletter(site)
+        except RuntimeError as exc:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>Could not generate a newsletter: {esc(exc)}</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=400)
+        store.create_newsletter(site_id, account["id"],
+                                subject=generated["subject"],
+                                body_text=generated["intro"],
+                                sections=generated["sections"],
+                                from_email=from_addr, recipients=to_addrs)
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
+
+    @app.post("/websites/sites/{site_id}/newsletters/{newsletter_id}/approve")
+    def newsletter_approve(request: Request, site_id: str, newsletter_id: str,
+                           totp_code: str = Form("")):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="websites"), status_code=404)
+        ok, err = _fresh_totp_ok(account, totp_code)
+        if not ok:
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>{esc(err)}</p><p><a href='/websites/sites/"
+                      f"{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=400)
+        newsletter = store.get_newsletter(newsletter_id)
+        if newsletter is None or newsletter["site_id"] != site_id:
+            return HTMLResponse(
+                _signed_page(site["url"], "<p>Newsletter not found.</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=404)
+        status = newsletter["status"]
+        if status == "draft":
+            # The approval record is written first — send_newsletter
+            # refuses any newsletter that does not carry one.
+            if not approve_newsletter(store, newsletter_id,
+                                      decided_by=account["email"]):
+                return HTMLResponse(
+                    _signed_page(site["url"],
+                          "<p>This newsletter was already decided.</p>"
+                          f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
+                          account, current="websites"), status_code=400)
+        elif status == "send_failed":
+            # Retry: re-approve the failed send (the original approval
+            # record is kept in decided_by).
+            store.decide_newsletter(
+                newsletter_id, "approved",
+                decided_by=newsletter.get("decided_by") or account["email"])
+        elif status != "approved":
+            return HTMLResponse(
+                _signed_page(site["url"],
+                      f"<p>This newsletter was already {esc(status)}.</p>"
+                      f"<p><a href='/websites/sites/{esc(site_id)}'>Back</a>.</p>",
+                      account, current="websites"), status_code=400)
+        sent, message = send_newsletter(store, config, account, site_id,
+                                        newsletter_id)
+        inner = (f"<p>{esc(message)}</p>"
+                 f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
+                 f"{esc(site['url'])}</a>.</p>")
+        return HTMLResponse(
+            _signed_page(site["url"], inner, account, current="websites"),
+            status_code=200 if sent else 400)
+
+    @app.post("/websites/sites/{site_id}/newsletters/{newsletter_id}/reject")
+    def newsletter_reject(request: Request, site_id: str, newsletter_id: str):
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(
+                _signed_page("Website", "<p>Website not found.</p>",
+                            account, current="websites"), status_code=404)
+        store.decide_newsletter(newsletter_id, "rejected",
+                                decided_by=account["email"])
+        return RedirectResponse(f"/websites/sites/{site_id}", status_code=303)
+
     @app.get("/account/logout")
     def logout(request: Request):
         token = request.cookies.get(SESSION_COOKIE, "")
@@ -2741,6 +2899,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 "Program</h2><p class='muted'>Your customer count is "
                 "hidden — turn it on in Data &amp; privacy controls "
                 "below.</p></div>")
+        # Email newsletters are an operator-held service (Resend key),
+        # not a per-site connection — their section sits after the
+        # connections, with the honest "not set up yet" state when the
+        # operator key is missing.
+        newsletter_section = newsletter_section_html(
+            store, config, account, site, _totp_field(account))
         inner = snapshot_html + brand_dna_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
@@ -2799,6 +2963,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <input type='text' id='amount' name='amount_usd' placeholder='19.00'>
 <p><button class='btn' type='submit'>Record sale</button></p></form></div>
 <h2>Connections</h2>{conn_rows}
+{newsletter_section}
 {privacy_card}
 {signature_card}"""
         inner += (f"<div class='card v-danger' id='remove-website'><h3>Remove this website</h3>"

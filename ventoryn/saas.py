@@ -249,6 +249,11 @@ class SaasConfig:
     #: their own Read key in wp-admin.
     shopify_client_id: str = ""
     shopify_client_secret: str = ""
+    #: Resend API key (VENTORYN_RESEND_API_KEY) for email newsletters.
+    #: The operator's key from his Resend account — which key is his
+    #: choice. Empty means "not configured": newsletter sending
+    #: refuses honestly instead of failing or faking a send.
+    resend_api_key: str = ""
     #: Social publishing is DISABLED BY DEFAULT. The operator turns it
     #: on (VENTORYN_SOCIAL_PUBLISHING_ENABLED=1) only when the
     #: provider apps are registered, reviewed, and ready. The
@@ -319,6 +324,7 @@ class SaasConfig:
             facebook_app_secret=env.get("VENTORYN_FACEBOOK_APP_SECRET", ""),
             shopify_client_id=env.get("VENTORYN_SHOPIFY_CLIENT_ID", ""),
             shopify_client_secret=env.get("VENTORYN_SHOPIFY_CLIENT_SECRET", ""),
+            resend_api_key=env.get("VENTORYN_RESEND_API_KEY", ""),
             social_publishing_enabled=env.get(
                 "VENTORYN_SOCIAL_PUBLISHING_ENABLED", "") == "1",
             social_daily_cap_usd=_safe_float(
@@ -425,6 +431,13 @@ class SaasConfig:
         """True only when Axionory's Shopify app credentials are set.
         Empty means "not configured"."""
         return bool(self.shopify_client_id and self.shopify_client_secret)
+
+    @property
+    def resend_configured(self) -> bool:
+        """True only when the operator's Resend API key is set. Empty
+        means "not configured" — newsletter sending refuses honestly
+        instead of failing or faking a send."""
+        return bool(self.resend_api_key and self.resend_api_key.strip())
 
 
 def default_saas_db_path() -> Path | None:
@@ -718,6 +731,32 @@ CREATE TABLE IF NOT EXISTS saas_x_post_log (
     site_id TEXT NOT NULL,
     draft_id TEXT NOT NULL,
     cost_usd_cents INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_newsletters (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL DEFAULT '',
+    sections_json TEXT NOT NULL DEFAULT '[]',
+    from_email TEXT NOT NULL DEFAULT '',
+    recipients_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'draft',
+    resend_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_by TEXT NOT NULL DEFAULT '',
+    sent_at TEXT
+);
+CREATE TABLE IF NOT EXISTS saas_newsletter_sends (
+    id TEXT PRIMARY KEY,
+    newsletter_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    resend_id TEXT NOT NULL DEFAULT '',
+    recipient_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS saas_meta_deletions (
@@ -3317,6 +3356,119 @@ class SaasStore:
                 " WHERE id = ? AND status IN ('pending', 'scheduled')",
                 (status, signature_tag, tweet_id, _iso(_now()), draft_id))
         return cur.rowcount > 0
+
+    # -- newsletters (draft-first, approval-gated sending) ------------------
+    # A newsletter is never sent by creating it — only an explicit,
+    # separate approve action (newsletters.approve_newsletter)
+    # followed by newsletters.send_newsletter calls the provider.
+    # Compose != approve != send.
+    def create_newsletter(self, site_id: str, account_id: str, *,
+                          subject: str, body_text: str,
+                          sections: list | None = None,
+                          from_email: str = "",
+                          recipients: list | None = None) -> dict:
+        newsletter_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_newsletters (id, site_id, account_id,"
+                " subject, body_text, sections_json, from_email,"
+                " recipients_json, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (newsletter_id, site_id, account_id, subject, body_text,
+                 json.dumps(sections or []), from_email,
+                 json.dumps(recipients or []), _iso(_now())))
+        return self.get_newsletter(newsletter_id)
+
+    @staticmethod
+    def _newsletter_row(row) -> dict | None:
+        """A newsletter row with its JSON columns decoded to lists."""
+        if row is None:
+            return None
+        d = _row_dict(row)
+        for key in ("sections", "recipients"):
+            raw = d.pop(f"{key}_json", "[]")
+            try:
+                d[key] = json.loads(raw) if raw else []
+            except ValueError:
+                d[key] = []
+            if not isinstance(d[key], list):
+                d[key] = []
+        return d
+
+    def get_newsletter(self, newsletter_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_newsletters WHERE id = ?",
+                (newsletter_id,)).fetchone()
+        return self._newsletter_row(row)
+
+    def list_newsletters(self, site_id: str, limit: int = 20) -> list[dict]:
+        """Only this site's newsletters — per-site storage, so one
+        tenant never sees another's drafts or send records."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_newsletters WHERE site_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (site_id, limit)).fetchall()
+        return [self._newsletter_row(r) for r in rows]
+
+    def decide_newsletter(self, newsletter_id: str, status: str,
+                          decided_by: str = "") -> bool:
+        """Record an approve/reject/send-failure decision. Only a
+        still-draft newsletter can be approved or rejected, only an
+        approved one can be marked send-failed, and only a failed one
+        can be re-approved for a retry — a newsletter already decided
+        (sent, rejected) cannot be decided again."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE saas_newsletters SET status = ?, decided_at = ?,"
+                " decided_by = ?"
+                " WHERE id = ? AND ((status = 'draft' AND ? IN"
+                " ('approved', 'rejected')) OR (status = 'approved'"
+                " AND ? = 'send_failed') OR (status = 'send_failed'"
+                " AND ? = 'approved'))",
+                (status, _iso(_now()), decided_by, newsletter_id,
+                 status, status, status))
+        return cur.rowcount > 0
+
+    def mark_newsletter_sent(self, newsletter_id: str,
+                             resend_id: str) -> bool:
+        """Draft-approved → sent, with the provider id. Only an
+        approved newsletter can be marked sent."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE saas_newsletters SET status = 'sent',"
+                " resend_id = ?, sent_at = ?"
+                " WHERE id = ? AND status = 'approved'",
+                (resend_id, _iso(_now()), newsletter_id))
+        return cur.rowcount > 0
+
+    def record_newsletter_send(self, newsletter_id: str, site_id: str,
+                               status: str, resend_id: str = "",
+                               recipient_count: int = 0,
+                               error: str = "") -> dict:
+        """One row per send attempt — failures are recorded too, so a
+        refused send is visible, never silent."""
+        send_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saas_newsletter_sends (id, newsletter_id,"
+                " site_id, status, resend_id, recipient_count, error,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (send_id, newsletter_id, site_id, status, resend_id,
+                 int(recipient_count), error[:500], _iso(_now())))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_newsletter_sends WHERE id = ?",
+                (send_id,)).fetchone()
+        return _row_dict(row) if row else {}
+
+    def list_newsletter_sends(self, newsletter_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_newsletter_sends WHERE newsletter_id = ?"
+                " ORDER BY created_at, rowid", (newsletter_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
 
     def record_x_post_cost(self, site_id: str, draft_id: str,
                            cost_usd_cents: int) -> None:
