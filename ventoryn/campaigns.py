@@ -185,6 +185,16 @@ def post_due(store, config, now: datetime | None = None, *, poster=None) -> list
     now = now or datetime.now(timezone.utc)
     done = []
     for d in store.due_scheduled_drafts(now.isoformat()):
+        # Bulk runs add non-X drafts (ads, emails) to the same table:
+        # only X drafts ever go out through post_to_x. A scheduled
+        # non-X draft is held with the reason — never posted, never
+        # retried — until its own send path exists.
+        if d.get("kind") != "x":
+            store.hold_draft(d["id"], "Not posted: only X drafts post "
+                             "automatically; ad and email drafts need "
+                             "their own send step.")
+            done.append((d["id"], False, "not an X draft"))
+            continue
         site = store.get_site(d["site_id"])
         account = store.get_account(site["account_id"]) if site else None
         if account is None:
@@ -227,6 +237,8 @@ def proposal_card(store, config, campaign: dict, totp_field: str) -> str:
     Approve (2FA) / Reject buttons."""
     site = store.get_site(campaign["site_id"]) or {}
     drafts = [d for d in store.campaign_drafts(campaign["id"]) if d["status"] == "pending"]
+    platform = campaign.get("platform") or "x"
+    is_x = platform == "x"
     est = estimate_x_campaign(posts_per_day=len(drafts) / max(1, campaign["days"]),
                               days=campaign["days"], with_link=bool(campaign["with_link"]),
                               spent_this_month_usd=store.x_spend_this_month_usd(site.get("id", "")),
@@ -234,33 +246,57 @@ def proposal_card(store, config, campaign: dict, totp_field: str) -> str:
     est["posts"] = len(drafts)
     est["total_usd"] = round(len(drafts) * est["rate_usd"], 2)
     x_conn = (store.get_connection(site.get("id", ""), "x") or {}).get("status") == "connected"
-    connect = ("" if x_conn else
+    connect = ("" if x_conn or not is_x else
                f"<p class='v-camp-warn'>X is not connected for this website — approved posts "
                f"will wait until you <a href='/integrations/x?site={_esc(site.get('id', ''))}'>"
                f"connect X</a>.</p>")
     cid = _esc(campaign["id"])
     rows = "".join(post_preview_html(site, d, i, cid) for i, d in enumerate(drafts, 1))
     who = "Proposed by the autopilot" if campaign["source"] == "autopilot" else "Started by you"
+    if campaign.get("source") == "bulk":
+        who = "Proposed by a bulk run"
+    # Bulk runs add ad/email campaigns to the same approvals queue:
+    # they are drafts like any other, but they are not X campaigns —
+    # no X cost estimate, no X connection warning, and approving them
+    # never posts anything to X (post_due holds non-X drafts).
+    label = {"x": "X campaign", "ad": "Ad drafts",
+             "email": "Email drafts"}.get(platform, f"{platform} drafts")
+    if is_x:
+        cost_line = (f"<p class='v-camp-cost'><strong>Cost:</strong> "
+                     f"{_esc(describe(est))}</p>")
+        approve_note = (f"Approving schedules the posts over {campaign['days']} days; each is "
+                        f"posted on its date within this website's monthly X budget.")
+        approve_label = "Approve campaign"
+    else:
+        cost_line = ("<p class='v-camp-cost'><strong>Cost:</strong> Bulk drafts — "
+                     "generation was charged to the wallet; nothing is posted "
+                     "automatically.</p>")
+        approve_note = ("Approving marks these drafts reviewed; ads and emails are "
+                        "never posted to X — they need their own send step.")
+        approve_label = "Approve drafts"
     # One compact row per proposal; the details open on click. The post
     # previews sit in their own scrolling box, so a 100-post campaign
     # never stretches the page.
     host = _esc(site.get('host') or site.get('url', ''))
-    flag = "" if x_conn else " <span class='v-camp-flag'>X not connected</span>"
+    flag = ("" if x_conn or not is_x else
+            " <span class='v-camp-flag'>X not connected</span>")
+    summary = (f"{len(drafts)} posts over {campaign['days']} days — "
+               f"about ${est['total_usd']:.2f}" if is_x else
+               f"{len(drafts)} drafts")
     return (
         f"<details class='card v-camp' id='campaign-{cid}'>"
-        f"<summary class='v-camp-sum'><span class='v-camp-site'>X campaign — {host}</span>"
+        f"<summary class='v-camp-sum'><span class='v-camp-site'>{_esc(label)} — {host}</span>"
         f"<span class='muted'>{who} — {_esc(str(campaign['created_at'])[:10])} — "
-        f"{len(drafts)} posts over {campaign['days']} days — about ${est['total_usd']:.2f}</span>"
+        f"{summary}</span>"
         f"{flag}<span class='v-camp-open'>Preview</span></summary>"
-        f"<p class='v-camp-cost'><strong>Cost:</strong> {_esc(describe(est))}</p>{connect}"
-        f"<h4>Preview — how each post will look</h4>"
-        f"<div class='v-camp-scroll' tabindex='0' aria-label='Post previews'>"
+        f"{cost_line}{connect}"
+        f"<h4>Preview — how each draft will look</h4>"
+        f"<div class='v-camp-scroll' tabindex='0' aria-label='Draft previews'>"
         f"<div class='v-camp-grid'>{rows}</div></div>"
         f"<form method='post' action='/campaigns/{cid}/approve'>{totp_field}"
-        f"<p><button class='btn btn-primary' type='submit'>Approve campaign</button> "
+        f"<p><button class='btn btn-primary' type='submit'>{approve_label}</button> "
         f"<button class='btn' type='submit' formaction='/campaigns/{cid}/reject'>Reject</button></p>"
-        f"<p class='muted'>Approving schedules the posts over {campaign['days']} days; each is "
-        f"posted on its date within this website's monthly X budget.</p></form></details>")
+        f"<p class='muted'>{approve_note}</p></form></details>")
 
 
 def scheduled_summary(store, campaign: dict) -> str:
