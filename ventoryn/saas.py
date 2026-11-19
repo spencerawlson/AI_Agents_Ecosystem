@@ -260,6 +260,23 @@ class SaasConfig:
     #: Facebook/Instagram approve-and-post paths read this at publish
     #: time, not import time.
     social_publishing_enabled: bool = False
+    #: Meta Business Verification (VENTORYN_META_BUSINESS_VERIFIED=1).
+    #: The operator sets this only once Meta's business verification
+    #: (step 3) has actually cleared. Default False — fail closed:
+    #: until it is set, Facebook/Instagram are `blocked` in the
+    #: publishing queue, never `ready`. (Registry, 2026-11-19: step 3
+    #: is pending on Spencer's legal details + document + 2FA +
+    #: @axionory.com email; App Review + Full-access qualification
+    #: follow.)
+    meta_business_verified: bool = False
+    #: X API prepaid credits (VENTORYN_X_CREDITS_AVAILABLE=1). The
+    #: operator sets this only after topping up credits in
+    #: console.x.com. Default False — fail closed: until it is set,
+    #: X is `blocked` in the publishing queue (posts fail HTTP 402
+    #: Payment Required on a zero balance). This flag is the
+    #: operator's confirmation, NOT a live balance read — a channel
+    #: is still never shown as working until a real post lands.
+    x_credits_available: bool = False
     #: Social spend caps in USD (env-overridable). See
     #: ventoryn/social_costs.py for what they bound.
     social_daily_cap_usd: float = 10.00
@@ -327,6 +344,10 @@ class SaasConfig:
             resend_api_key=env.get("VENTORYN_RESEND_API_KEY", ""),
             social_publishing_enabled=env.get(
                 "VENTORYN_SOCIAL_PUBLISHING_ENABLED", "") == "1",
+            meta_business_verified=env.get(
+                "VENTORYN_META_BUSINESS_VERIFIED", "") == "1",
+            x_credits_available=env.get(
+                "VENTORYN_X_CREDITS_AVAILABLE", "") == "1",
             social_daily_cap_usd=_safe_float(
                 env.get("VENTORYN_SOCIAL_DAILY_CAP_USD"), 10.00),
             social_account_monthly_cap_usd=_safe_float(
@@ -725,6 +746,14 @@ CREATE TABLE IF NOT EXISTS saas_competitor_findings (
     source TEXT NOT NULL DEFAULT '',
     observed_at TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saas_publishing_queue (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    draft_id TEXT NOT NULL UNIQUE,
+    channel TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    enqueued_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS saas_x_post_log (
     id TEXT PRIMARY KEY,
@@ -3469,6 +3498,86 @@ class SaasStore:
                 "SELECT * FROM saas_newsletter_sends WHERE newsletter_id = ?"
                 " ORDER BY created_at, rowid", (newsletter_id,)).fetchall()
         return [_row_dict(r) for r in rows]
+    # -- publishing queue (Gap 6) -----------------------------------------
+    def enqueue_publishing_item(self, site_id: str, draft_id: str,
+                                channel: str, reason: str) -> dict | None:
+        """Hold one approved-but-not-yet-posted draft in the publishing
+        queue. One row per draft (UNIQUE draft_id) — a second enqueue
+        returns the existing row. Returns the row, or None when the
+        draft does not exist or does not belong to this site."""
+        draft = self.get_social_draft(draft_id)
+        if draft is None or draft["site_id"] != site_id:
+            return None
+        item_id = _new_id()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO saas_publishing_queue"
+                " (id, site_id, draft_id, channel, reason, enqueued_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (item_id, site_id, draft_id, channel, reason[:500],
+                 _iso(_now())))
+            row = self._conn.execute(
+                "SELECT * FROM saas_publishing_queue WHERE draft_id = ?",
+                (draft_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_publishing_items(self, site_id: str) -> list[dict]:
+        """Queued items for a site whose draft is still waiting
+        (pending/scheduled). Rows whose draft was posted, rejected,
+        or deleted are pruned here — the queue never shows a draft
+        that already has an outcome."""
+        self.prune_publishing_items(site_id)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM saas_publishing_queue WHERE site_id = ?"
+                " ORDER BY enqueued_at, rowid", (site_id,)).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def get_publishing_item(self, item_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM saas_publishing_queue WHERE id = ?",
+                (item_id,)).fetchone()
+        return _row_dict(row) if row else None
+
+    def remove_publishing_item(self, item_id: str) -> bool:
+        """Cancel a queued item. The draft itself is untouched — it
+        stays pending and can still be approved through its own route."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM saas_publishing_queue WHERE id = ?",
+                (item_id,))
+        return cur.rowcount > 0
+
+    def prune_publishing_items(self, site_id: str) -> int:
+        """Drop queued rows whose draft is no longer waiting (posted,
+        rejected, held, or gone). Returns how many rows were dropped."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM saas_publishing_queue WHERE site_id = ?"
+                " AND draft_id NOT IN (SELECT id FROM saas_social_drafts"
+                " WHERE status IN ('pending', 'scheduled'))",
+                (site_id,))
+        return cur.rowcount
+
+    def has_successful_post(self, site_id: str, channel: str) -> bool:
+        """True only when a real post from Axionory is on record for
+        this site and channel: a social draft decided 'posted', or a
+        TikTok post that reached PUBLISH_COMPLETE. Never inferred
+        from a connection — a connected channel that never posted
+        reads False."""
+        with self._lock:
+            if channel == "tiktok":
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM saas_tiktok_posts WHERE site_id = ?"
+                    " AND status = 'PUBLISH_COMPLETE'",
+                    (site_id,)).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM saas_social_drafts"
+                    " WHERE site_id = ? AND kind = ? AND status = 'posted'",
+                    (site_id, channel)).fetchone()
+        return bool(row and row[0])
 
     def record_x_post_cost(self, site_id: str, draft_id: str,
                            cost_usd_cents: int) -> None:

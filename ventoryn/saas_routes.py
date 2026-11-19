@@ -151,6 +151,11 @@ from ventoryn.social_providers import (
     ProviderAmbiguousError,
     ProviderError,
 )
+from ventoryn.publishing_queue import (
+    PublishingQueue,
+    channel_states_for_site,
+    check_publish_allowed,
+)
 from ventoryn.saas import (
     job_cost_label,
     APP_REGISTRATION_KINDS,
@@ -481,6 +486,59 @@ def _wallet_account_html(store: SaasStore, config: SaasConfig,
         "placeholder='custom (cents)' style='width:150px'>"
         "<button class='btn btn-primary' type='submit'>Add funds</button>"
         "</form></div></div>")
+
+
+def _publishing_status_html(store: SaasStore, config: SaasConfig,
+                            site_id: str) -> str:
+    """The per-site publishing status section (Gap 6): every channel
+    with its live state, the exact step that would unblock it, whether
+    it has ever posted successfully from Axionory, and the drafts
+    waiting in the queue. Honest throughout — a channel that has
+    never posted successfully is never shown as working."""
+    states = channel_states_for_site(store, config, site_id)
+    rows = ""
+    for state in states:
+        badge = ("<span class='badge badge-ok'>Ready</span>" if
+                 state["state"] == "ready" else
+                 "<span class='badge badge-off'>"
+                 f"{esc(state['state'].replace('_', ' ').title())}"
+                 "</span>")
+        posted = ("Yes — posted from Axionory before" if
+                  state["ever_posted"] else
+                  "No successful post from Axionory yet")
+        step = esc(state["unblock_step"]) if state["unblock_step"] else "—"
+        rows += (f"<tr><td>{esc(state['display_name'])}</td>"
+                 f"<td>{badge}</td><td>{esc(state['reason'])}</td>"
+                 f"<td>{step}</td><td>{posted}</td></tr>")
+    queue = PublishingQueue(store, config)
+    queued = queue.list_queued(site_id)
+    if queued:
+        waiting = "".join(
+            f"<div class='card'><p>{esc(item['draft']['text'])}</p>"
+            f"<p class='muted'>Channel: "
+            f"{esc(item['channel_state']['display_name'])} — "
+            f"{esc(item['channel_state']['state'].replace('_', ' '))}: "
+            f"{esc(item['channel_state']['reason'])}</p>"
+            f"<p class='muted'>Waiting since "
+            f"{esc(item['enqueued_at'][:10])}. Nothing is sent "
+            "automatically — approve it again from the channel's "
+            "drafts once the channel is ready.</p></div>"
+            for item in queued)
+    else:
+        waiting = "<p class='muted'>No drafts waiting.</p>"
+    return (
+        "<div class='card'><h2>Publishing — live status</h2>"
+        "<p class='muted'>Where an approved draft can actually go "
+        "right now. A channel is Ready only when it is connected and "
+        "every check for it has cleared; anything else names the exact "
+        "step that would unblock it. No channel here publishes on its "
+        "own — every post still needs your approval first.</p>"
+        "<div class='table-wrap'><table>"
+        "<tr><th>Channel</th><th>Status</th><th>Why</th>"
+        "<th>What would unblock it</th><th>Ever posted</th></tr>"
+        f"{rows}</table></div>"
+        "<h3>Waiting to publish</h3>"
+        f"{waiting}</div>")
 
 
 def _funnel_rows(store: SaasStore, site: dict,
@@ -1585,6 +1643,16 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                       f"{esc(site_id)}'>Back</a>.</p>",
                       account, current="websites"), status_code=400)
         posted, message = post_to_x(store, config, account, site_id, draft_id)
+        if not posted:
+            # The draft was approved by a human (TOTP passed) but the
+            # channel could not take it — hold it in the publishing
+            # queue instead of losing it. The message and status code
+            # below are unchanged.
+            _allowed, _reason = check_publish_allowed(
+                store, config, site_id, "x")
+            if not _allowed:
+                PublishingQueue(store, config).enqueue_approved_draft(
+                    site_id, draft_id)
         inner = (f"<p>{esc(message)}</p>"
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
@@ -1644,6 +1712,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 status_code=400)
         posted, message = post_to_facebook(store, config, account, site_id,
                                            draft_id)
+        if not posted:
+            # Approved by a human but the channel could not take it —
+            # hold it in the publishing queue. Message/status unchanged.
+            _allowed, _reason = check_publish_allowed(
+                store, config, site_id, "facebook")
+            if not _allowed:
+                PublishingQueue(store, config).enqueue_approved_draft(
+                    site_id, draft_id)
         inner = (f"<p>{esc(message)}</p>"
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
@@ -1703,6 +1779,14 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
                 status_code=400)
         posted, message = post_to_instagram(store, config, account, site_id,
                                             draft_id)
+        if not posted:
+            # Approved by a human but the channel could not take it —
+            # hold it in the publishing queue. Message/status unchanged.
+            _allowed, _reason = check_publish_allowed(
+                store, config, site_id, "instagram")
+            if not _allowed:
+                PublishingQueue(store, config).enqueue_approved_draft(
+                    site_id, draft_id)
         inner = (f"<p>{esc(message)}</p>"
                  f"<p><a href='/websites/sites/{esc(site_id)}'>Back to "
                  f"{esc(site['url'])}</a>.</p>")
@@ -2905,6 +2989,7 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # operator key is missing.
         newsletter_section = newsletter_section_html(
             store, config, account, site, _totp_field(account))
+        publishing_html = _publishing_status_html(store, config, site_id)
         inner = snapshot_html + brand_dna_html + _va_card(site, va_check) + f"""<div class='card'><h2>Funnel — visitors to paying customers</h2>
 <div class='table-wrap'><table>{funnel}</table></div>
 <p class='muted'>Every number here comes from a real source. Where a
@@ -2964,6 +3049,7 @@ funnel counts it. This is the owner-recorded fallback.</p>
 <p><button class='btn' type='submit'>Record sale</button></p></form></div>
 <h2>Connections</h2>{conn_rows}
 {newsletter_section}
+{publishing_html}
 {privacy_card}
 {signature_card}"""
         inner += (f"<div class='card v-danger' id='remove-website'><h3>Remove this website</h3>"
@@ -3530,6 +3616,13 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"{esc(campaign_id)}'>Back</a>.</p>", account, current="approvals"),
                 status_code=400)
         _camp.schedule(store, c)
+        # The campaign's drafts were just approved — hold the newly
+        # scheduled ones in the publishing queue, per channel, until
+        # their channel can take them.
+        _queue = PublishingQueue(store, config)
+        for _d in store.campaign_drafts(campaign_id):
+            if _d["status"] == "scheduled":
+                _queue.enqueue_approved_draft(c["site_id"], _d["id"])
         return RedirectResponse(f"/approvals?campaign={campaign_id}", status_code=303)
 
     @app.post("/campaigns/{campaign_id}/reject")
