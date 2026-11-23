@@ -2965,6 +2965,12 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
             _dna.start(store, site)
             dna_rec = _dna.brand_dna_store_for(store).get(site["id"])
         brand_dna_html = _dna.render_card(site, dna_rec)
+        # Audience intelligence, phase 1: the business profile with
+        # evidence (built by the audience_profile job, on request).
+        from ventoryn import audience as _aud
+        brand_dna_html += _aud.render_card(
+            site, _aud.audience_store_for(store).latest(account["id"], site["id"]),
+            CREDIT_COSTS["audience_profile"])
         # Founding Customer Program: verified customers are distinct,
         # real Stripe payments (manual sales never count as verified).
         f100 = first100_summary(store, site_id)

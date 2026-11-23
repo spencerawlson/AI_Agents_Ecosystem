@@ -38,6 +38,8 @@ JOB_LABELS = {
     "seo_article": "SEO article draft",
     "video_render": "Video render — script to MP4 + subtitles",
     "x_campaign": "X campaign — posts drafted for your approval",
+    "audience_profile": "Business profile — what your site sells, to whom, "
+                        "where (with the evidence)",
 }
 
 #: What each job asks for beyond the site itself (shown as hints).
@@ -53,6 +55,9 @@ JOB_HINTS = {
                     "presenter, when the server has those keys.",
     "x_campaign": "30 days, one post a day, each linking to a page of your "
                   "site. Nothing is posted until you approve it in Approvals.",
+    "audience_profile": "Reads up to 8 pages of your site (home, pricing, "
+                        "products, about, FAQ). Every fact links to the page "
+                        "it came from; AI hypotheses are labelled as guesses.",
 }
 
 MAX_UPLOAD_BYTES = 5_000_000
@@ -431,8 +436,24 @@ def _run_x_campaign(site, inputs, ctx):
             f"${len(posts) * rate:.2f} on X — review it in Approvals · report {name}"), name
 
 
+def _run_audience_profile(site, inputs, ctx):
+    from ventoryn import audience
+
+    if ctx.get("store") is None:
+        raise RuntimeError("the business profile needs the account store")
+    profile, _ = audience.run_profile_job(ctx["store"], site,
+                                          job_id=inputs.get("job_id") or "")
+    lines = audience.report_lines(site, profile, ctx["date"])
+    name = _write(ctx["reports_dir"],
+                  f"profile_{_slug(_host(site))}_{ctx['stamp']}.md", lines)
+    counts = audience._counts(profile["claims"])
+    return (f"Business profile: {counts['fact']} facts, {counts['hypothesis']} AI "
+            f"hypotheses from {len(profile['pages'])} pages · report {name}"), name
+
+
 _RUNNERS = {
     "x_campaign": _run_x_campaign,
+    "audience_profile": _run_audience_profile,
     "analyze": _run_analyze,
     "geo_audit": _run_geo,
     "community_listening": _run_listening,
