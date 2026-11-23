@@ -95,7 +95,9 @@ _SHOP_Q = "query { shop { name myshopifyDomain currencyCode plan { displayName }
 
 _PRODUCT_FIELDS = """
   id title handle status vendor productType tags onlineStoreUrl
+  descriptionHtml
   seo { title description }
+  featuredMedia { ... on MediaImage { image { url } } }
   variants(first: 1) { nodes { id sku price inventoryQuantity } }
 """
 
@@ -167,7 +169,6 @@ _PRODUCT_DETAIL_Q = """
 query($id: ID!) {
   product(id: $id) {
     %s
-    descriptionHtml
     media(first: 10) { nodes { alt mediaContentType } }
   }
 }""" % _PRODUCT_FIELDS
