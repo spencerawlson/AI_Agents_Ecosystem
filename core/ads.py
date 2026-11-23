@@ -20,10 +20,30 @@ phrase-match keywords. Env:
   GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_REFRESH_TOKEN,
   GOOGLE_ADS_CUSTOMER_ID (digits), GOOGLE_ADS_LOGIN_CUSTOMER_ID
   (manager account, optional), GOOGLE_ADS_API_VERSION (optional)
+
+Reddit Ads — Ads API v3, Conversions objective with a promoted-post ad.
+Env (never committed):
+  REDDIT_ADS_CLIENT_ID, REDDIT_ADS_CLIENT_SECRET, REDDIT_ADS_REFRESH_TOKEN
+  (OAuth refresh token; the adapter exchanges it for an access token),
+  REDDIT_ADS_ACCOUNT_ID (ad account id), REDDIT_ADS_PIXEL_ID
+  (conversion pixel id — required since 2026-07-13 before any ad group
+  can be created; create one in Reddit Events Manager)
+
+Wire-format note: Reddit's own API docs are allow-list-gated, so the
+endpoint and field names below are cross-verified across independent
+third-party sources (the community Reddit Ads MCP server, agent skill
+repos, integration directories), not pulled from Reddit's own pages.
+The build-time authority is the OpenAPI spec at
+https://ads-api.reddit.com/api/v3/openapi.json — check every field
+against it before any live write, and treat a difference as a build
+blocker, not a guess. Nothing in this adapter makes a live call
+without credentials, and create_paused() only ever creates PAUSED
+objects.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -38,6 +58,18 @@ log = logging.getLogger("core.ads")
 
 META_API_VERSION = "v24.0"
 GOOGLE_ADS_API_VERSION = "v22"
+REDDIT_API_BASE = "https://ads-api.reddit.com/api/v3"
+
+# Reddit Ads API v3 objectives, as reported by third-party sources.
+# New objective enums began rolling out 2026-09-21; hardcoded values
+# are a live compatibility risk — the adapter fails loudly on an
+# unknown value, and the OpenAPI spec is the authority at build time.
+REDDIT_OBJECTIVES = ("BRAND_AWARENESS", "REACH", "TRAFFIC", "ENGAGEMENT",
+                     "VIDEO_VIEWS", "CONVERSIONS", "APP_INSTALLS",
+                     "LEAD_GENERATION", "CATALOG_SALES")
+# Non-CBO objectives: the budget lives on the ad group (goal_value +
+# goal_type), never as daily_budget_cents on the campaign.
+REDDIT_NON_CBO_OBJECTIVES = ("CONVERSIONS", "APP_INSTALLS", "CATALOG_SALES")
 
 # Google geo target constants for common markets.
 GOOGLE_GEO = {"US": 2840, "CA": 2124, "GB": 2826, "AU": 2036, "NZ": 2554,
@@ -46,6 +78,12 @@ GOOGLE_GEO = {"US": 2840, "CA": 2124, "GB": 2826, "AU": 2036, "NZ": 2554,
 LIMITS = {
     "google_headline": 30, "google_description": 90,
     "meta_primary": 125, "meta_headline": 40, "meta_description": 30,
+    # Reddit headline (promoted-post title) max is 300 characters,
+    # cross-verified across several guides citing Reddit Ads Help
+    # (Nov 2026); Reddit recommends <=100 to avoid truncation.
+    # reddit_description is single-source reported — confirm against
+    # the OpenAPI spec before any live write.
+    "reddit_headline": 300, "reddit_description": 180,
 }
 
 
@@ -492,12 +530,252 @@ class GoogleAdsAdapter(AdsAdapter):
                         revenue_usd=float(m.get("conversionsValue", 0)))
 
 
+# -- Reddit Ads ---------------------------------------------------------------
+
+class RedditAdsAdapter(AdsAdapter):
+    """Reddit Ads API v3: Conversions objective, promoted-post ad.
+
+    Creates campaign -> ad group -> ad, every object
+    configured_status PAUSED. Budget lives on the ad group
+    (goal_type DAILY_SPEND + goal_value in microcurrency), never on
+    the campaign for non-CBO objectives. A conversion pixel id is
+    required before any ad group can be created — the adapter refuses
+    before any API call if it is missing. No code path creates an
+    ACTIVE object; activation is a separate, approval-gated call.
+    """
+
+    platform = "reddit"
+
+    def __init__(self, client_id: str, client_secret: str, refresh_token: str,
+                 account_id: str, pixel_id: str = "",
+                 objective: str = "CONVERSIONS",
+                 transport: Transport | None = None) -> None:
+        if not all((client_id, client_secret, refresh_token, account_id)):
+            raise AdsError("Reddit Ads credentials incomplete")
+        objective = objective.upper()
+        if objective not in REDDIT_OBJECTIVES:
+            raise AdsError(
+                f"Reddit objective {objective!r} is not a known value "
+                f"({', '.join(REDDIT_OBJECTIVES)}); check the OpenAPI spec")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.refresh_token = refresh_token
+        self.account = account_id
+        self.pixel_id = pixel_id
+        self.objective = objective
+        self.base = REDDIT_API_BASE
+        self._transport = transport or _urllib_transport
+        self._token: str | None = None
+
+    @classmethod
+    def from_env(cls, **kw) -> "RedditAdsAdapter":
+        e = os.environ
+        return cls(e.get("REDDIT_ADS_CLIENT_ID", ""),
+                   e.get("REDDIT_ADS_CLIENT_SECRET", ""),
+                   e.get("REDDIT_ADS_REFRESH_TOKEN", ""),
+                   e.get("REDDIT_ADS_ACCOUNT_ID", ""),
+                   pixel_id=e.get("REDDIT_ADS_PIXEL_ID", ""), **kw)
+
+    @staticmethod
+    def configured() -> bool:
+        # The pixel is not part of "configured": a read-only verify()
+        # works without it; create_paused() refuses before any call
+        # if it is missing.
+        return all(os.environ.get(k) for k in (
+            "REDDIT_ADS_CLIENT_ID", "REDDIT_ADS_CLIENT_SECRET",
+            "REDDIT_ADS_REFRESH_TOKEN", "REDDIT_ADS_ACCOUNT_ID"))
+
+    def _access_token(self) -> str:
+        if self._token is None:
+            creds = base64.b64encode(
+                f"{self.client_id}:{self.client_secret}".encode()).decode()
+            body = urllib.parse.urlencode({
+                "grant_type": "refresh_token",
+                "refresh_token": self.refresh_token,
+            }).encode()
+            status, text = self._transport(
+                "POST", "https://www.reddit.com/api/v1/access_token",
+                {"Authorization": f"Basic {creds}",
+                 "Content-Type": "application/x-www-form-urlencoded"}, body)
+            if status != 200:
+                raise AdsError(f"Reddit OAuth failed ({status}): {text[:200]}")
+            self._token = json.loads(text)["access_token"]
+        return self._token
+
+    def _req(self, method: str, path: str, payload: dict | None = None) -> dict:
+        headers = {"Authorization": f"Bearer {self._access_token()}",
+                   "Content-Type": "application/json"}
+        body = json.dumps(payload).encode() if payload is not None else None
+        status, text = self._transport(
+            method, f"{self.base}/{path}", headers, body)
+        try:
+            data = json.loads(text) if text else {}
+        except json.JSONDecodeError:
+            data = {}
+        if status != 200 or "error" in data:
+            err = data.get("error") or {}
+            msg = ((err.get("message") if isinstance(err, dict) else str(err))
+                   or data.get("message") or text[:300])
+            raise AdsError(f"Reddit {path}: HTTP {status}: {msg}")
+        return data
+
+    @staticmethod
+    def _obj_id(data: dict, *keys: str) -> str:
+        for key in (*keys, "id"):
+            if data.get(key):
+                return str(data[key])
+        raise AdsError(f"Reddit returned no id: {data}")
+
+    def verify(self) -> dict:
+        """Live read-only check of the ad account."""
+        data = self._req("GET", f"ad_accounts/{self.account}")
+        status = data.get("account_status") or data.get("status")
+        return {"name": data.get("name"), "currency": data.get("currency"),
+                "account_status": status, "active": status == "ACTIVE"}
+
+    def create_paused(self, plan: CampaignPlan) -> dict:
+        if not self.pixel_id:
+            raise AdsError(
+                "Reddit needs a conversion pixel id before an ad group can "
+                "be created — create one in Reddit Events Manager and set "
+                "REDDIT_ADS_PIXEL_ID")
+        refs: dict = {}
+        try:
+            campaign: dict = {
+                "name": plan.name,
+                "objective": self.objective,
+                "configured_status": "PAUSED",
+            }
+            if self.objective not in REDDIT_NON_CBO_OBJECTIVES:
+                # CBO campaign: the campaign carries the budget.
+                campaign["daily_budget_cents"] = int(
+                    round(plan.daily_budget_usd * 100))
+            refs["campaign_id"] = self._obj_id(self._req(
+                "POST", f"ad_accounts/{self.account}/campaigns", campaign),
+                "campaign_id")
+            group: dict = {
+                "name": f"{plan.name} | ad group",
+                "campaign_id": refs["campaign_id"],
+                "conversion_pixel_id": self.pixel_id,
+                "bid_strategy": "BIDLESS",
+                "targeting": {"geolocations": plan.countries},
+                "expand_targeting": False,
+                "configured_status": "PAUSED",
+            }
+            if self.objective in REDDIT_NON_CBO_OBJECTIVES:
+                group["goal_type"] = "DAILY_SPEND"
+                group["goal_value"] = int(
+                    round(plan.daily_budget_usd * 1_000_000))
+            refs["ad_group_id"] = self._obj_id(self._req(
+                "POST", f"ad_accounts/{self.account}/ad_groups", group),
+                "ad_group_id")
+            c = plan.copy
+            refs["ad_id"] = self._obj_id(self._req(
+                "POST", f"ad_accounts/{self.account}/ads", {
+                    "name": f"{plan.name} | ad",
+                    "ad_group_id": refs["ad_group_id"],
+                    # Headline is the promoted-post title (max 300).
+                    # CTA and image field names are third-party-reported;
+                    # confirm against the OpenAPI spec before a live write.
+                    "headline": c.headlines[0][:LIMITS["reddit_headline"]],
+                    "destination_url": plan.product_url,
+                    "image_url": plan.image_url,
+                    "call_to_action": "SHOP_NOW",
+                    "configured_status": "PAUSED",
+                }), "ad_id")
+        except AdsError as exc:
+            raise AdsError(f"{exc} (partially created, all PAUSED: {refs})") from exc
+        return refs
+
+    def _set_status(self, refs: dict, status: str, keys: tuple) -> None:
+        kinds = {"campaign_id": "campaigns", "ad_group_id": "ad_groups",
+                 "ad_id": "ads"}
+        for key in keys:
+            if refs.get(key):
+                self._req("PATCH", f"{kinds[key]}/{refs[key]}",
+                          {"configured_status": status})
+
+    def activate(self, refs: dict) -> None:
+        # Children first so the campaign never goes live half-configured.
+        self._set_status(refs, "ACTIVE", ("ad_id", "ad_group_id", "campaign_id"))
+
+    def pause(self, refs: dict) -> None:
+        self._set_status(refs, "PAUSED", ("campaign_id",))
+
+    def set_daily_budget(self, refs: dict, daily_budget_usd: float) -> None:
+        self._req("PATCH", f"ad_groups/{refs['ad_group_id']}", {
+            "goal_type": "DAILY_SPEND",
+            "goal_value": int(round(daily_budget_usd * 1_000_000))})
+
+    def insights(self, refs: dict) -> Insights:
+        # Reports shape is third-party-reported (spend in
+        # microcurrency, purchase value in cents); Phase D confirms it
+        # against the OpenAPI spec before relying on it live.
+        data = self._req("POST", f"ad_accounts/{self.account}/reports",
+                         {"campaign_ids": [refs["campaign_id"]]})
+        rows = data.get("data") or []
+        if not rows:
+            return Insights()
+        row = rows[0]
+        return Insights(
+            spend_usd=int(row.get("spend", 0)) / 1_000_000,
+            impressions=int(row.get("impressions", 0)),
+            clicks=int(row.get("clicks", 0)),
+            purchases=float(row.get("conversions", 0)),
+            revenue_usd=float(row.get("conversions_value", 0)) / 100)
+
+
+class MockRedditAdapter(AdsAdapter):
+    """In-memory Reddit Ads platform for development and tests."""
+
+    platform = "reddit"
+
+    def __init__(self) -> None:
+        self.campaigns: dict[str, dict] = {}
+        self.ad_groups: dict[str, dict] = {}
+        self.ads: dict[str, dict] = {}
+        self.stats: dict[str, Insights] = {}
+
+    def create_paused(self, plan: CampaignPlan) -> dict:
+        n = len(self.campaigns) + 1
+        cid, gid, aid = f"mock_c{n}", f"mock_g{n}", f"mock_a{n}"
+        self.campaigns[cid] = {"status": "PAUSED", "name": plan.name}
+        self.ad_groups[gid] = {"status": "PAUSED", "campaign_id": cid,
+                               "goal_value": int(round(
+                                   plan.daily_budget_usd * 1_000_000))}
+        self.ads[aid] = {"status": "PAUSED", "ad_group_id": gid}
+        self.stats[cid] = Insights()
+        return {"campaign_id": cid, "ad_group_id": gid, "ad_id": aid}
+
+    def verify(self) -> dict:
+        return {"name": "Mock Reddit Ads", "currency": "USD",
+                "account_status": "ACTIVE", "active": True}
+
+    def activate(self, refs: dict) -> None:
+        for store, key in ((self.ads, "ad_id"),
+                           (self.ad_groups, "ad_group_id"),
+                           (self.campaigns, "campaign_id")):
+            store[refs[key]]["status"] = "ACTIVE"
+
+    def pause(self, refs: dict) -> None:
+        self.campaigns[refs["campaign_id"]]["status"] = "PAUSED"
+
+    def set_daily_budget(self, refs: dict, daily_budget_usd: float) -> None:
+        self.ad_groups[refs["ad_group_id"]]["goal_value"] = int(
+            round(daily_budget_usd * 1_000_000))
+
+    def insights(self, refs: dict) -> Insights:
+        return self.stats[refs["campaign_id"]]
+
+
 def configured_ads_adapters() -> dict[str, AdsAdapter]:
     out: dict[str, AdsAdapter] = {}
     if MetaAdsAdapter.configured():
         out["meta"] = MetaAdsAdapter.from_env()
     if GoogleAdsAdapter.configured():
         out["google"] = GoogleAdsAdapter.from_env()
+    if RedditAdsAdapter.configured():
+        out["reddit"] = RedditAdsAdapter.from_env()
     return out
 
 
