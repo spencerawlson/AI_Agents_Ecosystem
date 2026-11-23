@@ -319,3 +319,13 @@ def test_another_account_cannot_run_or_see_it(env):
                    data={"job_type": "audience_profile"}, follow_redirects=False)
     assert r.status_code == 404
     assert other.get(f"/websites/sites/{site['id']}").status_code == 404
+
+
+def test_keywords_keep_accented_letters_and_plus():
+    doc = website.parse("<html><head><title>Cours de pâtisserie française"
+                        "</title></head><body><h1>Security+ et pâtisserie "
+                        "française</h1></body></html>")
+    terms = [c["value"] for c in website._keywords([("https://x.fr/", doc),
+                                                    ("https://x.fr/a", doc)])]
+    assert "pâtisserie française" in terms
+    assert any("security+" in t for t in terms)

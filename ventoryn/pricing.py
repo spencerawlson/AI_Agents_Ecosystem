@@ -40,6 +40,7 @@ WALLET_RESERVE_ESTIMATE_CENTS: dict[str, int] = {
     "seo_article": 150,
     "video_render": 200,
     "audience_profile": 40,
+    "audience_discovery": 60,
 }
 
 #: Used for any job type not listed above.

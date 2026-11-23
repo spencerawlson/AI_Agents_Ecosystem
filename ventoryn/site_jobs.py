@@ -40,6 +40,8 @@ JOB_LABELS = {
     "x_campaign": "X campaign — posts drafted for your approval",
     "audience_profile": "Business profile — what your site sells, to whom, "
                         "where (with the evidence)",
+    "audience_discovery": "Demand discovery — where people discuss what you "
+                          "sell (Brave, Stack Exchange, Hacker News, YouTube)",
 }
 
 #: What each job asks for beyond the site itself (shown as hints).
@@ -58,6 +60,9 @@ JOB_HINTS = {
     "audience_profile": "Reads up to 8 pages of your site (home, pricing, "
                         "products, about, FAQ). Every fact links to the page "
                         "it came from; AI hypotheses are labelled as guesses.",
+    "audience_discovery": "Needs a business profile first. Searches only the "
+                          "sources this server may use and lists the ones it "
+                          "could not search, with the reason. Nothing is posted.",
 }
 
 MAX_UPLOAD_BYTES = 5_000_000
@@ -451,9 +456,26 @@ def _run_audience_profile(site, inputs, ctx):
             f"hypotheses from {len(profile['pages'])} pages · report {name}"), name
 
 
+def _run_audience_discovery(site, inputs, ctx):
+    from ventoryn import audience_discovery
+
+    if ctx.get("store") is None:
+        raise RuntimeError("demand discovery needs the account store")
+    result, _ = audience_discovery.run_discovery_job(
+        ctx["store"], site, job_id=inputs.get("job_id") or "")
+    lines = audience_discovery.report_lines(site, result, ctx["date"])
+    name = _write(ctx["reports_dir"],
+                  f"discovery_{_slug(_host(site))}_{ctx['stamp']}.md", lines)
+    searched = sum(1 for c in result["coverage"].values() if c["status"] == "searched")
+    return (f"Demand discovery: {len(result['items'])} results from {searched} sources"
+            + (f" ({result['stopped']})" if result["stopped"] else "")
+            + f" · report {name}"), name
+
+
 _RUNNERS = {
     "x_campaign": _run_x_campaign,
     "audience_profile": _run_audience_profile,
+    "audience_discovery": _run_audience_discovery,
     "analyze": _run_analyze,
     "geo_audit": _run_geo,
     "community_listening": _run_listening,

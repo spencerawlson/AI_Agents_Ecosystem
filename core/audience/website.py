@@ -370,7 +370,7 @@ def _keywords(pages: list[tuple[str, _Doc]], limit: int = 15) -> list[dict]:
         texts = [doc.title] + [t for _, t in doc.headings if not _BOILERPLATE.search(t)]
         seen_here = set()
         for text in texts:
-            words = [w for w in re.findall(r"[a-z0-9][a-z0-9+#.\-]*[a-z0-9+#]|[a-z0-9]",
+            words = [w for w in re.findall(r"[^\W_][\w+#.\-]*(?:[^\W_]|[+#])|[^\W_]",
                                            text.lower()) if w not in _STOP and len(w) > 2]
             grams = words + [f"{a} {b}" for a, b in zip(words, words[1:])]
             for g in grams:

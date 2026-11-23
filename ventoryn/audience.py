@@ -1,5 +1,13 @@
 """Audience intelligence for Axionory customers: storage and the job.
 
+Phase 2 — demand discovery. The ``audience_discovery`` job turns the
+latest profile into searches (``core.audience.query_plan``), runs them
+on the sources this server can use (``core.audience.discovery``), and
+stores the evidence with an expiry date set by each source's
+retention rule. Search costs are recorded with the job's usage, like
+AI calls. A scan can be stopped from the site page; what was found
+before stopping is kept.
+
 Phase 1 — the business profile. The ``audience_profile`` job (one of
 the site jobs, see ``ventoryn/site_jobs.py``) reads the customer's
 website through the SSRF-guarded fetch, extracts claims with evidence
@@ -54,10 +62,34 @@ CREATE TABLE IF NOT EXISTS audience_claims (
 );
 CREATE INDEX IF NOT EXISTS audience_claims_scan
     ON audience_claims (account_id, scan_id);
+CREATE TABLE IF NOT EXISTS audience_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    sources TEXT NOT NULL DEFAULT '[]',
+    kind TEXT NOT NULL DEFAULT '',
+    venue TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL,
+    url_key TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    snippet TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    engagement TEXT NOT NULL DEFAULT '{}',
+    query_ids TEXT NOT NULL DEFAULT '[]',
+    copies INTEGER NOT NULL DEFAULT 1,
+    flags TEXT NOT NULL DEFAULT '[]',
+    fetched_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audience_evidence_scan
+    ON audience_evidence (account_id, scan_id);
 """
 
 KEEP_SCANS = 5
 KIND_PROFILE = "profile"
+KIND_DISCOVERY = "discovery"
 
 #: Shown on the profile page, in this order.
 FIELD_LABELS = {
@@ -129,10 +161,13 @@ class AudienceStore:
                  json.dumps(detail or {}), scan_id, account_id))
             old = [r[0] for r in self._conn.execute(
                 "SELECT id FROM audience_scans WHERE account_id = ? AND site_id = ?"
-                " AND kind = ? AND status != 'running' ORDER BY created_at DESC"
+                " AND kind = ? AND status NOT IN ('running', 'stopping')"
+                " ORDER BY created_at DESC"
                 " LIMIT -1 OFFSET ?", (account_id, site_id, kind, KEEP_SCANS))]
             for sid in old:
                 self._conn.execute("DELETE FROM audience_claims WHERE scan_id = ?"
+                                   " AND account_id = ?", (sid, account_id))
+                self._conn.execute("DELETE FROM audience_evidence WHERE scan_id = ?"
                                    " AND account_id = ?", (sid, account_id))
                 self._conn.execute("DELETE FROM audience_scans WHERE id = ?"
                                    " AND account_id = ?", (sid, account_id))
@@ -143,7 +178,7 @@ class AudienceStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM audience_scans WHERE account_id = ? AND site_id = ?"
-                " AND kind = ? AND status != 'running'"
+                " AND kind = ? AND status NOT IN ('running', 'stopping')"
                 " ORDER BY created_at DESC LIMIT 1",
                 (account_id, site_id, kind)).fetchone()
             if row is None:
@@ -160,9 +195,83 @@ class AudienceStore:
                            "basis": json.loads(r[6])} for r in rows]
         return scan
 
+    # -- discovery evidence ------------------------------------------------
+    def add_evidence(self, account_id: str, scan_id: str, items: list[dict],
+                     retention_days: dict[str, int]) -> int:
+        """Store a scan's evidence. Each row expires after its source's
+        retention period; expired rows are deleted on every write."""
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT site_id FROM audience_scans WHERE id = ? AND account_id = ?",
+                (scan_id, account_id)).fetchone()
+            if row is None:
+                return 0
+            self._conn.execute("DELETE FROM audience_evidence WHERE expires_at < ?",
+                               (now.isoformat(),))
+            rows = []
+            for it in items:
+                days = max(1, int(retention_days.get(it["source"], 30)))
+                rows.append((scan_id, account_id, row[0], it["source"],
+                             json.dumps(it.get("sources") or [it["source"]]),
+                             it.get("kind", ""), it.get("venue", ""), it["url"],
+                             it.get("url_key", ""), it.get("title", ""),
+                             it.get("snippet", ""), it.get("published_at", ""),
+                             json.dumps(it.get("engagement") or {}),
+                             json.dumps(it.get("query_ids") or []),
+                             int(it.get("copies") or 1), json.dumps(it.get("flags") or []),
+                             now.isoformat(), (now + timedelta(days=days)).isoformat()))
+            self._conn.executemany(
+                "INSERT INTO audience_evidence (scan_id, account_id, site_id, source,"
+                " sources, kind, venue, url, url_key, title, snippet, published_at,"
+                " engagement, query_ids, copies, flags, fetched_at, expires_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        return len(rows)
+
+    def evidence(self, account_id: str, scan_id: str) -> list[dict]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM audience_evidence WHERE account_id = ? AND scan_id = ?"
+                " AND expires_at >= ? ORDER BY id", (account_id, scan_id, now))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k in ("sources", "engagement", "query_ids", "flags"):
+                r[k] = json.loads(r[k] or "null")
+        return rows
+
+    # -- stopping a running scan ------------------------------------------
+    def running(self, account_id: str, site_id: str, kind: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, status, created_at FROM audience_scans WHERE account_id = ?"
+                " AND site_id = ? AND kind = ? AND status IN ('running', 'stopping')"
+                " ORDER BY created_at DESC LIMIT 1",
+                (account_id, site_id, kind)).fetchone()
+        return {"id": row[0], "status": row[1], "created_at": row[2]} if row else None
+
+    def request_stop(self, account_id: str, scan_id: str) -> bool:
+        with self._lock, self._conn:
+            return self._conn.execute(
+                "UPDATE audience_scans SET status = 'stopping' WHERE id = ?"
+                " AND account_id = ? AND status = 'running'",
+                (scan_id, account_id)).rowcount == 1
+
+    def stop_requested(self, account_id: str, scan_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT status FROM audience_scans WHERE id = ? AND account_id = ?",
+                (scan_id, account_id)).fetchone()
+        return bool(row) and row[0] == "stopping"
+
     def delete_site(self, account_id: str, site_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM audience_claims WHERE account_id = ?"
+                               " AND site_id = ?", (account_id, site_id))
+            self._conn.execute("DELETE FROM audience_evidence WHERE account_id = ?"
                                " AND site_id = ?", (account_id, site_id))
             self._conn.execute("DELETE FROM audience_scans WHERE account_id = ?"
                                " AND site_id = ?", (account_id, site_id))
