@@ -937,6 +937,13 @@ def create_app(
      right-edge fade. Fade only — no sticky first column here. */
   .v-results-pair .table-wrap { overflow-x: auto;
     box-shadow: inset -20px 0 14px -14px rgba(11, 14, 30, .28), var(--v-shadow); }
+  /* Attribution flow on phones: the steps were two-across with
+     wrapped names ("AI" / "Recommendation") and arrows landing
+     mid-row. One step per row, arrows pointing down, reads as a
+     vertical flow. Desktop keeps the horizontal flow. */
+  .v-flow { flex-direction: column; flex-wrap: nowrap; }
+  .v-flow-step { flex: 1 1 auto; }
+  .v-flow-arrow { align-self: center; transform: rotate(90deg); }
 }
 """
 
@@ -951,6 +958,28 @@ def create_app(
    only frame. */
 .v-approvals .card table { margin: 0; border: 0; background: transparent; }
 .v-approvals .card h2 { margin-top: 0; }
+/* Phones: the pending table is the page's money action, and its
+   two columns (a long request summary + a decide form) do not fit
+   side by side at 390px — the table used to push the whole page
+   44px past the viewport, cutting the Approve button off-screen.
+   Stack each pending row into a card: request on top, decide form
+   full-width below it. The Decided table stays a table, wrapped
+   in .table-wrap with the same right-edge fade as the other
+   tables. Desktop is untouched. */
+@media (max-width: 640px) {
+  .v-approvals table.v-approvals-pending,
+  .v-approvals table.v-approvals-pending tbody,
+  .v-approvals table.v-approvals-pending tr,
+  .v-approvals table.v-approvals-pending td { display: block; width: auto; }
+  .v-approvals table.v-approvals-pending tr:first-child { display: none; }
+  .v-approvals table.v-approvals-pending tr { border-top: 1px solid var(--v-line);
+    padding: 14px 0 6px; }
+  .v-approvals table.v-approvals-pending tr:nth-child(2) { border-top: 0;
+    padding-top: 0; }
+  .v-approvals table.v-approvals-pending td { padding: 6px 0; border: 0; }
+  .v-approvals table.v-approvals-pending td + td { border-top: 1px dashed var(--v-line);
+    margin-top: 10px; padding-top: 14px; }
+}
 """
 
     _ADMIN_CSS = """
@@ -978,6 +1007,33 @@ def create_app(
 .v-admin-card .qr { background: #fff; border: 1px solid var(--v-line);
   border-radius: 12px; padding: 12px; display: inline-block;
   margin: 12px 0; }
+/* Phones: the Accounts table has 9 columns, and the per-row grant
+   form (amount + kind + note + Grant) wraps into a ~226px-tall row
+   whose visible columns are mostly white space. Stack each account
+   into a labelled card instead — the grant form becomes a full-width
+   section the operator can actually use on a phone. Desktop keeps
+   the scrolling table with the fade cue. */
+@media (max-width: 640px) {
+  .v-admin-accounts table, .v-admin-accounts tbody,
+  .v-admin-accounts tr, .v-admin-accounts td { display: block; width: auto; }
+  .v-admin-accounts tr:first-child { display: none; }
+  .v-admin-accounts tr { border-top: 1px solid var(--v-line);
+    padding: 12px 0 6px; }
+  .v-admin-accounts tr:nth-child(2) { border-top: 0; padding-top: 0; }
+  .v-admin-accounts td { padding: 6px 14px; border: 0; }
+  .v-admin-accounts td::before { content: attr(data-label); display: block;
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--v-muted); margin-bottom: 2px; }
+  /* No horizontal scroll any more, so the scroll cue's inset fade
+     and the sticky first column would just sit in the corner —
+     neutralise both on the stacked table. */
+  .v-admin-accounts { box-shadow: var(--v-shadow); }
+  .v-admin-accounts td:first-child { position: static; box-shadow: none; }
+  .v-admin-accounts td form input, .v-admin-accounts td form select {
+    width: 100%; margin: 4px 0; }
+  .v-admin-accounts td form button { width: 100%; min-height: 44px;
+    margin-top: 8px; }
+}
 .v-admin-card .codes { font-family: ui-monospace, Consolas, monospace;
   font-size: 17px; line-height: 1.9; background: #faf9fe;
   border: 1px solid var(--v-line); border-radius: 10px; padding: 12px 16px; }
@@ -1366,7 +1422,13 @@ section.alt { background: var(--bg-tint); }
   .hero h2.sub { font-size: 21px; }
   .hero p.lede { font-size: 17px; }
   .btn { width: 100%; margin: 4px 0; }
-  .hero-ctas .btn { width: 100%; }
+  /* Hero CTAs on phones: the long "Join the Founding Customer
+     Waitlist" label wraps to two lines, and the desktop 52px
+     line-height made the button ~120px tall. Normal line-height
+     keeps the wrapped label compact while the button stays
+     thumb-height. */
+  .hero-ctas .btn { width: 100%; line-height: 1.35; padding: 12px 16px;
+    min-height: 52px; }
   .nav-links { display: none; flex-direction: column; position: absolute;
     top: 60px; left: 0; right: 0; background: var(--navy); padding: 8px 16px 16px;
     gap: 0; }
@@ -2388,8 +2450,8 @@ customers per site.</p>{hidden_note}
             f"{esc(json.dumps(a.details or {}, indent=2, default=str))}"
             f"</pre></details></td>"
             f"<td><form method='post' action='/approvals/{esc(a.id)}/decide'>"
-            f"<button name='approved' value='true'>Approve</button>"
-            f"<button name='approved' value='false'>Reject</button></form></td></tr>"
+            f"<button class='btn btn-primary' name='approved' value='true'>Approve</button> "
+            f"<button class='btn' name='approved' value='false'>Reject</button></form></td></tr>"
             for a in pending
         )
         pend_rows = (pend_rows + draft_pend_rows) or \
@@ -2415,11 +2477,11 @@ customers per site.</p>{hidden_note}
         banner = _decide_banner_html(gate, decided)
         inner = f"""<div class="v-approvals">{banner}{_approvals_campaigns_html(account)}<div class="card"><p class="muted">Nothing is published or executed without your sign-off. Approving a mission report records your approval of its drafts &mdash; nothing is published automatically. Approving a <strong>supplier</strong> publishes that product to Shopify on the next publish run.</p></div>
 <div class="card"><h2>Pending ({len(pending) + draft_pending_count})</h2>
-<table>
+<table class="v-approvals-pending">
 <tr><th>Request</th><th>Decide</th></tr>{pend_rows}</table></div>
 <div class="card"><h2>Decided</h2>
-<table>
-<tr><th>Request</th><th>Decision</th><th>Decided</th><th>By</th></tr>{dec_rows}</table></div></div>"""
+<div class="table-wrap v-table-cue"><table>
+<tr><th>Request</th><th>Decision</th><th>Decided</th><th>By</th></tr>{dec_rows}</table></div></div></div>"""
         return _operator_page(
             "Approvals", inner, account=account, current="approvals",
             is_operator=_saas_config.is_operator(account["email"]),
@@ -4109,7 +4171,7 @@ per-sale details are separate settings.</p>{data['privacy_forms']}</div>
             ) or "<tr><td colspan='4'>No jobs yet.</td></tr>"
             inner = f"""<p class='muted'>Track verified paying customers
 from signed campaigns to checkout.</p>
-<p class='muted'>Generated: {esc(utcnow().isoformat())}</p>
+<p class='muted'>Generated: {esc(utcnow().strftime("%b %d, %Y, %H:%M UTC"))}</p>
 {_progress_grid_html(data)}
 {_attribution_sections_html(data)}
 <h2>Your websites</h2>
@@ -4154,7 +4216,7 @@ from signed campaigns to checkout.</p>
         net_color = ("var(--v-muted)" if fin["net_profit"] is None else
                      "var(--v-green)" if fin["net_profit"] >= 0 else
                      "var(--v-red)")
-        inner = f"""<p class='muted'>Generated: {esc(utcnow().isoformat())} — Tick: {snap["tick"]}</p>
+        inner = f"""<p class='muted'>Generated: {esc(utcnow().strftime("%b %d, %Y, %H:%M UTC"))} — Tick: {snap["tick"]}</p>
 <h2>Financials</h2>
 <div class="cards">
 <div class="card"><div class="label">Revenue</div>
@@ -5531,13 +5593,13 @@ a real Stripe payment, no signature.</p>"""
                  f"{LIVE_WINDOW_MINUTES} minutes — stamped when a "
                  f"signed-in account makes a request. Nobody is "
                  f"invented; stale sessions drop off.</p>"
-                 f"<div class='table-wrap'><table>"
+                 f"<div class='table-wrap v-table-cue'><table>"
                  f"<tr><th>Account</th><th>Name</th><th>Last action</th>"
                  f"<th>Last seen</th></tr>{live_rows}</table></div></div>"
                  f"<div class='v-admin-card'><h2>Recent activity</h2>"
                  f"<p class='muted'>Sign-ins, websites added, "
                  f"subscriptions, analyze runs — only real events.</p>"
-                 f"<div class='table-wrap'><table>"
+                 f"<div class='table-wrap v-table-cue'><table>"
                  f"<tr><th>When</th><th>Account</th><th>Event</th>"
                  f"<th>Detail</th></tr>{event_rows}</table></div></div>"
                  f"<div class='v-admin-card'><h2>At a glance</h2>"
@@ -5576,7 +5638,7 @@ a real Stripe payment, no signature.</p>"""
                  "$20/month subscription. Counts only — no site URLs, "
                  "no funnels, no approvals: those belong to the "
                  "customer.</p>"
-                 "<div class='table-wrap'><table>"
+                 "<div class='table-wrap v-table-cue'><table>"
                  "<tr><th>Email</th><th>Name</th><th>Sites</th>"
                  "<th>Paying customers</th><th>Credits</th></tr>"
                  f"{rows or '<tr><td colspan=5>No subscribers yet.</td></tr>'}"
@@ -5631,21 +5693,21 @@ a real Stripe payment, no signature.</p>"""
                     f"<button type='submit'>Grant</button></form>"
                     f"<span class='muted'>{hint}</span>")
             rows += (
-                f"<tr><td>{esc(account['email'])}</td>"
-                f"<td>{esc(account['name'] or '—')}</td>"
-                f"<td>{esc(account['subscription_status'])}</td>"
-                f"<td>{len(sites)}</td>"
-                f"<td>{_spendable_credits_cell(account)}</td>"
-                f"<td>{esc((account['created_at'] or '')[:10])}</td>"
-                f"<td>{'Enabled' if totp['enabled'] else 'Not set up'}</td>"
-                f"<td>{reset_cell}</td>"
-                f"<td>{grant_cell}</td></tr>")
+                f"<tr><td data-label='Email'>{esc(account['email'])}</td>"
+                f"<td data-label='Name'>{esc(account['name'] or '—')}</td>"
+                f"<td data-label='Subscription'>{esc(account['subscription_status'])}</td>"
+                f"<td data-label='Sites'>{len(sites)}</td>"
+                f"<td data-label='Credits'>{_spendable_credits_cell(account)}</td>"
+                f"<td data-label='Created'>{esc((account['created_at'] or '')[:10])}</td>"
+                f"<td data-label='Two-factor'>{'Enabled' if totp['enabled'] else 'Not set up'}</td>"
+                f"<td data-label='Reset 2FA'>{reset_cell}</td>"
+                f"<td data-label='Grant'>{grant_cell}</td></tr>")
         inner = ("<div class='v-admin-card'>"
                  "<p class='muted'>Every account that exists on the "
                  "platform — subscribed or not. Counts only.</p>"
                  + (f"<p class='v-error'>{esc(errors[error])}</p>"
                     if error in errors else "") +
-                 "<div class='table-wrap v-table-cue'><table>"
+                 "<div class='table-wrap v-table-cue v-admin-accounts'><table>"
                  "<tr><th>Email</th><th>Name</th><th>Subscription</th>"
                  "<th>Sites</th><th>Credits</th><th>Created</th>"
                  "<th>Two-factor</th><th>Reset 2FA</th><th>Grant</th></tr>"
@@ -5780,7 +5842,7 @@ a real Stripe payment, no signature.</p>"""
                  f"${OPERATOR_GRANT_MONTHLY_CAP_CENTS / 100:.2f}) · "
                  f"<strong>{credits_month} credits</strong> (cap "
                  f"{OPERATOR_GRANT_MONTHLY_CAP_CREDITS})</p>"
-                 "<div class='table-wrap'><table>"
+                 "<div class='table-wrap v-table-cue'><table>"
                  "<tr><th>Account</th><th>Amount</th><th>Kind</th>"
                  "<th>Status</th><th>Last granted</th><th>Note</th>"
                  "<th>Recent grants</th><th>Actions</th></tr>"
@@ -5872,14 +5934,14 @@ a real Stripe payment, no signature.</p>"""
                  "health only — no customer portfolios, no approvals, "
                  "no approve buttons.</p>"
                  "<h2>Agent activity</h2>"
-                 "<div class='table-wrap'><table>"
+                 "<div class='table-wrap v-table-cue'><table>"
                  "<tr><th>Agent</th><th>Tasks</th><th>Tokens</th>"
                  "<th>Cost (USD)</th><th>Failed / reworked</th>"
                  "<th>Last task</th></tr>"
                  f"{stat_rows}</table></div></div>"
                  "<div class='v-admin-card'>"
                  "<h2>Problems (latest 20 failed or reworked runs)</h2>"
-                 "<div class='table-wrap'><table>"
+                 "<div class='table-wrap v-table-cue'><table>"
                  "<tr><th>When</th><th>Agent</th><th>Event</th>"
                  "<th>Business</th><th>Detail</th></tr>"
                  f"{problem_rows}</table></div></div>")
