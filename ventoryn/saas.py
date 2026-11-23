@@ -80,7 +80,7 @@ from ventoryn.plans import (
     STARTER_WALLET_CREDIT_CENTS,
 )
 from ventoryn.signature import (make_tag, parse_tag, sign_agent_link,
-                                tag_from_url)
+                                tag_from_reference, tag_from_url)
 from ventoryn.token_crypto import decrypt_token, encrypt_token, is_encrypted
 from ventoryn.totp import (
     hash_backup_code,
@@ -4849,7 +4849,19 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
         return "ok"
 
     metadata = obj.get("metadata") or {}
-    if metadata.get("ventoryn_site_id") != site_id:
+    # The tag reaches the payment one of three ways: the merchant's
+    # own Checkout Session metadata (ventoryn_tag / utm_content), or a
+    # Stripe Payment Link opened with ?client_reference_id=<tag> (the
+    # tracker adds that on the visitor's click; see analytics.py).
+    tag = (metadata.get("ventoryn_tag") or metadata.get("utm_content")
+           or tag_from_reference(obj.get("client_reference_id") or ""))
+    signed_here = bool(tag) and store.get_signature_by_tag(site_id, tag) is not None
+    meta_site = metadata.get("ventoryn_site_id")
+    # Which site a sale belongs to: metadata.ventoryn_site_id when the
+    # merchant set it; otherwise only a tag Axionory recorded for THIS
+    # site proves it (a Payment Link cannot carry per-visit metadata).
+    # Anything else is not counted for this site.
+    if meta_site != site_id and (meta_site or not signed_here):
         return "ignored"
     amount = None
     payment_intent_id = ""
@@ -4865,7 +4877,6 @@ def handle_customer_sale_webhook(store: SaasStore, site_id: str,
     if not isinstance(amount, int) or amount <= 0:
         return "ignored"
     currency = (obj.get("currency") or "usd").lower()
-    tag = metadata.get("ventoryn_tag") or metadata.get("utm_content") or ""
     attribution = "unattributed"
     action_id = ""
     if tag:

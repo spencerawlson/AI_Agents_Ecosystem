@@ -74,6 +74,28 @@ def parse_tag(tag: str) -> tuple[str, str] | None:
     return action_id, mac
 
 
+def tag_to_reference(tag: str) -> str:
+    """The tag as a Stripe ``client_reference_id``: Stripe Payment
+    Links accept only letters, digits, ``-`` and ``_`` there, so the
+    ``.`` before the MAC becomes ``_``. Reversible because an
+    action id never contains ``_``."""
+    return tag.replace(".", "_") if parse_tag(tag) else ""
+
+
+def tag_from_reference(reference: str) -> str:
+    """The tag carried in a Stripe ``client_reference_id`` (as made by
+    :func:`tag_to_reference`, or the tag itself), or ""."""
+    if not isinstance(reference, str) or not reference.startswith(_TAG_PREFIX + "_"):
+        return ""
+    if parse_tag(reference):
+        return reference
+    head, sep, mac = reference.rpartition("_")
+    if not sep or head == _TAG_PREFIX:
+        return ""
+    tag = f"{head}.{mac}"
+    return tag if parse_tag(tag) else ""
+
+
 def sign_url(url: str, site_slug: str, agent: str, tag: str) -> str:
     """Add the Axionory signature to a link: UTM parameters plus
     the signed tag as ``utm_content``. Existing query parameters
