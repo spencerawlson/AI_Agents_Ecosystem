@@ -82,6 +82,7 @@ def run_discovery_job(store, site: dict, *, job_id: str = "", http=None, env=Non
         result = discovery.run(
             queries, providers=providers, http=http or http_json, env=env,
             own_host=site.get("host") or "", topic_terms=query_plan.topic_terms(claims),
+            core_terms=query_plan.core_terms(claims),
             sleep=sleep or time.sleep,
             should_stop=lambda: aud.stop_requested(account_id, scan_id),
             on_cost=_record_cost)

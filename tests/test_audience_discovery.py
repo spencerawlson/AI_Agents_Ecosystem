@@ -372,3 +372,31 @@ def test_stop_is_scoped_to_the_owner(env):
     r = client.post(f"/websites/sites/{site['id']}/audience/stop", data={"scan_id": scan},
                     follow_redirects=False)
     assert r.status_code == 303 and aud.stop_requested(account["id"], scan)
+
+
+# -- found by the first live run on the server (2026-11-23) -------------------
+
+def test_brave_discussion_html_becomes_plain_text():
+    raw = {"discussions": {"results": [{
+        "url": "https://forum.example.org/t/9", "title": "x",
+        "data": {"forum_name": "r/cissp",
+                 "question": "<p> I&#39;m practicing <strong>(ISC)2</strong> questions</p>",
+                 "top_comment": "&lt;b&gt;tip&lt;/b&gt; use flashcards"}}]}}
+    out = prov.BraveSearch().search(QUERIES[0], lambda u, h: (200, raw), ENV)
+    assert out[0]["title"] == "I'm practicing (ISC)2 questions"
+    assert out[0]["snippet"] == "tip use flashcards"
+
+
+def test_ai_phrase_alone_cannot_pick_a_community():
+    sites = [{"name": "Information Security", "audience": "security professionals",
+              "param": "security", "url": "https://security.stackexchange.com"},
+             {"name": "Music: Practice & Theory", "audience": "musicians",
+              "param": "music", "url": "https://music.stackexchange.com"}]
+    terms = ["security", "cert cissp", "CISSP practice exam questions"]
+    core = ["security", "cert cissp"]
+    se = prov.StackExchange
+    assert [s["param"] for s in se.pick_sites(terms, sites)] == ["security", "music"]
+    assert [s["param"] for s in se.pick_sites(terms, sites, core=core)] == ["security"]
+    claims = [_c("c1", "keyword", "security", "derived"),
+              _c("h1", "search_phrase", "CISSP practice exam questions", "hypothesis")]
+    assert query_plan.core_terms(claims) == ["security"]
