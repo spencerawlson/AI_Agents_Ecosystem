@@ -225,6 +225,13 @@ SIDEBAR_CSS = """
 .v-alert-mark:hover { color: #6d28d9; }
 .v-alert.is-read { opacity: .55; border-left-color: #c9c4da; }
 .bell-panel .v-alerts { max-height: 360px; overflow: auto; }
+/* When the list has more below the fold, fade its bottom edge so a row
+   sliced by the 360px cap reads as "scroll for more", not a broken row.
+   The class is toggled by BELL_JS (on open + on scroll) and only set
+   while more content actually follows — short lists never fade. */
+.bell-panel .v-alerts.v-scroll-more {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
 .bell-panel .v-alert { font-size: 13px; padding: 10px 12px; flex-direction: column;
   align-items: flex-start; gap: 6px; margin-bottom: 8px; }
 .bell-panel .bell-all { display: block; text-align: center; font-weight: 700;
@@ -486,7 +493,7 @@ def autopilot_switch_html(site_id: str, on: bool, label: str,
             + "</form>")
 
 
-BELL_JS = "<script>(function(){var b=document.getElementById('bell-btn'),p=document.getElementById('bell-panel');if(!b||!p)return;function close(){p.hidden=true;b.setAttribute('aria-expanded','false');}b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var open=p.hidden;p.hidden=!open;b.setAttribute('aria-expanded',String(open));});document.addEventListener('click',function(e){if(!p.hidden&&!p.contains(e.target)&&!b.contains(e.target))close();});document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});})();</script>"
+BELL_JS = "<script>(function(){var b=document.getElementById('bell-btn'),p=document.getElementById('bell-panel');if(!b||!p)return;var l=p.querySelector('.v-alerts');function fade(){if(!l)return;l.classList.toggle('v-scroll-more',l.scrollHeight-l.scrollTop-l.clientHeight>4);}if(l)l.addEventListener('scroll',fade);function close(){p.hidden=true;b.setAttribute('aria-expanded','false');}b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var open=p.hidden;p.hidden=!open;b.setAttribute('aria-expanded',String(open));if(open)fade();});document.addEventListener('click',function(e){if(!p.hidden&&!p.contains(e.target)&&!b.contains(e.target))close();});document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});})();</script>"
 
 
 def _alerts_js() -> str:
