@@ -57,7 +57,8 @@ def _own(url: str, own_host: str) -> bool:
 
 
 def run(queries: list[dict], *, providers: list, http, env: dict, own_host: str = "",
-        topic_terms: list[str] | None = None, sleep: Callable[[float], None] = time.sleep,
+        topic_terms: list[str] | None = None, core_terms: list[str] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         should_stop: Callable[[], bool] = lambda: False,
         on_cost: Callable[[str, float], None] | None = None,
@@ -84,7 +85,8 @@ def run(queries: list[dict], *, providers: list, http, env: dict, own_host: str 
         context = {}
         if isinstance(p, StackExchange):
             try:
-                sites = p.pick_sites(topic_terms or [], p.sites(http, env))
+                sites = p.pick_sites(topic_terms or [], p.sites(http, env),
+                                     core=core_terms)
             except Exception as exc:  # noqa: BLE001
                 cov.update(status="failed", reason=clean(exc, 160))
                 continue

@@ -152,16 +152,18 @@ class BraveSearch(Provider):
             d = r.get("data") or {}
             out.append(evidence(
                 source="brave", kind="discussion",
-                venue=d.get("forum_name") or _host(r.get("url", "")),
-                url=r.get("url", ""), title=d.get("question") or r.get("title", ""),
-                snippet=d.get("top_comment") or r.get("description", ""),
+                venue=_strip_tags(d.get("forum_name") or "") or _host(r.get("url", "")),
+                url=r.get("url", ""),
+                title=_strip_tags(d.get("question") or "") or _strip_tags(r.get("title", "")),
+                snippet=_strip_tags(d.get("top_comment") or r.get("description", "")),
                 published_at=r.get("page_age", ""),
                 engagement={"answers": _int(d.get("num_answers"))}))
         for r in ((data.get("web") or {}).get("results") or []):
             out.append(evidence(
                 source="brave", kind="page", venue=_host(r.get("url", "")),
-                url=r.get("url", ""), title=r.get("title", ""),
-                snippet=r.get("description", ""), published_at=r.get("page_age", "")))
+                url=r.get("url", ""), title=_strip_tags(r.get("title", "")),
+                snippet=_strip_tags(r.get("description", "")),
+                published_at=r.get("page_age", "")))
         return [e for e in out if e["url"].startswith(("http://", "https://"))]
 
 
@@ -195,12 +197,18 @@ class StackExchange(Provider):
         return self._SITES_CACHE["sites"]
 
     @staticmethod
-    def pick_sites(terms: list[str], sites: list[dict], limit: int = 2) -> list[dict]:
+    def pick_sites(terms: list[str], sites: list[dict], limit: int = 2,
+                   core: list[str] | None = None) -> list[dict]:
         """The Q&A sites whose name or audience shares words with the
-        business's terms. None matching → none searched (reported)."""
+        business's terms. None matching → none searched (reported).
+        ``core``: the website's own words (keywords, offerings); when
+        given, a site's name must match one of them — an AI-guessed
+        phrase alone cannot pull in an unrelated community."""
         from collections import Counter
 
         freq = Counter(w for t in terms for w in _words(t) if w not in _GENERIC)
+        core_words = ({w for t in core for w in _words(t)} - _GENERIC
+                      if core is not None else None)
         scored = []
         for i, s in enumerate(sites):
             name = set(_words(s["name"])) - _GENERIC
@@ -208,6 +216,8 @@ class StackExchange(Provider):
             # The site's own name must share a topic word with the business;
             # words the business uses more often count more.
             if not name & set(freq):
+                continue
+            if core_words is not None and not name & core_words:
                 continue
             score = 3 * sum(freq[w] for w in name & set(freq)) + sum(
                 freq[w] for w in aud & set(freq))
@@ -395,7 +405,9 @@ def _host(url: str) -> str:
 
 
 def _strip_tags(text: str) -> str:
-    return _unescape(re.sub(r"<[^>]+>", " ", text or ""))
+    """Plain text from a snippet that may carry HTML (tags removed,
+    entities decoded — twice, as some APIs double-encode)."""
+    return _unescape(_unescape(re.sub(r"<[^>]+>", " ", _unescape(text or ""))))
 
 
 def _unescape(text: str) -> str:

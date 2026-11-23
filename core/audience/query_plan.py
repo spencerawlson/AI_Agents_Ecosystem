@@ -85,6 +85,13 @@ def plan(claims: list[dict], *, language: str = "en", country: str = "",
     return out
 
 
+def core_terms(claims: list[dict]) -> list[str]:
+    """The website's own words about its topic (facts and derived terms,
+    never AI guesses)."""
+    return [c["value"] for c in claims
+            if c["field"] in ("keyword", "offering") and c["kind"] != "hypothesis"]
+
+
 def topic_terms(claims: list[dict]) -> list[str]:
     """Words describing the business's topic (for picking communities)."""
     keep = ("keyword", "offering", "segment", "search_phrase")
