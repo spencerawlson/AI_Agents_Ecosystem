@@ -178,13 +178,13 @@ def test_credit_table_wallet_account_zero_balance(client, store):
 def test_credit_table_wallet_account_with_funds(client, store):
     """$1.00 in the wallet: the jobs whose reserve estimate fits
     (analyze 50c, x campaign 40c, geo audit 50c, community listening
-    60c, social report 40c) are available; the bigger ones (seo
-    article 150c, video render 200c) need funds."""
+    60c, social report 40c, business profile 40c) are available; the
+    bigger ones (seo article 150c, video render 200c) need funds."""
     account = _login(client, store)
     store.set_plan(account["id"], "starter")
     store.grant_wallet_credit(account["id"], 100, "test")
     r = client.get("/account/subscribe")
     table = _credit_table_html(r.text)
     assert "$1.00" in table
-    assert table.count("Available now") == 5
+    assert table.count("Available now") == 6
     assert table.count("Needs wallet funds") == 2
