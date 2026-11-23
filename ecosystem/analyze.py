@@ -192,7 +192,7 @@ def run_analysis(url: str, country: str, language: str | None = None,
     community_result: dict | None = None
     if community and keywords:
         community_result = listen_reddit([community], keywords,
-                                         fetch=rfetch)
+                                         fetch=rfetch, now=now)
     elif community:
         community_result = {
             "status": "needs_keywords",

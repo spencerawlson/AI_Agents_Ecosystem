@@ -37,7 +37,8 @@ ADMIN_PASSWORD = "admin-secret-for-tests"
 CUSTOMER_ITEMS = ("Overview", "Websites", "Campaigns", "Approvals",
                   "Agents", "Analytics", "Customers", "Integrations",
                   "My account")
-ADMIN_ITEMS = ("Live", "Subscribers", "Accounts", "Agent activity")
+ADMIN_ITEMS = ("Live", "Subscribers", "Accounts", "Grants",
+               "Agent activity")
 
 
 def _app_with(approvals=None, registry=None):
