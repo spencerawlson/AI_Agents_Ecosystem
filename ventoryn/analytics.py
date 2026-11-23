@@ -21,6 +21,15 @@ Privacy (the Plausible model):
   and the raw rows — hashes included — are deleted.
 - IPs and user agents are never stored.
 
+Checkout attribution (``data-carry`` on the script tag), still with
+nothing stored on the device: when the visitor arrived on a signed
+Axionory link, the tracker carries that link's UTM parameters onto
+the site's own links as the visitor clicks them, and adds the tag as
+``client_reference_id`` to Stripe Payment Links (buy.stripe.com), so
+the tag reaches the payment. ``ventoryn.tag`` exposes it to a site
+that creates its own Checkout Sessions (pass it as
+``metadata.ventoryn_tag``). It lives only in the page URL.
+
 Abuse protection on the public collect endpoint: the page URL (and the
 Origin header, when sent) must be on the registered site's host; bots
 and automation are dropped; bodies over 2 KB are refused; each client
@@ -85,6 +94,19 @@ fetch(api,{method:'POST',body:b,keepalive:true,credentials:'omit',headers:{'Cont
 var last;function pv(){if(location.href===last)return;last=location.href;send('pageview');}
 pv();var h=history;if(h.pushState){var p=h.pushState;h.pushState=function(){p.apply(this,arguments);pv();};addEventListener('popstate',pv);}
 window.ventoryn=function(n){if(typeof n==='string'&&/^[a-z0-9_-]{1,40}$/i.test(n))send(n.toLowerCase());};
+var q=new URLSearchParams(location.search),tag=q.get('utm_content')||'';
+if(!/^vtn_[A-Za-z0-9-]{1,60}\.[0-9a-f]{12}$/.test(tag))tag='';
+window.ventoryn.tag=tag;
+if(tag&&s.hasAttribute('data-carry')){
+var keep={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){var v=q.get(k);if(v)keep[k]=v;});
+var base=location.hostname.replace(/^www\./,'');
+function mine(h){h=h.replace(/^www\./,'');return h===base||h.slice(-base.length-1)==='.'+base;}
+function carry(e){var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;if(!a)return;
+try{var u=new URL(a.href,location.href);if(u.protocol!=='https:'&&u.protocol!=='http:')return;
+if(u.hostname==='buy.stripe.com'){if(u.searchParams.get('client_reference_id'))return;u.searchParams.set('client_reference_id',tag.replace('.','_'));}
+else if(mine(u.hostname)){for(var k in keep)if(!u.searchParams.has(k))u.searchParams.set(k,keep[k]);}
+else return;a.href=u.href;}catch(x){}}
+d.addEventListener('click',carry,true);d.addEventListener('auxclick',carry,true);}
 })();
 """
 
@@ -131,7 +153,10 @@ def is_bot(user_agent: str) -> bool:
 
 
 def snippet(site_id: str, base_url: str) -> str:
-    return (f'<script defer data-site="{site_id}" '
+    """The install line. ``data-carry`` turns on checkout attribution
+    (see the module docstring) — the tag follows the visitor's clicks
+    in the URL only; nothing is stored on their device."""
+    return (f'<script defer data-site="{site_id}" data-carry '
             f'src="{base_url.rstrip("/")}/v.js"></script>')
 
 
