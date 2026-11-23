@@ -117,6 +117,7 @@ CREDIT_COSTS: dict[str, int] = {
     "seo_article": 10,         # one SEO blog article draft
     "video_render": 15,        # one rendered video (script -> MP4 + SRT)
     "audience_profile": 5,     # business profile with evidence (up to 8 pages)
+    "audience_discovery": 10,  # demand search across the permitted sources
 }
 
 def job_cost_label(job: dict, is_operator: bool) -> str:

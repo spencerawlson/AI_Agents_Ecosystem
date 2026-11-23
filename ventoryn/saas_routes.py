@@ -2984,9 +2984,18 @@ def register_saas_routes(app, store: SaasStore, config: SaasConfig) -> None:
         # Audience intelligence, phase 1: the business profile with
         # evidence (built by the audience_profile job, on request).
         from ventoryn import audience as _aud
-        brand_dna_html += _aud.render_card(
-            site, _aud.audience_store_for(store).latest(account["id"], site["id"]),
-            CREDIT_COSTS["audience_profile"])
+        from ventoryn import audience_discovery as _disc
+        _aud_store = _aud.audience_store_for(store)
+        _profile = _aud_store.latest(account["id"], site["id"])
+        brand_dna_html += _aud.render_card(site, _profile,
+                                           CREDIT_COSTS["audience_profile"])
+        # Phase 2: demand discovery (evidence only; ranking is phase 3).
+        _disc_scan = _aud_store.latest(account["id"], site["id"], _aud.KIND_DISCOVERY)
+        brand_dna_html += _disc.render_card(
+            site, _profile, _disc_scan,
+            _aud_store.evidence(account["id"], _disc_scan["id"]) if _disc_scan else [],
+            _aud_store.running(account["id"], site["id"], _aud.KIND_DISCOVERY),
+            CREDIT_COSTS["audience_discovery"])
         # Founding Customer Program: verified customers are distinct,
         # real Stripe payments (manual sales never count as verified).
         f100 = first100_summary(store, site_id)
@@ -3979,6 +3988,24 @@ funnel counts it. This is the owner-recorded fallback.</p>
                 f"Check my installation</button></form>")
         return (f"<div class='card' id='ventoryn-analytics'>"
                 f"<h2>Axionory Analytics</h2>{notice}{status}{install}</div>")
+
+    @app.post("/websites/sites/{site_id}/audience/stop")
+    def audience_stop(request: Request, site_id: str, scan_id: str = Form("")):
+        """Stop a running demand search after its current call; what it
+        found so far is kept."""
+        from ventoryn import audience as _aud
+
+        account, redirect = _need_account(request)
+        if redirect is not None:
+            return redirect
+        site = store.get_site(site_id)
+        if site is None or site["account_id"] != account["id"]:
+            return HTMLResponse(_signed_page("Website", "<p>Website not found.</p>",
+                                             account, current="websites"),
+                                status_code=404)
+        _aud.audience_store_for(store).request_stop(account["id"], scan_id)
+        return RedirectResponse(f"/websites/sites/{site_id}#demand-discovery",
+                                status_code=303)
 
     @app.post("/websites/sites/{site_id}/snapshot")
     def snapshot_refresh(request: Request, site_id: str):

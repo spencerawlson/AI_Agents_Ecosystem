@@ -40,6 +40,13 @@ from core.audience.untrusted import clean
 
 Http = Callable[[str, dict], tuple[int, object]]
 
+#: Words too general to say what a community is about.
+_GENERIC = set("""the and for with you your our who what how best new and
+users people professionals enthusiasts experts developers questions answers
+site community learn learning beginners advanced general help repair
+repairs maintenance service services home business businesses online
+local professional company free app apps tool tools software""".split())
+
 #: Operator kill switch: comma-separated provider names to turn off.
 DISABLE_ENV = "AUDIENCE_PROVIDERS_DISABLED"
 
@@ -180,8 +187,9 @@ class StackExchange(Provider):
             if status != 200 or not isinstance(data, dict):
                 raise RuntimeError(f"Stack Exchange returned {status}")
             self._SITES_CACHE["sites"] = [
-                {"param": s.get("api_site_parameter", ""), "name": s.get("name", ""),
-                 "audience": s.get("audience", ""), "url": s.get("site_url", "")}
+                {"param": s.get("api_site_parameter", ""),
+                 "name": _unescape(s.get("name", "")),
+                 "audience": _unescape(s.get("audience", "")), "url": s.get("site_url", "")}
                 for s in data.get("items") or []
                 if s.get("site_type") == "main_site" and s.get("api_site_parameter")]
         return self._SITES_CACHE["sites"]
@@ -190,16 +198,25 @@ class StackExchange(Provider):
     def pick_sites(terms: list[str], sites: list[dict], limit: int = 2) -> list[dict]:
         """The Q&A sites whose name or audience shares words with the
         business's terms. None matching → none searched (reported)."""
-        words = {w for t in terms for w in re.findall(r"[a-z0-9+#]{3,}", t.lower())}
+        from collections import Counter
+
+        freq = Counter(w for t in terms for w in _words(t) if w not in _GENERIC)
         scored = []
         for i, s in enumerate(sites):
-            name = set(re.findall(r"[a-z0-9+#]{3,}", s["name"].lower()))
-            aud = set(re.findall(r"[a-z0-9+#]{3,}", s["audience"].lower()))
-            score = 3 * len(words & name) + len(words & aud)
-            if score >= 2:
-                scored.append((-score, i, s))
+            name = set(_words(s["name"])) - _GENERIC
+            aud = set(_words(s["audience"])) - _GENERIC
+            # The site's own name must share a topic word with the business;
+            # words the business uses more often count more.
+            if not name & set(freq):
+                continue
+            score = 3 * sum(freq[w] for w in name & set(freq)) + sum(
+                freq[w] for w in aud & set(freq))
+            scored.append((-score, i, s))
         scored.sort(key=lambda x: (x[0], x[1]))
-        return [s for _, _, s in scored[:limit]]
+        if not scored:
+            return []
+        best = -scored[0][0]
+        return [s for neg, _, s in scored[:limit] if -neg >= 0.6 * best]
 
     def search(self, query, http, env):
         out = []
@@ -351,6 +368,17 @@ def server_env() -> dict:
         if p.info.cost_env:
             keys.add(p.info.cost_env)
     return {k: os.environ.get(k, "") for k in keys}
+
+
+def _words(text: str) -> list[str]:
+    """Lower-case words, with a plain plural reduced (pets -> pet)."""
+    out = []
+    for w in re.findall(r"[\w+#]{3,}", (text or "").lower()):
+        w = w.strip("+#")
+        if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+            w = w[:-1]
+        out.append(w)
+    return out
 
 
 def _int(v) -> int:
