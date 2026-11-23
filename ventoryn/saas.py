@@ -1593,50 +1593,53 @@ class SaasStore:
         campaigns and posts, sales, analytics, snapshot, spend logs…),
         the reviews of its videos, then the site. Returns rows removed
         per table. Revoking provider tokens is the caller's job, first."""
-        removed: dict = {}
         with self._lock, self._conn:
-            tables = [r[0] for r in self._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'")]
-            if "saas_video_reviews" in tables:
-                n = self._conn.execute(
-                    "DELETE FROM saas_video_reviews WHERE job_id IN"
-                    " (SELECT id FROM saas_jobs WHERE site_id = ?)", (site_id,)).rowcount
+            return self._delete_site_rows(site_id)
+
+    def _delete_site_rows(self, site_id: str) -> dict:
+        """delete_site's work, for a caller already holding the lock in
+        a transaction (delete_site, delete_account)."""
+        removed: dict = {}
+        tables = [r[0] for r in self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")]
+        if "saas_video_reviews" in tables:
+            n = self._conn.execute(
+                "DELETE FROM saas_video_reviews WHERE job_id IN"
+                " (SELECT id FROM saas_jobs WHERE site_id = ?)", (site_id,)).rowcount
+            if n:
+                removed["saas_video_reviews"] = n
+        for t in tables:
+            if t == "saas_sites":
+                continue
+            cols = [c[1] for c in self._conn.execute(f"PRAGMA table_info({t})")]
+            if "site_id" in cols:
+                n = self._conn.execute(f"DELETE FROM {t} WHERE site_id = ?",
+                                       (site_id,)).rowcount
                 if n:
-                    removed["saas_video_reviews"] = n
-            for t in tables:
-                if t == "saas_sites":
-                    continue
-                cols = [c[1] for c in self._conn.execute(f"PRAGMA table_info({t})")]
-                if "site_id" in cols:
-                    n = self._conn.execute(f"DELETE FROM {t} WHERE site_id = ?",
-                                           (site_id,)).rowcount
-                    if n:
-                        removed[t] = n
-            removed["saas_sites"] = self._conn.execute(
-                "DELETE FROM saas_sites WHERE id = ?", (site_id,)).rowcount
+                    removed[t] = n
+        removed["saas_sites"] = self._conn.execute(
+            "DELETE FROM saas_sites WHERE id = ?", (site_id,)).rowcount
         return removed
 
     def delete_account(self, account_id: str) -> None:
-        """Delete an account and everything it owns: sites and their
-        connections (tokens included — the caller revokes at the
-        provider FIRST), jobs, credit ledger, conversions, sessions,
-        activity. The account row itself is deleted last."""
+        """Delete an account and everything it owns: every website with
+        every row that belongs to it (the same sweep as delete_site:
+        connections — tokens included, the caller revokes at the
+        provider FIRST — sales, signatures, analytics, snapshots, brand
+        DNA, campaigns, drafts, audience profiles…), then jobs, credit
+        ledger, sessions, activity, alert reads and workspaces. The
+        account row itself is deleted last. Wallet and payment ledgers
+        are not touched here (financial records)."""
         with self._lock, self._conn:
             site_ids = [r[0] for r in self._conn.execute(
                 "SELECT id FROM saas_sites WHERE account_id = ?",
                 (account_id,)).fetchall()]
             for site_id in site_ids:
-                self._conn.execute(
-                    "DELETE FROM saas_connections WHERE site_id = ?",
-                    (site_id,))
-                self._conn.execute(
-                    "DELETE FROM saas_conversions WHERE site_id = ?",
-                    (site_id,))
-                self._conn.execute(
-                    "DELETE FROM saas_signatures WHERE site_id = ?",
-                    (site_id,))
-                self._conn.execute(
-                    "DELETE FROM saas_sites WHERE id = ?", (site_id,))
+                self._delete_site_rows(site_id)
+            self._conn.execute(
+                "DELETE FROM saas_alert_reads WHERE account_id = ?", (account_id,))
+            self._conn.execute(
+                "DELETE FROM saas_workspaces WHERE account_id = ?", (account_id,))
             self._conn.execute(
                 "DELETE FROM saas_jobs WHERE account_id = ?", (account_id,))
             self._conn.execute(
