@@ -75,11 +75,13 @@ def test_public_nav_with_product_dropdown():
     assert "Who it" in r.text  # dropdown item "Who it's for"
     assert "Sign In" in r.text and "Get Started" in r.text
     assert 'id="nav-toggle"' in r.text  # mobile nav toggle
-    # Spencer 2026-11-08: the mobile hamburger sits at the FAR LEFT
-    # of the header, before the brand — never centered between the
-    # brand and the Get Started button.
-    assert (r.text.index('id="nav-toggle"')
-            < r.text.index('class="brand"'))
+    # Spencer 2026-11-25 (reverses 2026-11-08): the mobile hamburger
+    # sits at the FAR RIGHT of the header, after the actions — the
+    # standard spot for a landing page — with Sign In inside the
+    # menu it opens, not in the header.
+    assert (r.text.index('class="nav-actions"')
+            < r.text.index('id="nav-toggle"'))
+    assert 'class="nav-menu-signin"' in r.text  # Sign In in the menu
 
 
 def test_preview_is_real_dashboard_screenshot():
